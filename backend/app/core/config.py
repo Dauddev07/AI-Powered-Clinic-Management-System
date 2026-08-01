@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "all-mpnet-base-v2"
 
     DEFAULT_SLOT_MINUTES: int = 30
-    RETRIEVAL_SIMILARITY_THRESHOLD: float = 0.7
+    RETRIEVAL_SIMILARITY_THRESHOLD: float = 0.5
 
     # Minimum cosine similarity (same embedding model as retrieval) for an uploaded
     # doctor-CSV header to be *suggested* as a synonym of a canonical column name.
