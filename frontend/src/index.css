@@ -1,0 +1,184 @@
+/*
+ * Single fixed theme — no light/dark toggle, no data-theme attribute. A medium-dark
+ * slate palette (not stark black) with the brand teal accent, applied unconditionally.
+ * color-scheme is pinned to "dark" so native form controls (date pickers, etc.) render
+ * with matching dark UA styling instead of defaulting to light.
+ */
+html {
+  color-scheme: dark;
+
+  --app-bg-page: #1c1d1f;
+  --app-bg-card: #212224;
+  --app-text-title: #c3c5c9;
+  --app-text-subtitle: #7c7e83;
+  --app-text-label: #9fa1a6;
+  --app-text-body: #adafb4;
+  --app-border: #2c2d30;
+  --app-input-bg: #1c1d1f;
+  --app-input-text: #c3c5c9;
+  --app-input-placeholder: #6a6c70;
+  --app-accent: #87977f;
+  --app-accent-hover: #9aab91;
+  --app-accent-text: #dfe0e3;
+  --app-link: #9aab91;
+  --app-error-bg: #271f1f;
+  --app-error-text: #b98c8c;
+  --app-error-border: #453232;
+  --app-success-bg: #2c3d2f;
+  --app-success-text: #a8d1ad;
+  --app-success-border: #3d5442;
+  --app-warning-bg: #28241c;
+  --app-warning-text: #c4a877;
+  --app-warning-border: #443a28;
+  --app-neutral-bg: #26272a;
+  --app-neutral-text: #918f96;
+  --app-neutral-border: #38363a;
+  --app-info-bg: #1c2126;
+  --app-info-text: #8a9dab;
+  --app-info-border: #2e3944;
+  --app-shadow: rgba(0, 0, 0, 0.24);
+  --app-overlay: rgba(0, 0, 0, 0.5);
+}
+
+:root {
+  --sans: 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif;
+
+  --font-size-title: 1.75rem;
+  --font-size-heading: 1.25rem;
+  --font-size-body: 1rem;
+  --font-size-label: 0.875rem;
+  --font-size-caption: 0.75rem;
+
+  font: 18px/145% var(--sans);
+  letter-spacing: 0.18px;
+  color: var(--app-text-body);
+  background: var(--app-bg-page);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  @media (max-width: 1024px) {
+    font-size: 16px;
+  }
+}
+
+body {
+  margin: 0;
+}
+
+/* Only affects same-page anchor jumps (e.g. the landing page's header nav) —
+   harmless everywhere else since no other route uses in-page hash links. */
+html {
+  scroll-behavior: smooth;
+}
+
+/* The app fills the viewport width — individual screens (e.g. the centered
+   Login/Register cards) constrain their own content width instead of the
+   shell doing it, so layouts that want full width (admin screens) get it. */
+#root {
+  width: 100%;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+h1,
+h2 {
+  font-family: 'Work Sans', system-ui, sans-serif;
+  font-weight: 500;
+  color: var(--app-text-title);
+}
+
+h1 {
+  font-size: calc(var(--font-size-title) * 2);
+  letter-spacing: -1.68px;
+  margin: 32px 0;
+  @media (max-width: 1024px) {
+    font-size: calc(var(--font-size-title) * 1.4);
+    margin: 20px 0;
+  }
+}
+h2 {
+  font-size: var(--font-size-heading);
+  line-height: 118%;
+  letter-spacing: -0.24px;
+  margin: 0 0 8px;
+  @media (max-width: 1024px) {
+    font-size: var(--font-size-label);
+  }
+}
+p {
+  margin: 0;
+}
+
+/* Site-wide scroll-reveal (see src/hooks/useReveal.js) — a global, unscoped
+   class so any page can use it without duplicating this block into every
+   CSS module. transform/opacity only — never width/height/margin — so
+   nothing here can trigger a layout reflow. */
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 600ms ease-out, transform 600ms ease-out;
+}
+
+.reveal.revealed {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.reveal-delay-1 {
+  transition-delay: 90ms;
+}
+
+.reveal-delay-2 {
+  transition-delay: 180ms;
+}
+
+.reveal-delay-3 {
+  transition-delay: 270ms;
+}
+
+.reveal-delay-4 {
+  transition-delay: 360ms;
+}
+
+.reveal-delay-5 {
+  transition-delay: 450ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* Route-level fade (see App.jsx) — plays once per navigation on the wrapper
+   around <Routes>, so moving between pages reads as one continuous motion
+   instead of the next screen just snapping into place. */
+.page-transition {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  animation: page-fade-in 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes page-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-transition {
+    animation: none;
+  }
+}

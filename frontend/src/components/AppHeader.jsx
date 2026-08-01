@@ -1,0 +1,237 @@
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
+import Logo from "./Logo";
+import NotificationBell from "./NotificationBell";
+import SettingsMenu from "./SettingsMenu";
+import styles from "./AppHeader.module.css";
+
+const SECTION_IDS = ["departments-heading", "why-us-heading", "how-it-works-heading", "about-heading"];
+
+// Public landing nav only now — the authenticated patient/admin nav has moved
+// to the account menu (see SettingsMenu), so a signed-in visitor sees the
+// logo on the left and a home icon + account launcher grouped at the far
+// right of the header.
+export default function AppHeader() {
+  const location = useLocation();
+  const { isAuthenticated, user } = useAuth();
+  const isLanding = location.pathname === "/";
+  const showPublicNav = isLanding && !isAuthenticated;
+  const dashboardPath = user?.role === "admin" ? "/admin" : "/patient";
+
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState(null);
+  const [homeSpinning, setHomeSpinning] = useState(false);
+  const headerRef = useRef(null);
+
+  // Closes the collapsible nav panel on route change.
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+
+  // Publishes the header's real rendered height as a CSS var so the landing
+  // hero (Landing.module.css) can size itself to exactly fill the rest of
+  // the viewport, rather than guessing a fixed value that drifts whenever
+  // the header's own layout changes (e.g. wrapping to two rows on mobile).
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return undefined;
+    const setVar = () => {
+      document.documentElement.style.setProperty("--app-header-height", `${el.offsetHeight}px`);
+    };
+    setVar();
+    const observer = new ResizeObserver(setVar);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Highlights whichever on-page section is currently in view while scrolling
+  // the landing page, so the header nav reflects where the visitor actually is.
+  // Tracks the last section heading that has scrolled past the sticky header
+  // rather than watching a thin band around the viewport's center — a
+  // center-band approach goes stale for tall sections (e.g. the department
+  // grid), whose heading exits the band long before its content does.
+  useEffect(() => {
+    if (!showPublicNav) return undefined;
+    const elements = SECTION_IDS.map((id) => document.getElementById(id)).filter(Boolean);
+    if (elements.length === 0) return undefined;
+
+    const OFFSET = 120; // roughly clears the sticky header
+
+    let ticking = false;
+    const updateActive = () => {
+      ticking = false;
+      // A short last section (e.g. About) can run out of page to scroll
+      // before its heading ever reaches the offset line below — snap to it
+      // once the page itself is scrolled to the bottom.
+      const atBottom =
+        window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+      if (atBottom) {
+        setActiveSection(elements[elements.length - 1].id);
+        return;
+      }
+      let current = null;
+      for (const el of elements) {
+        if (el.getBoundingClientRect().top - OFFSET <= 0) {
+          current = el.id;
+        }
+      }
+      setActiveSection(current);
+    };
+
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(updateActive);
+    };
+
+    updateActive();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [showPublicNav, location.pathname]);
+
+  const anchorLinkClass = (id) =>
+    `${styles.navAnchor} ${activeSection === id ? styles.navAnchorActive : ""}`;
+
+  const closeMobileNav = () => setMobileNavOpen(false);
+
+  // Scrolls directly on click rather than relying solely on the location-hash
+  // effect on the Landing page — that effect only fires when the hash string
+  // actually changes, so clicking the same anchor twice in a row (or landing
+  // on it via a different path) would otherwise silently do nothing.
+  const handleAnchorClick = (id) => (e) => {
+    closeMobileNav();
+    const el = document.getElementById(id);
+    if (el) {
+      e.preventDefault();
+      el.scrollIntoView({ behavior: "smooth" });
+      window.history.replaceState(null, "", `/#${id}`);
+    }
+  };
+
+  return (
+    <header className={styles.header} ref={headerRef}>
+      <div className={styles.headerStart}>
+        {isAuthenticated ? (
+          <SettingsMenu />
+        ) : (
+          <Link to="/" className={styles.brand}>
+            <Logo />
+          </Link>
+        )}
+      </div>
+
+      {isAuthenticated && (
+        <div className={styles.headerEnd}>
+          {/* Clicking this while already on the dashboard still navigates —
+              react-router mints a fresh location.key for a Link to the
+              current path, which remounts the routed page (see App.jsx's
+              page-transition wrapper) and re-runs its data fetch, so it
+              doubles as a refresh button rather than doing nothing. The
+              spin is purely visual feedback that the click registered,
+              on top of that. */}
+          <Link
+            to={dashboardPath}
+            className={styles.homeBtn}
+            aria-label="Go to dashboard"
+            onClick={() => {
+              setHomeSpinning(false);
+              requestAnimationFrame(() => setHomeSpinning(true));
+            }}
+          >
+            <svg
+              className={homeSpinning ? styles.homeIconSpin : ""}
+              onAnimationEnd={() => setHomeSpinning(false)}
+              viewBox="0 0 24 24"
+              width="30"
+              height="30"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M4 11.5 12 4l8 7.5M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9" />
+            </svg>
+          </Link>
+          {/* Notifications only exist for patient-initiated booking events (see
+              app/services/notifications.py) — there's no admin notification type
+              yet, so the bell is patient-only rather than shown for every role. */}
+          {user?.role === "patient" && <NotificationBell />}
+        </div>
+      )}
+
+      {showPublicNav && (
+        <>
+          <button
+            type="button"
+            className={styles.navToggle}
+            aria-label={mobileNavOpen ? "Close menu" : "Open menu"}
+            aria-expanded={mobileNavOpen}
+            aria-controls="site-nav"
+            onClick={() => setMobileNavOpen((open) => !open)}
+          >
+            <span className={styles.navToggleBar} />
+            <span className={styles.navToggleBar} />
+            <span className={styles.navToggleBar} />
+          </button>
+
+          {mobileNavOpen && (
+            <button
+              type="button"
+              className={styles.navBackdrop}
+              aria-label="Close menu"
+              onClick={() => setMobileNavOpen(false)}
+            />
+          )}
+
+          <nav
+            id="site-nav"
+            className={`${styles.landingNav} ${mobileNavOpen ? styles.navOpen : ""}`}
+            aria-label="Site"
+          >
+            <Link
+              to="/#departments-heading"
+              className={anchorLinkClass("departments-heading")}
+              onClick={handleAnchorClick("departments-heading")}
+            >
+              Departments
+            </Link>
+            <Link
+              to="/#why-us-heading"
+              className={anchorLinkClass("why-us-heading")}
+              onClick={handleAnchorClick("why-us-heading")}
+            >
+              Why us
+            </Link>
+            <Link
+              to="/#how-it-works-heading"
+              className={anchorLinkClass("how-it-works-heading")}
+              onClick={handleAnchorClick("how-it-works-heading")}
+            >
+              How it works
+            </Link>
+            <Link
+              to="/#about-heading"
+              className={anchorLinkClass("about-heading")}
+              onClick={handleAnchorClick("about-heading")}
+            >
+              About
+            </Link>
+            <Link to="/login" className={styles.navLogin} onClick={closeMobileNav}>
+              Log in
+            </Link>
+            <Link to="/register" className={styles.navRegister} onClick={closeMobileNav}>
+              Register
+            </Link>
+          </nav>
+        </>
+      )}
+    </header>
+  );
+}

@@ -1,0 +1,133 @@
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.card {
+  /* Grid items default to min-width: auto (their content's intrinsic width) —
+     without this, one long unbroken value (a department name, an error
+     string) can force its column wider than the grid track, pushing the
+     whole statsGrid into horizontal overflow instead of wrapping. */
+  min-width: 0;
+  background: var(--app-bg-card);
+  border: 1px solid var(--app-border);
+  border-radius: 20px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 24px var(--app-shadow);
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+}
+
+@media (max-width: 480px) {
+  .card {
+    padding: 1.25rem;
+  }
+
+  .statValue {
+    font-size: calc(var(--font-size-title) * 0.95);
+  }
+}
+
+.cardTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.cardTitleRow .cardTitle {
+  margin-bottom: 0;
+}
+
+.cardTitle {
+  margin: 0 0 1rem;
+  font-size: var(--font-size-label);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--app-text-subtitle);
+}
+
+.titleIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+}
+
+.titleIcon_info {
+  background: var(--app-info-bg);
+  color: var(--app-info-text);
+}
+
+.titleIcon_warning {
+  background: var(--app-warning-bg);
+  color: var(--app-warning-text);
+}
+
+.titleIcon_success {
+  background: var(--app-success-bg);
+  color: var(--app-success-text);
+}
+
+.statValue {
+  font-size: calc(var(--font-size-title) * 1.15);
+  font-weight: 700;
+  color: var(--app-text-title);
+  line-height: 1;
+}
+
+.statLabel {
+  margin-top: 0.35rem;
+  font-size: var(--font-size-label);
+  color: var(--app-text-subtitle);
+}
+
+/* Horizontal-bar track/fill for the slot-utilization bar — 10px thin mark,
+   4px rounded ends per the design system's mark spec for a single-hue
+   magnitude bar. */
+.barTrack {
+  height: 10px;
+  border-radius: 4px;
+  background: var(--app-border);
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--app-accent);
+  transition: width 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Shared "headline number + optional trailing detail" row, used both above
+   the slot-utilization bar and above the weekly chart. */
+.utilizationSummary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+.utilizationFraction {
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--app-text-title);
+}
+
+.utilizationPercent {
+  font-size: var(--font-size-label);
+  color: var(--app-text-subtitle);
+}
+
+.errorText {
+  color: var(--app-error-text);
+  font-size: var(--font-size-label);
+}

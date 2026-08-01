@@ -1,0 +1,167 @@
+.page {
+  min-height: calc(100vh - 3.5rem);
+  background: var(--app-bg-page);
+  padding: 2rem 1.5rem;
+}
+
+.header {
+  max-width: 640px;
+  margin: 0 auto 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.header h1 {
+  font-size: var(--font-size-title);
+  color: var(--app-text-title);
+  margin: 0;
+}
+
+.nav {
+  display: flex;
+  gap: 1rem;
+  font-size: var(--font-size-body);
+}
+
+.nav a,
+.nav button {
+  color: var(--app-link);
+  text-decoration: none;
+  font-weight: 600;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: var(--font-size-body);
+}
+
+.card {
+  max-width: 640px;
+  margin: 0 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--app-bg-card);
+  color: var(--app-text-body);
+  border-radius: 20px;
+  box-shadow: 0 4px 24px var(--app-shadow);
+  /* Safety net: any unexpectedly long unbroken string (an email, a UUID, a long
+     name) wraps instead of pushing the card wider than its column at narrow widths. */
+  overflow-wrap: anywhere;
+  padding: 1.75rem;
+}
+
+.muted {
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-label);
+  /* A long unbroken string (e.g. an email address) wraps onto a new line
+     instead of overflowing the card at narrow widths. */
+  overflow-wrap: anywhere;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+@media (max-width: 480px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.field {
+  /* Grid items default to min-width: auto, which floors them at their content's
+     intrinsic width (e.g. a select's widest option) — without this they refuse to
+     shrink below that and overflow the card on narrow viewports. */
+  min-width: 0;
+}
+
+.field label {
+  display: block;
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  color: var(--app-text-subtitle);
+  margin-bottom: 0.3rem;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  font-size: var(--font-size-body);
+  box-sizing: border-box;
+  background: var(--app-input-bg);
+  color: var(--app-input-text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.field input::placeholder {
+  color: var(--app-input-placeholder);
+}
+
+.field input:focus,
+.field select:focus {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 1px;
+}
+
+.fieldError {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--app-error-text);
+  font-size: var(--font-size-label);
+}
+
+.saveBtn {
+  margin-top: 1.25rem;
+  padding: 0.65rem 1.25rem;
+  min-height: 2.5rem;
+  background: var(--app-accent);
+  color: var(--app-accent-text);
+  border: none;
+  border-radius: 14px;
+  font-weight: 600;
+  font-size: var(--font-size-label);
+  cursor: pointer;
+  transition: background-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+
+.saveBtn:hover:not(:disabled) {
+  background: var(--app-accent-hover);
+  transform: translateY(-1px);
+}
+
+.requiredMark {
+  color: var(--app-error-text);
+  margin-left: 0.15rem;
+}
+
+.fieldHint {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: var(--font-size-caption);
+  color: var(--app-text-subtitle);
+}
+
+.status {
+  margin-top: 0.75rem;
+  font-size: var(--font-size-label);
+  display: flex;
+  align-items: center;
+}
+
+.status.ok {
+  color: var(--app-success-text);
+}
+
+.status.err {
+  color: var(--app-error-text);
+}

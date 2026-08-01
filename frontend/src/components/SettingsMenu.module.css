@@ -1,0 +1,461 @@
+/* Rendered inline as the header's leftmost item now (see AppHeader.jsx) —
+   no fixed positioning of its own; the backdrop/panel below stay position:
+   fixed regardless of where in the DOM this trigger lives. */
+.launcher {
+  display: inline-flex;
+  flex: none;
+}
+
+.avatarBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: none;
+  background: var(--app-accent);
+  color: var(--app-accent-text);
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 180ms ease, transform 180ms ease;
+}
+
+.avatarBtn:hover {
+  background: var(--app-accent-hover);
+  transform: translateY(-1px);
+}
+
+.avatarBtn:active {
+  transform: translateY(0);
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: var(--app-overlay);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+}
+
+.backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Fixed, full-height, docked to the left edge — its own dedicated width means
+   nothing inside it ever has to compete for space with page content the way
+   the old bottom-left card popup did. Off-canvas (translateX(-100%)) rather
+   than unmounted while closed, so both open and close animate instead of the
+   panel just appearing/disappearing. */
+.panel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 81;
+  width: min(340px, 88vw);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: var(--app-bg-card);
+  border-right: 1px solid var(--app-border);
+  box-shadow: 8px 0 32px var(--app-shadow);
+  transform: translateX(-100%);
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.panel.open {
+  transform: translateX(0);
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1.25rem 1.25rem 0.75rem;
+  flex: none;
+}
+
+.panelHeading {
+  flex: 1;
+  font-size: var(--font-size-heading);
+  font-weight: 700;
+  color: var(--app-text-title);
+}
+
+.backBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: var(--app-text-body);
+  cursor: pointer;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.backBtn:hover {
+  background: var(--app-bg-page);
+  color: var(--app-accent);
+}
+
+/* var(--app-border) reads as barely-there against this theme's dark
+   background — brightened to the accent color so the close control is
+   unmistakable at a glance, not just another muted outline in the panel. */
+.closeBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1.5px solid var(--app-accent);
+  border-radius: 10px;
+  background: none;
+  color: var(--app-accent);
+  font-size: var(--font-size-label);
+  cursor: pointer;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.closeBtn:hover {
+  background: var(--app-accent);
+  color: var(--app-accent-text);
+}
+
+/* Wraps whichever view (account list or a sub-panel) is currently showing —
+   re-keyed per view in the component so it remounts and replays the slide-in
+   below on every switch, giving drilling in/out a sense of motion instead of
+   the content just snapping to the new list. */
+.panelBody {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.slideForward,
+.slideBack {
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.slideForward {
+  animation-name: slideInForward;
+}
+
+.slideBack {
+  animation-name: slideInBack;
+}
+
+@keyframes slideInForward {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes slideInBack {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slideForward,
+  .slideBack {
+    animation: none;
+  }
+}
+
+.accountInfo {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.75rem 1.25rem 1.25rem;
+  margin: 0 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--app-border);
+  min-width: 0;
+  flex: none;
+}
+
+.accountAvatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  background: var(--app-accent);
+  color: var(--app-accent-text);
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.accountText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.accountName {
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--app-text-title);
+  overflow-wrap: anywhere;
+}
+
+.accountEmail {
+  font-size: var(--font-size-label);
+  color: var(--app-text-subtitle);
+  overflow-wrap: anywhere;
+}
+
+.menuList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0 1rem 1.25rem;
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  width: 100%;
+  min-height: 3rem;
+  box-sizing: border-box;
+  padding: 0.6rem 0.75rem;
+  border: none;
+  border-radius: 12px;
+  background: none;
+  color: var(--app-text-body);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+.menuItem:hover {
+  background: var(--app-bg-page);
+  color: var(--app-accent);
+  transform: translateX(2px);
+}
+
+.menuItem:active {
+  transform: translateX(2px) scale(0.99);
+}
+
+/* Icon chip — same visual language as the department cards on the landing
+   page (soft tinted gradient, hairline border) so the account panel reads as
+   part of the same design system rather than a plainer, separately-styled
+   surface. */
+.menuIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 10px;
+  background: var(--app-bg-page);
+  border: 1px solid var(--app-border);
+  color: var(--app-text-subtitle);
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
+}
+
+.menuItem:hover .menuIcon {
+  background: linear-gradient(145deg, var(--app-info-bg), var(--app-bg-card));
+  border-color: var(--app-info-border);
+  color: var(--app-accent);
+}
+
+.menuLabel {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.menuChevron {
+  display: flex;
+  flex: none;
+  color: var(--app-text-subtitle);
+  transition: color 180ms ease, transform 180ms ease;
+}
+
+.menuChevron svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.menuItem:hover .menuChevron {
+  color: var(--app-accent);
+  transform: translateX(2px);
+}
+
+.logoutItem {
+  color: var(--app-error-text);
+}
+
+.logoutItem .menuIcon {
+  background: var(--app-error-bg);
+  border-color: var(--app-error-border);
+  color: var(--app-error-text);
+}
+
+.logoutItem:hover {
+  background: var(--app-error-bg);
+  color: var(--app-error-text);
+}
+
+.logoutItem:hover .menuIcon {
+  background: var(--app-error-bg);
+  border-color: var(--app-error-border);
+  color: var(--app-error-text);
+}
+
+/* Sub-panel intro — a large icon badge + one-line description at the top of
+   Manage Doctors / Upload Documents / Settings, mirroring .accountInfo's
+   role in the main view (a fixed identity block above the action list) so a
+   drilled-in sub-panel reads as its own well-composed screen, not a bare
+   list of buttons. */
+.subViewIntro {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.25rem 1.25rem 1.25rem;
+  margin: 0 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--app-border);
+  flex: none;
+}
+
+.subViewIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 14px;
+  background: linear-gradient(145deg, var(--app-info-bg), var(--app-bg-card));
+  border: 1px solid var(--app-info-border);
+  color: var(--app-accent);
+}
+
+.subViewIcon svg {
+  width: 1.4rem;
+  height: 1.4rem;
+}
+
+.subViewDescription {
+  margin: 0;
+  font-size: var(--font-size-label);
+  color: var(--app-text-subtitle);
+  line-height: 1.4;
+}
+
+.subMenuList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0 1rem 1.25rem;
+}
+
+/* Each sub-panel action is a small uppercase section label sitting above its
+   own full-width button, replacing the old icon-box + inline-label row. The
+   button keeps the same elevated-card treatment (hairline border, hover lift
+   + shadow) as before — the same language as the landing page's department/
+   feature cards — just without the boxed icon chip. */
+.subMenuGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.subMenuSectionLabel {
+  padding: 0 0.15rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-text-subtitle);
+}
+
+.subMenuButton {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.85rem 1rem;
+  background: var(--app-bg-page);
+  border: 1px solid var(--app-border);
+  border-radius: 16px;
+  color: var(--app-text-body);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: 0 2px 10px transparent;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, color 180ms ease;
+}
+
+.subMenuButton svg {
+  flex: none;
+  color: var(--app-text-subtitle);
+  transition: color 180ms ease;
+}
+
+.subMenuButtonLabel {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.subMenuButton:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px var(--app-shadow);
+  border-color: var(--app-accent);
+  color: var(--app-accent);
+}
+
+.subMenuButton:hover svg {
+  color: var(--app-accent);
+}
+
+.subMenuButton:active {
+  transform: translateY(-1px) scale(0.99);
+}
+
+@media (max-width: 480px) {
+  .panel {
+    width: 100vw;
+  }
+}

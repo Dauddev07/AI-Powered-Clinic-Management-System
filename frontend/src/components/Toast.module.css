@@ -1,0 +1,82 @@
+.viewport {
+  position: fixed;
+  bottom: 1.25rem;
+  right: 1.25rem;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 0.5rem;
+  max-width: min(92vw, 380px);
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-card, #fff);
+  color: var(--app-text-body);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  animation: toast-in 180ms ease;
+}
+
+.toastMessage {
+  flex: 1;
+  font-size: var(--font-size-label);
+}
+
+.closeBtn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.6;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0.15rem;
+}
+
+.closeBtn:hover {
+  opacity: 1;
+}
+
+.success {
+  background: var(--app-success-bg);
+  color: var(--app-success-text);
+  border-color: var(--app-success-border);
+}
+
+.error {
+  background: var(--app-error-bg);
+  color: var(--app-error-text);
+  border-color: var(--app-error-border);
+}
+
+.info {
+  background: var(--app-info-bg);
+  color: var(--app-info-text);
+  border-color: var(--app-info-border);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 480px) {
+  .viewport {
+    left: 1rem;
+    right: 1rem;
+    bottom: 1rem;
+    max-width: none;
+  }
+}

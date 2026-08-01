@@ -1,0 +1,52 @@
+.wrapper {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--app-input-bg);
+}
+
+.wrapper.invalid {
+  border-color: var(--app-error-text);
+}
+
+.prefix {
+  display: flex;
+  align-items: center;
+  padding: 0 0.65rem;
+  background: var(--app-bg-page);
+  color: var(--app-text-body);
+  font-weight: 600;
+  border-right: 1px solid var(--app-border);
+  user-select: none;
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.6rem 0.7rem;
+  border: none;
+  background: transparent;
+  color: var(--app-input-text);
+  font-size: var(--font-size-body);
+}
+
+.input:focus {
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--app-input-placeholder);
+}
+
+.hint {
+  margin-top: 0.3rem;
+  font-size: var(--font-size-caption);
+  color: var(--app-text-subtitle);
+  transition: color 180ms ease;
+}
+
+.hintError {
+  color: var(--app-error-text);
+}

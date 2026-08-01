@@ -1,0 +1,234 @@
+.page {
+  min-height: calc(100vh - 3.5rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* A soft accent-tinted gradient instead of a flat fill — ties this page back
+     to the landing page's branding rather than reading as a bare utility form. */
+  background: radial-gradient(
+    120% 120% at 15% 15%,
+    color-mix(in srgb, var(--app-accent) 10%, var(--app-bg-page)) 0%,
+    var(--app-bg-page) 55%
+  );
+  padding: 1.5rem;
+}
+
+.card {
+  width: 100%;
+  max-width: 380px;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--app-bg-card);
+  border-radius: 20px;
+  box-shadow: 0 4px 24px var(--app-shadow);
+  /* Safety net: any unexpectedly long unbroken string wraps instead of pushing
+     the card wider than the viewport at narrow widths. */
+  overflow-wrap: anywhere;
+  padding: 2rem;
+}
+
+/* Intro side panel only exists as a large-screen embellishment (see the
+   1024px breakpoint below) — hidden by default so it doesn't take up space
+   or show blank content on small/medium screens. Same pattern as
+   Register.module.css's .intro/.formSide, kept in sync for visual consistency
+   across every auth page. */
+.intro {
+  display: none;
+}
+
+.introTitle {
+  margin: 0;
+  font-size: var(--font-size-heading);
+  color: var(--app-text-title);
+}
+
+.introText {
+  margin: 0;
+  font-size: var(--font-size-label);
+  color: var(--app-text-subtitle);
+  line-height: 1.6;
+}
+
+.formSide {
+  min-width: 0;
+}
+
+@media (min-width: 1024px) {
+  /* Scoped to :has(.intro) rather than the bare .card class — this stylesheet is
+     shared with ChangePassword.jsx, which reuses .card/.page/.field/etc. for a
+     plain single-column form with no .intro panel (a "join us" side panel makes
+     no sense mid-session for someone forced to change their password). Without
+     this scoping, the two-column grid below would apply to that page too and
+     silently scramble its layout on large screens. */
+  .card:has(.intro) {
+    max-width: 760px;
+    padding: 0;
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    overflow: hidden;
+  }
+
+  .intro {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 3rem 2.25rem;
+    background: linear-gradient(
+      165deg,
+      color-mix(in srgb, var(--app-accent) 14%, var(--app-bg-page)) 0%,
+      var(--app-bg-page) 100%
+    );
+    border-right: 1px solid var(--app-border);
+  }
+
+  .formSide {
+    padding: 2.5rem 2.75rem;
+  }
+}
+
+.title {
+  font-size: var(--font-size-title);
+  font-weight: 700;
+  margin: 0 0 0.25rem;
+  color: var(--app-text-title);
+}
+
+.subtitle {
+  margin: 0 0 1.5rem;
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-body);
+}
+
+.field {
+  margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.field label {
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  color: var(--app-text-label);
+}
+
+.requiredMark {
+  color: var(--app-error-text);
+  margin-left: 0.15rem;
+}
+
+.fieldHint {
+  display: block;
+  font-size: var(--font-size-caption);
+  color: var(--app-text-subtitle);
+}
+
+.field input,
+.field select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  font-size: var(--font-size-body);
+  background: var(--app-input-bg);
+  color: var(--app-input-text);
+}
+
+.field input::placeholder {
+  color: var(--app-input-placeholder);
+}
+
+.field input:focus,
+.field select:focus {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 1px;
+}
+
+.row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.row > .field {
+  flex: 1;
+}
+
+@media (max-width: 480px) {
+  .row {
+    flex-direction: column;
+    gap: 0;
+  }
+}
+
+.submit {
+  width: 100%;
+  padding: 0.75rem;
+  min-height: 2.6rem;
+  margin-top: 0.5rem;
+  background: var(--app-accent);
+  color: var(--app-accent-text);
+  border: none;
+  border-radius: 14px;
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+
+.submit:hover:not(:disabled) {
+  background: var(--app-accent-hover);
+  transform: translateY(-1px);
+}
+
+.submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.error {
+  background: var(--app-error-bg);
+  color: var(--app-error-text);
+  border: 1px solid var(--app-error-border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  font-size: var(--font-size-label);
+  margin-bottom: 1rem;
+}
+
+.success {
+  background: var(--app-success-bg);
+  color: var(--app-success-text);
+  border: 1px solid var(--app-success-border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  font-size: var(--font-size-label);
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+}
+
+.footer {
+  margin-top: 1.25rem;
+  font-size: var(--font-size-label);
+  color: var(--app-text-subtitle);
+  text-align: center;
+}
+
+.footer a {
+  color: var(--app-link);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.linkButton {
+  background: none;
+  border: none;
+  color: var(--app-link);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: inherit;
+}

@@ -1,0 +1,114 @@
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--app-border);
+}
+
+.rangeText {
+  font-size: var(--font-size-caption);
+  color: var(--app-text-subtitle);
+  white-space: nowrap;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  max-width: 100%;
+  margin-left: auto;
+}
+
+.pageList {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  /* Safety net at the narrowest widths: the strip scrolls internally rather
+     than pushing the page wider or clipping a page-number button. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.pageList::-webkit-scrollbar {
+  display: none;
+}
+
+.navBtn,
+.pageBtn,
+.pageBtnActive {
+  flex: none;
+  box-sizing: border-box;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  padding: 0 0.4rem;
+  border-radius: 8px;
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  line-height: 1;
+}
+
+.navBtn {
+  background: none;
+  border: 1px solid var(--app-border);
+  color: var(--app-text-body);
+  font-size: 1.1rem;
+}
+
+.navBtn:hover:not(:disabled) {
+  background: var(--app-bg-page);
+}
+
+.navBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pageBtn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--app-text-body);
+}
+
+.pageBtn:hover {
+  background: var(--app-bg-page);
+  border-color: var(--app-border);
+}
+
+.pageBtnActive {
+  background: var(--app-accent);
+  border: 1px solid var(--app-accent);
+  color: var(--app-accent-text);
+}
+
+.ellipsis {
+  flex: none;
+  min-width: 1.25rem;
+  text-align: center;
+  color: var(--app-text-subtitle);
+}
+
+@media (max-width: 480px) {
+  .pagination {
+    justify-content: center;
+    text-align: center;
+  }
+
+  .controls {
+    width: 100%;
+    justify-content: center;
+    margin-left: 0;
+  }
+
+  .rangeText {
+    width: 100%;
+    text-align: center;
+  }
+}

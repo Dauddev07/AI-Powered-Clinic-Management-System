@@ -1,0 +1,572 @@
+.title {
+  font-size: var(--font-size-title);
+  color: var(--app-text-title);
+  margin: 0 0 0.4rem;
+}
+
+.subtitle {
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-body);
+  margin: 0 0 1.25rem;
+}
+
+.card {
+  background: var(--app-bg-card);
+  color: var(--app-text-body);
+  border-radius: 20px;
+  box-shadow: 0 4px 24px var(--app-shadow);
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  box-sizing: border-box;
+  /* Safety net: any unexpectedly long unbroken string (an email, a UUID, a long
+     name) wraps instead of pushing the card wider than its column at narrow widths. */
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .card {
+    padding: 1.25rem;
+    border-radius: 16px;
+  }
+}
+
+.actionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .actionGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.profileGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 1.25rem;
+}
+
+.profileField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.profileLabel {
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  color: var(--app-text-subtitle);
+}
+
+.profileValue {
+  font-size: var(--font-size-body);
+  color: var(--app-text-body);
+  overflow-wrap: anywhere;
+}
+
+.uploadRow {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.infoBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem 0.75rem;
+  background: none;
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+  color: var(--app-text-body);
+  font-weight: 600;
+  font-size: var(--font-size-label);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 180ms ease;
+}
+
+.infoBtn:hover {
+  background: var(--app-bg-page);
+}
+
+.modalIntro {
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-body);
+  margin: 0 0 1rem;
+}
+
+.modalSubIntro {
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-body);
+  margin: 0 0 0.75rem;
+}
+
+/* table-layout: fixed forces the browser to actually respect these column
+   widths (and wrap .wrapCell's text within them) instead of letting the
+   Description column's long sentences expand the table far past the modal's
+   visible width, which — with the default auto layout — pushed scrollWidth to
+   roughly 2x clientWidth even at desktop widths. */
+/* table-layout: fixed keeps the shared .table class's 560px floor (so it still
+   scrolls horizontally like every other table in the app on very narrow screens
+   — the reason it isn't dropped here is a long unbroken value like
+   "external_doctor_id" overlapping its neighboring column once the fixed column
+   width goes below what the text needs) but forces the browser to actually
+   respect these column widths and wrap .wrapCell's text within them at
+   tablet/desktop widths, instead of letting the Description column's long
+   sentences expand the table far past the modal's visible width. */
+.columnsTable {
+  table-layout: fixed;
+}
+
+.columnsTable th:nth-child(1),
+.columnsTable td:nth-child(1) {
+  width: 34%;
+}
+
+.columnsTable th:nth-child(2),
+.columnsTable td:nth-child(2) {
+  width: 16%;
+}
+
+.columnsTable th:nth-child(3),
+.columnsTable td:nth-child(3) {
+  width: 50%;
+}
+
+/* Needs to out-specificity ".table td" (which sets white-space: nowrap) — a bare
+   ".wrapCell" class has the same specificity as ".table td" and, appearing earlier
+   in this file, would lose to it regardless. */
+.columnsTable td.wrapCell {
+  white-space: normal;
+}
+
+.sampleDownloadBtn {
+  display: inline-block;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-top: 1.25rem;
+  padding: 0.65rem 1.25rem;
+  min-height: 2.5rem;
+  background: var(--app-accent);
+  color: var(--app-accent-text);
+  border: none;
+  border-radius: 14px;
+  font-weight: 600;
+  font-size: var(--font-size-label);
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+
+.sampleDownloadBtn:hover {
+  background: var(--app-accent-hover);
+  transform: translateY(-1px);
+}
+
+.primaryBtn {
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.65rem 1.25rem;
+  min-height: 2.5rem;
+  background: var(--app-accent);
+  color: var(--app-accent-text);
+  border: none;
+  border-radius: 14px;
+  font-weight: 600;
+  font-size: var(--font-size-label);
+  cursor: pointer;
+  /* No white-space: nowrap — at normal widths the short label already fits on one
+     line; this is only a fallback so it wraps instead of overflowing the card at
+     extreme widths. */
+  text-align: center;
+  transition: background-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+
+.primaryBtn:hover:not(:disabled) {
+  background: var(--app-accent-hover);
+  transform: translateY(-1px);
+}
+
+.primaryBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dangerBtn {
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem 0.9rem;
+  background: none;
+  border: 1px solid var(--app-error-border);
+  border-radius: 14px;
+  color: var(--app-error-text);
+  font-weight: 600;
+  font-size: var(--font-size-label);
+  cursor: pointer;
+  text-align: center;
+  transition: background-color 180ms ease;
+}
+
+.dangerBtn:hover {
+  background: var(--app-error-bg);
+}
+
+.dangerBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.secondaryBtn {
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem 0.9rem;
+  background: none;
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+  color: var(--app-text-body);
+  font-weight: 600;
+  font-size: var(--font-size-label);
+  cursor: pointer;
+  text-align: center;
+  transition: background-color 180ms ease;
+}
+
+.secondaryBtn:hover {
+  background: var(--app-bg-page);
+}
+
+.secondaryBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hiddenFileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.fileChooseBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.6rem 1rem;
+  background: var(--app-bg-page);
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+  color: var(--app-text-body);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+}
+
+.fileChooseBtn:hover {
+  background: var(--app-border);
+}
+
+.fileChooseBtn:has(.hiddenFileInput:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.select {
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  font-size: var(--font-size-body);
+  background: var(--app-input-bg);
+  color: var(--app-input-text);
+}
+
+.sectionHeading {
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--app-text-title);
+  margin: 0 0 0.75rem;
+}
+
+/* Filename chip with the clear "×" sitting as a badge on its top-right corner,
+   like a browser tab's close button — positioned relative to the chip itself
+   (not the row), so it stays anchored correctly whether the row wraps to its
+   own line on narrow screens or not. */
+.fileChip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  /* min() clamps the cap to whatever room the row actually has — plain
+     max-width: 220px would hold the chip at 220px even in a card narrower
+     than that, same class of overflow as the buttons above. */
+  max-width: min(220px, 100%);
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--app-bg-page);
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
+.fileChipName {
+  /* Without this, the flex item refuses to shrink below the filename's own
+     intrinsic width, so text-overflow: ellipsis below never gets a chance to
+     trigger and the name spills past .fileChip's max-width instead. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-label);
+  color: var(--app-text-body);
+}
+
+.fileChipClear {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: var(--app-bg-card);
+  border: 1px solid var(--app-border);
+  border-radius: 50%;
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-caption);
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 3px var(--app-shadow);
+}
+
+.fileChipClear:hover {
+  background: var(--app-error-bg);
+  color: var(--app-error-text);
+  border-color: var(--app-error-border);
+}
+
+.fileChipClear:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.linkBtn {
+  background: none;
+  border: none;
+  color: var(--app-link);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  font-size: var(--font-size-label);
+}
+
+.errorText {
+  color: var(--app-error-text);
+  background: var(--app-error-bg);
+  border: 1px solid var(--app-error-border);
+  border-radius: 8px;
+  padding: 0.65rem 0.9rem;
+  font-size: var(--font-size-label);
+  margin-top: 1rem;
+}
+
+.warningText {
+  color: var(--app-error-text);
+  font-size: var(--font-size-label);
+  margin: 0.5rem 0 1rem;
+}
+
+/* Advisory only — e.g. a duplicate doctor name under different IDs. Never blocks
+   Confirm, so it's styled as a neutral heads-up, not an error/warning color. */
+.noticeBox {
+  background: var(--app-bg-page);
+  border: 1px solid var(--app-border);
+  border-left: 3px solid var(--app-accent);
+  border-radius: 8px;
+  padding: 0.65rem 0.9rem;
+  font-size: var(--font-size-label);
+  color: var(--app-text-body);
+  margin: 0.75rem 0;
+}
+
+.noticeBox p {
+  margin: 0.3rem 0 0;
+}
+
+.noticeBox p:first-child {
+  margin-top: 0;
+}
+
+.successBox {
+  color: var(--app-success-text);
+  background: var(--app-success-bg);
+  border: 1px solid var(--app-success-border);
+  border-radius: 8px;
+  padding: 0.65rem 0.9rem;
+  font-size: var(--font-size-body);
+  margin-top: 1rem;
+}
+
+.successBox p {
+  margin: 0.3rem 0 0;
+}
+
+.summaryRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  font-size: var(--font-size-body);
+  color: var(--app-text-body);
+  margin-bottom: 0.75rem;
+}
+
+.successText {
+  color: var(--app-success-text);
+}
+
+.errorTextInline {
+  color: var(--app-error-text);
+}
+
+.sectionTitle {
+  font-size: var(--font-size-heading);
+  color: var(--app-text-title);
+  margin: 1.25rem 0 0.6rem;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+}
+
+.table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: var(--font-size-label);
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--app-border);
+  white-space: nowrap;
+}
+
+.table th {
+  color: var(--app-text-subtitle);
+  font-weight: 600;
+  background: var(--app-bg-page);
+}
+
+.table tbody tr {
+  transition: background-color 180ms ease;
+}
+
+.table tbody tr:hover {
+  background-color: var(--app-bg-page);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Below this width a horizontally-scrolling table becomes cramped/truncated instead
+   of readable — each row turns into its own stacked card, with the column header
+   restored per-cell via the data-label attribute the row markup already sets. */
+@media (max-width: 640px) {
+  .tableWrap {
+    overflow-x: visible;
+    border: none;
+  }
+  .table {
+    min-width: 0;
+  }
+  .table thead {
+    display: none;
+  }
+  .table,
+  .table tbody,
+  .table tr {
+    display: block;
+    width: 100%;
+  }
+  .table tbody tr {
+    border: 1px solid var(--app-border);
+    border-radius: 8px;
+    margin-bottom: 0.75rem;
+    padding: 0.2rem 0.75rem;
+  }
+  .table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    white-space: normal;
+    text-align: right;
+  }
+  .table td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: var(--app-text-subtitle);
+    text-align: left;
+    margin-right: auto;
+  }
+  /* Action-only columns (no header on desktop either) skip the label entirely and
+     left-align their button(s), rather than showing an empty label slot. */
+  .table td[data-label=""] {
+    justify-content: flex-start;
+  }
+  .table td[data-label=""]::before {
+    content: none;
+  }
+  /* A long Reason value wraps onto several lines here — center-aligning it against
+     its single-line label (the default above) leaves the label looking randomly
+     offset partway down the block instead of level with the first line of text. */
+  .table td[data-label="Reason"] {
+    align-items: flex-start;
+  }
+}
+
+.rejectedRow td {
+  color: var(--app-error-text);
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.4rem;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  border-radius: 4px;
+  background: var(--app-accent);
+  color: var(--app-accent-text);
+}
+
+.detailBlock {
+  white-space: pre-wrap;
+  font-size: var(--font-size-label);
+  color: var(--app-text-body);
+  margin: 0;
+  padding: 0.5rem 0;
+}

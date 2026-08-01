@@ -1,0 +1,9 @@
+.footer {
+  margin-top: auto;
+  border-top: 1px solid var(--app-border);
+  background: var(--app-bg-card);
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-caption);
+}

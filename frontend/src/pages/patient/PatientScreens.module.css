@@ -1,0 +1,469 @@
+.title {
+  font-size: var(--font-size-title);
+  color: var(--app-text-title);
+  margin: 0 0 0.4rem;
+}
+
+.subtitle {
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-body);
+  margin: 0 0 1.25rem;
+}
+
+.dateHeading {
+  font-size: var(--font-size-body);
+  color: var(--app-text-title);
+  margin: 0 0 0.75rem;
+}
+
+.actionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .actionGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  background: var(--app-bg-card);
+  color: var(--app-text-body);
+  border-radius: 20px;
+  box-shadow: 0 4px 24px var(--app-shadow);
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  box-sizing: border-box;
+  /* Safety net: any unexpectedly long unbroken string (an email, a UUID, a long
+     name) wraps instead of pushing the card wider than its column at narrow widths. */
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .card {
+    padding: 1.25rem;
+    border-radius: 16px;
+  }
+}
+
+.filterRow {
+  display: grid;
+  /* min() clamps the track floor to the container's own width, so a track never
+     forces the grid (and its card) wider than the viewport — plain minmax(160px, 1fr)
+     would hold every track at 160px even on a viewport narrower than that. */
+  grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.filterField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.filterField label {
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  color: var(--app-text-subtitle);
+}
+
+.requiredMark {
+  color: var(--app-error-text);
+  margin-left: 0.15rem;
+}
+
+.fieldHint {
+  font-size: var(--font-size-caption);
+  color: var(--app-text-subtitle);
+}
+
+.filterField select,
+.filterField input {
+  width: 100%;
+}
+
+.select {
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  font-size: var(--font-size-body);
+  background: var(--app-input-bg);
+  color: var(--app-input-text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.combobox {
+  position: relative;
+  min-width: 0;
+}
+
+.comboboxTrigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  font-size: var(--font-size-body);
+  background: var(--app-input-bg);
+  color: var(--app-input-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.comboboxTrigger:hover {
+  background: var(--app-bg-page);
+}
+
+.comboboxTriggerText {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.comboboxChevron {
+  flex: none;
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-caption);
+}
+
+/* Portaled to <body> (see BookAppointment.jsx) and positioned via inline
+   top/left/width computed from the trigger's own bounding rect — position: fixed
+   here means it's placed relative to the viewport, immune to any parent card's own
+   stacking context (e.g. a sibling "reveal" card animating in later in the DOM
+   would otherwise be able to paint over an absolutely-positioned descendant). */
+.comboboxPanel {
+  position: fixed;
+  z-index: 65;
+  box-sizing: border-box;
+  padding: 0.5rem;
+  background: var(--app-bg-card);
+  border: 1px solid var(--app-border);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px var(--app-shadow);
+}
+
+.comboboxSearchInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem 0.65rem;
+  margin-bottom: 0.4rem;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  font-size: var(--font-size-body);
+  background: var(--app-input-bg);
+  color: var(--app-input-text);
+}
+
+.comboboxList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.comboboxOption,
+.comboboxOptionSelected {
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  font-size: var(--font-size-body);
+  color: var(--app-text-body);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.comboboxOption:hover {
+  background: var(--app-bg-page);
+}
+
+.comboboxOptionSelected {
+  background: var(--app-bg-page);
+  color: var(--app-accent);
+  font-weight: 600;
+}
+
+.comboboxEmpty {
+  padding: 0.5rem 0.6rem;
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-label);
+}
+
+.primaryBtn {
+  padding: 0.65rem 1.25rem;
+  min-height: 2.5rem;
+  background: var(--app-accent);
+  color: var(--app-accent-text);
+  border: none;
+  border-radius: 14px;
+  font-weight: 600;
+  font-size: var(--font-size-label);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+
+.primaryBtn:hover:not(:disabled) {
+  background: var(--app-accent-hover);
+  transform: translateY(-1px);
+}
+
+.primaryBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.secondaryBtn {
+  padding: 0.5rem 0.9rem;
+  background: none;
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+  color: var(--app-text-body);
+  font-weight: 600;
+  font-size: var(--font-size-label);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 180ms ease;
+}
+
+.secondaryBtn:hover {
+  background: var(--app-bg-page);
+}
+
+.secondaryBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dangerBtn {
+  padding: 0.5rem 0.9rem;
+  background: none;
+  border: 1px solid var(--app-error-border);
+  border-radius: 14px;
+  color: var(--app-error-text);
+  font-weight: 600;
+  font-size: var(--font-size-label);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 180ms ease;
+}
+
+.dangerBtn:hover {
+  background: var(--app-error-bg);
+}
+
+.dangerBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.linkBtn {
+  background: none;
+  border: none;
+  color: var(--app-link);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  font-size: var(--font-size-label);
+}
+
+.errorText {
+  color: var(--app-error-text);
+  background: var(--app-error-bg);
+  border: 1px solid var(--app-error-border);
+  border-radius: 8px;
+  padding: 0.65rem 0.9rem;
+  font-size: var(--font-size-label);
+  margin-top: 1rem;
+}
+
+.successBox {
+  color: var(--app-success-text);
+  background: var(--app-success-bg);
+  border: 1px solid var(--app-success-border);
+  border-radius: 8px;
+  padding: 0.65rem 0.9rem;
+  font-size: var(--font-size-label);
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+}
+
+.noticeBox {
+  background: var(--app-bg-page);
+  border: 1px solid var(--app-border);
+  border-left: 3px solid var(--app-accent);
+  border-radius: 8px;
+  padding: 0.65rem 0.9rem;
+  font-size: var(--font-size-label);
+  color: var(--app-text-body);
+  margin: 0.75rem 0;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+}
+
+.table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: var(--font-size-label);
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--app-border);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.table tbody tr {
+  transition: background-color 180ms ease;
+}
+
+.table tbody tr:hover {
+  background-color: var(--app-bg-page);
+}
+
+.table th {
+  color: var(--app-text-subtitle);
+  font-weight: 600;
+  background: var(--app-bg-page);
+  white-space: nowrap;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Below this width a horizontally-scrolling table becomes cramped/truncated instead
+   of readable — each row turns into its own stacked card, with the column header
+   restored per-cell via the data-label attribute the row markup already sets. */
+@media (max-width: 640px) {
+  .tableWrap {
+    overflow-x: visible;
+    border: none;
+  }
+  .table {
+    min-width: 0;
+  }
+  .table thead {
+    display: none;
+  }
+  .table,
+  .table tbody,
+  .table tr {
+    display: block;
+    width: 100%;
+  }
+  .table tbody tr {
+    border: 1px solid var(--app-border);
+    border-radius: 8px;
+    margin-bottom: 0.75rem;
+    padding: 0.2rem 0.75rem;
+  }
+  .table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    white-space: normal;
+    text-align: right;
+  }
+  .table td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: var(--app-text-subtitle);
+    text-align: left;
+    margin-right: auto;
+  }
+  /* Action-only columns (no header on desktop either) skip the label entirely and
+     left-align their button(s), rather than showing an empty label slot. */
+  .table td[data-label=""] {
+    justify-content: flex-start;
+  }
+  .table td[data-label=""]::before {
+    content: none;
+  }
+  /* A long Reason value wraps onto several lines here — center-aligning it against
+     its single-line label (the default above) leaves the label looking randomly
+     offset partway down the block instead of level with the first line of text. */
+  .table td[data-label="Reason"] {
+    align-items: flex-start;
+  }
+}
+
+.takenRow td {
+  color: var(--app-text-subtitle);
+}
+
+.bookingRow {
+  transition: background-color 180ms ease;
+  background: var(--app-info-bg);
+}
+
+.actionsCell {
+  display: flex;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.reschedulePanel {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background: var(--app-bg-page);
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+}
+
+.reschedulePanel h3 {
+  font-size: var(--font-size-label);
+  margin: 0 0 0.5rem;
+  color: var(--app-text-title);
+}
+
+.rescheduleList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.rescheduleOption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  padding: 0.45rem 0.65rem;
+  background: var(--app-bg-card);
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  font-size: var(--font-size-label);
+  transition: background-color 180ms ease;
+}
+
+.rescheduleOption span {
+  min-width: 0;
+}

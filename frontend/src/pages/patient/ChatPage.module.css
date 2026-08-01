@@ -1,0 +1,1211 @@
+/* Edge-to-edge: the page fills exactly the viewport area below the header, at every
+   breakpoint — no side gutters, no reading-column cap, no floating "card" look (that's
+   what PatientLayout's contentFullBleed/contentInnerFullBleed variants exist for). */
+.page {
+  display: flex;
+  width: 100%;
+  height: calc(100dvh - var(--app-header-height, 56px));
+  min-height: 420px;
+  background: var(--app-bg-card);
+  border-top: 1px solid var(--app-border);
+  box-sizing: border-box;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ---------- Sidebar (session history) ---------- */
+
+.sidebar {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  width: 280px;
+  background: color-mix(in srgb, var(--app-bg-page) 65%, var(--app-bg-card));
+  border-right: 1px solid var(--app-border);
+  box-sizing: border-box;
+  transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.sidebarHeader {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.9rem;
+}
+
+.newChatBtn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--app-accent) 40%, var(--app-border));
+  background: color-mix(in srgb, var(--app-accent) 14%, var(--app-bg-card));
+  color: var(--app-text-title);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease;
+}
+
+.newChatBtn:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--app-accent) 24%, var(--app-bg-card));
+  border-color: var(--app-accent);
+}
+
+.sidebarCloseBtn {
+  display: none;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid var(--app-border);
+  background: none;
+  color: var(--app-text-subtitle);
+  cursor: pointer;
+}
+
+.sessionList {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0 0.6rem 0.9rem;
+}
+
+.sessionListEmpty {
+  padding: 1rem 0.75rem;
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-caption);
+  text-align: center;
+}
+
+.sessionItemWrapper {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 0.1rem;
+  border-radius: 9px;
+  transition: background-color 140ms ease;
+}
+
+.sessionItemWrapper:hover {
+  background: color-mix(in srgb, var(--app-accent) 5%, transparent);
+}
+
+.sessionItem {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.45rem 0.4rem 0.45rem 0.55rem;
+  border: none;
+  border-radius: 9px;
+  background: none;
+  color: var(--app-text-body);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Subtle highlight, and only on the one active thread — every other row stays flush
+   with the sidebar background until hovered. */
+.sessionItemActive {
+  background: color-mix(in srgb, var(--app-accent) 12%, transparent);
+  color: var(--app-text-title);
+}
+
+.sessionItemWrapper:hover .sessionItemActive {
+  background: color-mix(in srgb, var(--app-accent) 15%, transparent);
+}
+
+.sessionItemIcon {
+  flex-shrink: 0;
+  color: var(--app-text-subtitle);
+}
+
+.sessionItemActive .sessionItemIcon {
+  color: var(--app-accent);
+}
+
+.sessionItemText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.sessionItemTitle {
+  font-size: var(--font-size-label);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sessionItemTime {
+  font-size: var(--font-size-caption);
+  color: var(--app-text-subtitle);
+}
+
+/* ---------- Per-session "…" menu ---------- */
+
+.sessionMenuBtn {
+  flex-shrink: 0;
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 7px;
+  /* Transparent, not a fixed color — it always shows whatever the row itself is
+     showing (plain, hovered, or active), so the button never reads as a separate
+     box sitting on top of the row. */
+  background: transparent;
+  color: var(--app-text-subtitle);
+  cursor: pointer;
+}
+
+.sessionMenuBtn:hover,
+.sessionMenuBtn[aria-expanded="true"] {
+  color: var(--app-text-title);
+}
+
+.sessionMenuPopover {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 0.3rem;
+  z-index: 30;
+  min-width: 150px;
+  padding: 0.35rem;
+  border-radius: 10px;
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-card);
+  box-shadow: 0 10px 28px var(--app-shadow);
+}
+
+.sessionMenuDelete {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--app-error-text);
+  font-size: var(--font-size-label);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sessionMenuDelete:hover {
+  background: color-mix(in srgb, var(--app-error-text) 14%, transparent);
+}
+
+/* ---------- Delete-confirmation modal body (see components/Modal.jsx for the shell) ---------- */
+
+.modalIntro {
+  margin: 0 0 1.1rem;
+  color: var(--app-text-body);
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+.modalCancelBtn {
+  padding: 0.6rem 1.1rem;
+  border-radius: 12px;
+  border: 1px solid var(--app-border);
+  background: none;
+  color: var(--app-text-body);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modalCancelBtn:hover:not(:disabled) {
+  background: var(--app-neutral-bg);
+}
+
+.modalDeleteBtn {
+  padding: 0.6rem 1.1rem;
+  border-radius: 12px;
+  border: none;
+  background: var(--app-error-text);
+  color: var(--app-bg-page);
+  font-size: var(--font-size-label);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.modalDeleteBtn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.modalCancelBtn:disabled,
+.modalDeleteBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sidebarBackdrop {
+  display: none;
+}
+
+/* Sidebar collapses to an off-canvas drawer below the desktop breakpoint — toggled via
+   the top bar's panel icon, closed via its own close button, backdrop tap, or picking
+   a session/starting a new chat. */
+@media (max-width: 899px) {
+  .sidebar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 20;
+    width: min(300px, 84vw);
+    transform: translateX(-100%);
+    box-shadow: 12px 0 32px var(--app-shadow);
+  }
+
+  .sidebarOpen {
+    transform: translateX(0);
+  }
+
+  .sidebarCloseBtn {
+    display: flex;
+  }
+
+  .sidebarBackdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 15;
+    border: none;
+    padding: 0;
+    background: color-mix(in srgb, black 55%, transparent);
+    cursor: pointer;
+  }
+}
+
+/* ---------- Main chat column ---------- */
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topBar {
+  flex-shrink: 0;
+  display: none;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-bg-card);
+}
+
+@media (max-width: 899px) {
+  .topBar {
+    display: flex;
+  }
+}
+
+.sidebarToggle,
+.topBarNewChatBtn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  border: 1px solid var(--app-border);
+  background: none;
+  color: var(--app-text-body);
+  cursor: pointer;
+}
+
+.topBarTitle {
+  flex: 1;
+  font-size: var(--font-size-label);
+  font-weight: 700;
+  color: var(--app-text-title);
+}
+
+/* Warning-yellow banner, deliberately noticeable and never dismissible — the
+   brightness is dialed down a notch from the raw --app-warning-* tokens (each
+   blended a bit toward black via color-mix) so it stays legible/prominent without
+   glaring against the rest of this dark theme. Spans the full width of the main
+   column (edge-to-edge, matching .page/.topBar/.messages below); disclaimerInner
+   caps the text itself to a readable line length on wide screens instead of
+   stretching one sentence across the whole viewport. */
+.disclaimer {
+  flex-shrink: 0;
+  position: relative;
+  padding: 0.7rem 1.25rem 0.7rem 1.5rem;
+  background: color-mix(in srgb, var(--app-warning-bg) 85%, black);
+  color: var(--app-warning-text);
+  border-bottom: 1px solid var(--app-warning-border);
+  font-size: var(--font-size-label);
+  line-height: 1.45;
+  box-sizing: border-box;
+}
+
+/* Solid stripe down the left edge — the same "this needs attention" cue used for
+   the emergency chat bubble, so the two read as one consistent visual language for
+   "this is not a normal message" rather than two unrelated styles. */
+.disclaimer::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: color-mix(in srgb, var(--app-warning-text) 85%, black);
+}
+
+.disclaimerInner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.disclaimerIcon {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  margin-top: 0.05rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--app-warning-border);
+  color: color-mix(in srgb, var(--app-warning-text) 85%, black);
+  animation: disclaimer-pulse 2.6s ease-in-out infinite;
+}
+
+@keyframes disclaimer-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(167, 143, 101, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(167, 143, 101, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .disclaimerIcon {
+    animation: none;
+  }
+}
+
+.disclaimerText {
+  color: color-mix(in srgb, var(--app-warning-text) 85%, black);
+}
+
+.disclaimerLabel {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: var(--app-warning-border);
+  color: color-mix(in srgb, var(--app-warning-text) 85%, black);
+  font-weight: 700;
+  font-size: var(--font-size-caption);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+/* Messages/input are capped to a comfortable reading width and centered — the page
+   itself (background, border) still fills the full viewport either side of this
+   column, so there's no dead/empty page background, just a sane line length. */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1.25rem;
+  box-sizing: border-box;
+}
+
+.welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.5rem;
+  padding: 2rem 1rem;
+  color: var(--app-text-body);
+}
+
+.welcomeIconHalo {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.75rem;
+}
+
+.welcomeIconHalo::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 40%, transparent), transparent 72%);
+  animation: welcome-halo-pulse 3.2s ease-in-out infinite;
+}
+
+@keyframes welcome-halo-pulse {
+  0%, 100% {
+    transform: scale(0.94);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+}
+
+.welcomeIcon {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(150deg, var(--app-accent-hover), var(--app-accent) 70%);
+  color: var(--app-accent-text);
+  box-shadow:
+    0 10px 28px color-mix(in srgb, var(--app-accent) 45%, transparent),
+    inset 0 1px 0 color-mix(in srgb, white 20%, transparent);
+}
+
+.welcomeSparkle {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  color: color-mix(in srgb, white 80%, var(--app-accent-text));
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--app-accent-hover) 85%, transparent));
+  animation: chat-twinkle 2.6s ease-in-out infinite;
+}
+
+@keyframes chat-twinkle {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+.welcomeHeading {
+  margin: 0;
+  /* Generous line-height + a touch of bottom padding: background-clip:text crops
+     strictly to the line box, and descenders (y, g, q) get flattened off without
+     this — the tight 145% body line-height is fine for opaque text but not enough
+     headroom once the fill is a clipped gradient. */
+  line-height: 1.35;
+  padding-bottom: 0.1em;
+  font-size: calc(var(--font-size-title) * 1.05);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  background: linear-gradient(100deg, var(--app-text-title) 20%, var(--app-accent-hover) 60%, var(--app-accent) 90%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.welcomeSubtitle {
+  max-width: 440px;
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-label);
+  line-height: 1.55;
+}
+
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 1.1rem;
+  max-width: 520px;
+}
+
+.suggestionChip {
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--app-accent) 30%, var(--app-border));
+  background: color-mix(in srgb, var(--app-bg-card) 88%, var(--app-accent) 6%);
+  color: var(--app-text-body);
+  font-size: var(--font-size-label);
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.suggestionChip:hover,
+.suggestionChip:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--app-accent);
+  background: color-mix(in srgb, var(--app-accent) 16%, var(--app-bg-card));
+  color: var(--app-text-title);
+}
+
+@media (max-width: 480px) {
+  .welcomeIconHalo {
+    width: 72px;
+    height: 72px;
+  }
+
+  .welcomeIcon {
+    width: 52px;
+    height: 52px;
+  }
+
+  .welcomeHeading {
+    font-size: calc(var(--font-size-title) * 0.85);
+  }
+
+  .suggestionChip {
+    font-size: var(--font-size-caption);
+    padding: 0.5rem 0.85rem;
+  }
+}
+
+.historyError {
+  align-self: center;
+  color: var(--app-error-text);
+  font-size: var(--font-size-label);
+}
+
+.bubbleRow {
+  display: flex;
+  width: 100%;
+}
+
+.userRow {
+  justify-content: flex-end;
+}
+
+.assistantRow {
+  justify-content: flex-start;
+  align-items: flex-end;
+  gap: 0.5rem;
+  /* Flex items default to min-width: auto, which blocks them from ever shrinking
+     below their content's intrinsic width — .feedbackCard's own min-width (below)
+     is wider than very narrow viewports (~300px) can offer once this row's avatar
+     and gap are subtracted, and without this override the row simply overflowed the
+     page instead of letting the card shrink to fit. */
+  min-width: 0;
+}
+
+.assistantAvatar {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--app-accent) 20%, var(--app-bg-card));
+  color: var(--app-accent);
+}
+
+/* Reserves the same width as .assistantAvatar so consecutive assistant messages
+   still line up under one another once the avatar is hidden on the grouped ones. */
+.avatarSpacer {
+  flex-shrink: 0;
+  width: 26px;
+}
+
+/* Consecutive same-role messages sit closer together than a fresh turn, echoing the
+   "grouped by sender" convention most chat UIs use instead of repeating an avatar
+   (and, for user messages, the same visual gap) on every single line. */
+.groupedRow {
+  margin-top: -0.5rem;
+}
+
+.bubbleCol {
+  display: flex;
+  flex-direction: column;
+  max-width: min(72%, 560px);
+}
+
+.userRow .bubbleCol {
+  align-items: flex-end;
+}
+
+.messageTime {
+  font-size: var(--font-size-caption);
+  color: var(--app-text-subtitle);
+  margin: 0.2rem 0.35rem 0;
+}
+
+.bubble {
+  max-width: 100%;
+  padding: 0.7rem 1rem;
+  border-radius: 16px;
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  animation: chat-msg-in 220ms ease-out;
+}
+
+@keyframes chat-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble {
+    animation: none;
+  }
+  .welcomeIconHalo::before,
+  .welcomeSparkle {
+    animation: none;
+  }
+}
+
+.userBubble {
+  background: var(--app-accent);
+  color: var(--app-accent-text);
+  border-bottom-right-radius: 4px;
+}
+
+.assistantBubble {
+  background: var(--app-neutral-bg);
+  color: var(--app-text-body);
+  border: 1px solid var(--app-border);
+  border-bottom-left-radius: 4px;
+}
+
+.errorBubble {
+  background: var(--app-error-bg);
+  color: var(--app-error-text);
+  border-color: var(--app-error-border);
+}
+
+@media (max-width: 480px) {
+  .bubbleCol {
+    max-width: 84%;
+  }
+}
+
+.typingBubble {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.85rem 1rem;
+}
+
+.typingDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--app-text-subtitle);
+  animation: chat-typing 1.2s ease-in-out infinite;
+}
+
+.typingDot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typingDot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes chat-typing {
+  0%, 60%, 100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+.redFlagBubble {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  max-width: min(80%, 560px);
+  padding: 0.8rem 1rem;
+  border-radius: 14px;
+  background: var(--app-error-bg);
+  color: var(--app-error-text);
+  border: 1px solid var(--app-error-border);
+  font-weight: 600;
+  font-size: var(--font-size-body);
+}
+
+.redFlagBubble svg {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+
+.redFlagText {
+  white-space: pre-line;
+  line-height: 1.5;
+}
+
+.bookingCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 200px;
+}
+
+.bookingCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 700;
+  color: var(--app-success-text);
+  margin-bottom: 0.2rem;
+}
+
+.bookingCardRow {
+  font-size: var(--font-size-label);
+  color: var(--app-text-body);
+}
+
+.doctorOptionsCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 220px;
+  max-width: 100%;
+}
+
+.doctorOptionsNote {
+  font-size: var(--font-size-label);
+  color: var(--app-text-subtitle);
+  font-style: italic;
+}
+
+.doctorOptionsHeader {
+  font-weight: 700;
+  color: var(--app-text-heading);
+}
+
+.doctorOptionGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.doctorOptionName {
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  color: var(--app-text-body);
+}
+
+.doctorOptionSlots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.departmentListCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  min-width: 240px;
+  max-width: 100%;
+}
+
+.departmentListSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.departmentListSection:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.slotOptionBtn {
+  border: 1px solid var(--app-border);
+  background: var(--app-surface);
+  color: var(--app-text-body);
+  border-radius: 8px;
+  padding: 0.35rem 0.65rem;
+  font-size: var(--font-size-label);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.slotOptionBtn:hover:not(:disabled) {
+  background: var(--app-accent-bg);
+  border-color: var(--app-accent);
+}
+
+.slotOptionBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.inputBar {
+  flex-shrink: 0;
+  padding: 0.85rem 1rem;
+  border-top: 1px solid var(--app-border);
+  background: var(--app-bg-card);
+  box-sizing: border-box;
+}
+
+.inputBarInner {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.input {
+  flex: 1;
+  resize: none;
+  min-width: 0;
+  min-height: 2.7rem;
+  max-height: 140px;
+  padding: 0.65rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid var(--app-border);
+  background: var(--app-input-bg);
+  color: var(--app-input-text);
+  font: inherit;
+  font-size: var(--font-size-body);
+  line-height: 1.4;
+  box-sizing: border-box;
+}
+
+.input::placeholder {
+  color: var(--app-input-placeholder);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--app-accent);
+}
+
+.sendBtn {
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: none;
+  background: var(--app-accent);
+  color: var(--app-accent-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 160ms ease, transform 160ms ease, opacity 160ms ease;
+}
+
+.sendBtn:hover:not(:disabled) {
+  background: var(--app-accent-hover);
+  transform: translateY(-1px);
+}
+
+.sendBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+  .inputBar {
+    padding: 0.65rem 0.75rem;
+  }
+
+  .sendBtn {
+    width: 38px;
+    height: 38px;
+  }
+}
+
+/* Deliberately its own card rather than reusing .bubble/.assistantBubble — this is
+   an action the patient needs to notice and complete, not a line of conversation, so
+   it gets a distinct accent border/gradient and more generous padding to read as
+   "something to do here," the same visual weight the red-flag alert bubble carries
+   for the opposite reason (something urgent). */
+.feedbackCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 260px;
+  width: min(92%, 640px);
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 1.1rem 1.3rem;
+  border-radius: 18px;
+  background: linear-gradient(165deg, color-mix(in srgb, var(--app-accent) 10%, var(--app-bg-card)), var(--app-bg-card) 65%);
+  border: 1px solid color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
+  box-shadow: 0 6px 20px var(--app-shadow);
+  animation: chat-msg-in 220ms ease-out;
+}
+
+/* Landscape, not a tall stack: the prompt/skip live in one column, the star picker
+   in a second column beside it, so the card grows wider rather than taller — only
+   the rating stage needs this (the reason stage's textarea is inherently vertical,
+   so it stays a normal stacked column). */
+.feedbackRatingRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.feedbackTextCol {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.feedbackActionCol {
+  flex-shrink: 0;
+}
+
+@media (max-width: 560px) {
+  .feedbackRatingRow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.85rem;
+  }
+
+  /* The 260px floor above reads fine as a minimum on normal phone widths, but on a
+     very narrow screen (~300px CSS width) it's wider than the space actually left
+     after the page padding and assistant avatar are subtracted, and min-width always
+     wins over max-width — so it has to be relaxed here rather than solved by
+     max-width alone, letting the card and its text genuinely shrink to fit instead
+     of overflowing the screen edge. */
+  .feedbackCard {
+    min-width: 0;
+    padding: 0.9rem 1rem;
+  }
+}
+
+.feedbackCardDone {
+  padding: 0.9rem 1.2rem;
+  background: var(--app-neutral-bg);
+  border-color: var(--app-border);
+  box-shadow: none;
+}
+
+.feedbackHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.feedbackHeaderIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--app-accent) 22%, transparent);
+  color: var(--app-accent);
+  flex-shrink: 0;
+}
+
+.feedbackHeaderTitle {
+  font-size: var(--font-size-caption);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--app-accent);
+}
+
+.feedbackPrompt {
+  margin: 0;
+  font-weight: 600;
+  font-size: var(--font-size-body);
+  line-height: 1.45;
+  color: var(--app-text-heading);
+}
+
+.starBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.starRow {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.starBtn {
+  border: none;
+  background: none;
+  padding: 2px;
+  line-height: 0;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--app-text-subtitle) 55%, transparent);
+  transition: color 0.15s ease, transform 0.12s ease;
+}
+
+.starBtn:hover:not(:disabled),
+.starBtn:focus-visible:not(:disabled) {
+  color: var(--app-accent);
+  transform: scale(1.15);
+}
+
+.starBtn[aria-pressed="true"] {
+  color: var(--app-accent);
+}
+
+.starBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.starRatingLabel {
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--app-text-subtitle);
+  min-height: 1em;
+}
+
+.feedbackSkipBtn {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  padding: 0;
+  margin-top: -0.15rem;
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-label);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.feedbackSkipBtn:hover {
+  color: var(--app-text-body);
+}
+
+.feedbackReasonBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid color-mix(in srgb, var(--app-accent) 20%, var(--app-border));
+}
+
+.feedbackReasonLabel {
+  font-size: var(--font-size-label);
+  color: var(--app-text-subtitle);
+}
+
+.feedbackReasonInput {
+  resize: vertical;
+  min-height: 48px;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface);
+  color: var(--app-text-body);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  font-family: inherit;
+  font-size: var(--font-size-body);
+  transition: border-color 0.15s ease;
+}
+
+.feedbackReasonInput:focus {
+  outline: none;
+  border-color: var(--app-accent);
+}
+
+.feedbackSubmitBtn {
+  align-self: flex-start;
+  border: none;
+  border-radius: 10px;
+  padding: 0.5rem 1.2rem;
+  background: var(--app-accent);
+  color: var(--app-accent-text);
+  font-weight: 600;
+  font-size: var(--font-size-label);
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.feedbackSubmitBtn:hover:not(:disabled) {
+  background: var(--app-accent-hover);
+  transform: translateY(-1px);
+}
+
+.feedbackSubmitBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.feedbackAckRow {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.feedbackAckIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--app-success-text) 20%, transparent);
+  color: var(--app-success-text);
+  flex-shrink: 0;
+}
+
+.feedbackAck {
+  margin: 0;
+  color: var(--app-text-body);
+  font-size: var(--font-size-label);
+}

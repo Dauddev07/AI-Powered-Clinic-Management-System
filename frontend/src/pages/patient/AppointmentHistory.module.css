@@ -1,0 +1,337 @@
+.statsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.statTile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 92px;
+  padding: 0.65rem 1rem;
+  border-radius: 14px;
+  background: var(--app-bg-card);
+  border: 1px solid var(--app-border);
+  border-left: 3px solid var(--app-border);
+}
+
+.statTile.success {
+  border-left-color: var(--app-success-border);
+}
+
+.statTile.error {
+  border-left-color: var(--app-error-border);
+}
+
+.statTile.neutral {
+  border-left-color: var(--app-neutral-border);
+}
+
+.statValue {
+  font-size: calc(var(--font-size-title) * 0.85);
+  font-weight: 700;
+  color: var(--app-text-title);
+  line-height: 1.1;
+}
+
+.statLabel {
+  font-size: var(--font-size-caption);
+  color: var(--app-text-subtitle);
+}
+
+.filterBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.75rem;
+}
+
+.filterChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-card);
+  color: var(--app-text-body);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+.filterChip:hover {
+  border-color: var(--app-accent);
+  transform: translateY(-1px);
+}
+
+.filterChipActive {
+  background: var(--app-accent);
+  border-color: var(--app-accent);
+  color: var(--app-accent-text);
+}
+
+.filterChipActive:hover {
+  border-color: var(--app-accent-hover);
+}
+
+.filterChipCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--app-bg-page);
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-caption);
+}
+
+.filterChipActive .filterChipCount {
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--app-accent-text);
+}
+
+.monthGroup {
+  margin-bottom: 2rem;
+}
+
+.monthGroup:last-child {
+  margin-bottom: 0;
+}
+
+.monthHeading {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  padding: 0.3rem 0.85rem;
+  border-radius: 999px;
+  background: var(--app-bg-page);
+  border: 1px solid var(--app-border);
+  font-size: var(--font-size-label);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--app-text-subtitle);
+}
+
+.monthCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--app-bg-card);
+  border: 1px solid var(--app-border);
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-caption);
+  font-weight: 700;
+}
+
+.timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+/* The connecting vertical line running through every dot in this month's
+   group — a single pseudo-element on the list rather than per-row so it
+   reads as one continuous thread, not a stack of disconnected segments. */
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 15px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--app-border);
+}
+
+@media (max-width: 480px) {
+  .timeline::before {
+    left: 11px;
+  }
+}
+
+.entry {
+  position: relative;
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.node {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--app-bg-page);
+  border: 2px solid var(--app-border);
+  color: var(--app-text-subtitle);
+  margin-top: 0.15rem;
+}
+
+@media (max-width: 480px) {
+  .node {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+.node.success {
+  border-color: var(--app-success-border);
+  color: var(--app-success-text);
+  background: var(--app-success-bg);
+}
+
+.node.error {
+  border-color: var(--app-error-border);
+  color: var(--app-error-text);
+  background: var(--app-error-bg);
+}
+
+.node.neutral {
+  border-color: var(--app-neutral-border);
+  color: var(--app-neutral-text);
+  background: var(--app-neutral-bg);
+}
+
+.card {
+  flex: 1;
+  min-width: 0;
+  background: var(--app-bg-card);
+  border: 1px solid var(--app-border);
+  border-left: 3px solid var(--app-border);
+  border-radius: 16px;
+  padding: 1.1rem 1.25rem;
+  box-shadow: 0 4px 20px var(--app-shadow);
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+  transition: transform 200ms ease, box-shadow 200ms ease, border-left-color 200ms ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px var(--app-shadow);
+}
+
+.card.success {
+  border-left-color: var(--app-success-border);
+}
+
+.card.error {
+  border-left-color: var(--app-error-border);
+}
+
+.card.neutral {
+  border-left-color: var(--app-neutral-border);
+}
+
+.cardTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.doctorRow {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.avatar {
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--app-bg-page);
+  border: 1px solid var(--app-border);
+  color: var(--app-accent);
+  font-size: var(--font-size-label);
+  font-weight: 700;
+}
+
+.doctorText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.doctorName {
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  color: var(--app-text-title);
+}
+
+.departmentName {
+  font-size: var(--font-size-caption);
+  color: var(--app-text-subtitle);
+}
+
+.whenRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: 0.25rem;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+  font-size: var(--font-size-label);
+  color: var(--app-text-body);
+}
+
+.whenIcon {
+  flex: none;
+  color: var(--app-text-subtitle);
+}
+
+.relativeTime {
+  margin-left: 0.15rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid var(--app-border);
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-caption);
+}
+
+.reason {
+  margin-top: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  background: var(--app-bg-page);
+  border-radius: 10px;
+  font-size: var(--font-size-label);
+  color: var(--app-text-body);
+}
+
+.completedNote {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--app-success-bg);
+  border: 1px solid var(--app-success-border);
+  border-radius: 10px;
+  color: var(--app-success-text);
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+}

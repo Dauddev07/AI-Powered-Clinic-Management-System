@@ -1,0 +1,4 @@
+external_doctor_id,name,department,specialty,shift_days,shift_start,shift_end,active,slot_length_minutes,leave_dates
+DOC-1001,Dr. Jane Example,Cardiology,Cardiologist,"Mon,Wed,Fri",09:00,17:00,true,30,2026-08-15
+DOC-1002,Dr. John Sample,General Medicine,,"Tue,Thu",08:30,14:00,true,,
+DOC-1003,Dr. Alex Placeholder,Pediatrics,Pediatrician,"Mon,Tue,Wed,Thu,Fri",10:00,18:00,false,20,"2026-08-01,2026-08-02"

@@ -1,0 +1,176 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.card {
+  /* Grid items default to min-width: auto (their content's intrinsic width) —
+     without this, one long unbroken value (a doctor/department name, a
+     booking reason) can force its column wider than the grid track, pushing
+     the whole grid into horizontal overflow instead of wrapping. */
+  min-width: 0;
+  background: var(--app-bg-card);
+  border: 1px solid var(--app-border);
+  border-radius: 20px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 24px var(--app-shadow);
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+}
+
+@media (max-width: 480px) {
+  .card {
+    padding: 1.25rem;
+  }
+
+  .countValue {
+    font-size: calc(var(--font-size-title) * 0.95);
+  }
+
+  .counts {
+    gap: 1rem;
+  }
+}
+
+.cardTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.cardTitleRow .cardTitle {
+  margin-bottom: 0;
+}
+
+.cardTitle {
+  margin: 0 0 1rem;
+  font-size: var(--font-size-label);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--app-text-subtitle);
+}
+
+.titleIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+}
+
+.titleIcon_info {
+  background: var(--app-info-bg);
+  color: var(--app-info-text);
+}
+
+.titleIcon_success {
+  background: var(--app-success-bg);
+  color: var(--app-success-text);
+}
+
+.nextAppointment {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.nextStatusRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.nextEndsIn {
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--app-warning-text);
+}
+
+.nextWhen {
+  font-size: var(--font-size-heading);
+  font-weight: 700;
+  color: var(--app-text-title);
+}
+
+.nextWith {
+  font-size: var(--font-size-body);
+  color: var(--app-text-subtitle);
+}
+
+.nextReason {
+  margin-top: 0.4rem;
+  font-size: var(--font-size-label);
+  color: var(--app-text-subtitle);
+}
+
+.viewAllLink {
+  margin-top: 0.5rem;
+  align-self: flex-start;
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  color: var(--app-accent);
+  text-decoration: none;
+}
+
+.viewAllLink:hover {
+  text-decoration: underline;
+}
+
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+
+.countItem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.countIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  margin-bottom: 0.25rem;
+}
+
+.countIcon_info {
+  background: var(--app-info-bg);
+  color: var(--app-info-text);
+}
+
+.countIcon_warning {
+  background: var(--app-warning-bg);
+  color: var(--app-warning-text);
+}
+
+.countIcon_success {
+  background: var(--app-success-bg);
+  color: var(--app-success-text);
+}
+
+.countValue {
+  font-size: calc(var(--font-size-title) * 1.15);
+  font-weight: 700;
+  color: var(--app-text-title);
+  line-height: 1;
+}
+
+.countLabel {
+  font-size: var(--font-size-label);
+  color: var(--app-text-subtitle);
+}
+
+.errorText {
+  color: var(--app-error-text);
+  font-size: var(--font-size-label);
+}

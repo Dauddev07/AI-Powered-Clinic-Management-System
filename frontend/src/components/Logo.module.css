@@ -1,0 +1,52 @@
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 700;
+  font-size: clamp(0.85rem, 3.2vw, var(--font-size-heading));
+  color: var(--app-text-title);
+  min-width: 0;
+  line-height: 1;
+}
+
+.glyph {
+  flex: none;
+  font-size: 1.35em;
+}
+
+.wordmark {
+  /* Without this, a flex item's default min-width: auto pins it at its own
+     nowrap content's full intrinsic width — the overflow/ellipsis below never
+     actually engages (there's nothing to hide, the box is always exactly wide
+     enough for the whole string), so the text just overflows .logo's bounds
+     and gets hard-clipped by whatever ancestor happens to have its own
+     overflow: hidden, with no ellipsis, instead of truncating cleanly here. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clinic {
+  color: var(--app-accent);
+}
+
+.lg {
+  font-size: clamp(1.25rem, 4vw, calc(var(--font-size-title) * 1.2));
+}
+
+/* Lets the wordmark wrap onto a second line instead of truncating — the icon
+   stays aligned to the first line rather than centered across both. */
+.wrap {
+  align-items: flex-start;
+}
+
+.wrap .glyph {
+  margin-top: 0.15em;
+}
+
+.wrap .wordmark {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}

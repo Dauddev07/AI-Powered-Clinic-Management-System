@@ -1,0 +1,63 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.content {
+  width: 100%;
+  max-width: min(640px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 1.25rem;
+  background: var(--app-bg-card);
+  color: var(--app-text-body);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px var(--app-shadow);
+  /* Safety net at narrow widths, matching the other cards in the app. */
+  overflow-wrap: anywhere;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.title {
+  min-width: 0;
+  font-size: var(--font-size-heading);
+  color: var(--app-text-title);
+  margin: 0;
+}
+
+.closeBtn {
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: none;
+  color: var(--app-text-body);
+  font-size: var(--font-size-label);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.closeBtn:hover {
+  background: var(--app-bg-page);
+}
+
+.body {
+  font-size: var(--font-size-body);
+}

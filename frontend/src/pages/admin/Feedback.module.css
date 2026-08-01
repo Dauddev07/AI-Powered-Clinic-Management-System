@@ -1,0 +1,98 @@
+.stars {
+  display: inline-flex;
+  gap: 1px;
+}
+
+.starFilled {
+  color: var(--app-accent);
+}
+
+.starEmpty {
+  color: color-mix(in srgb, var(--app-text-subtitle) 50%, transparent);
+}
+
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
+  gap: 0.9rem;
+  margin-bottom: 1.25rem;
+}
+
+.statTile {
+  background: var(--app-bg-card);
+  border-radius: 16px;
+  border-left: 4px solid var(--app-border);
+  box-shadow: 0 4px 24px var(--app-shadow);
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.statTile_good {
+  border-left-color: var(--app-success-text);
+}
+
+.statTile_neutral {
+  border-left-color: var(--app-warning-text);
+}
+
+.statTile_bad {
+  border-left-color: var(--app-error-text);
+}
+
+.statValue {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--app-text-heading);
+}
+
+.statLabel {
+  font-size: var(--font-size-label);
+  color: var(--app-text-subtitle);
+}
+
+.statTile_good .statValue {
+  color: var(--app-success-text);
+}
+
+.statTile_neutral .statValue {
+  color: var(--app-warning-text);
+}
+
+.statTile_bad .statValue {
+  color: var(--app-error-text);
+}
+
+.toneTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 1.1rem;
+}
+
+.toneTab {
+  border: 1px solid var(--app-border);
+  background: var(--app-surface);
+  color: var(--app-text-subtitle);
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease;
+}
+
+.toneTab:hover {
+  color: var(--app-text-body);
+}
+
+.toneTabActive {
+  background: var(--app-accent);
+  border-color: var(--app-accent);
+  color: var(--app-accent-text);
+}
+
+.rowBad {
+  background: color-mix(in srgb, var(--app-error-bg) 55%, transparent);
+}

@@ -1,0 +1,23 @@
+.content {
+  min-height: calc(100vh - 3.5rem);
+  background: var(--app-bg-page);
+  padding: 2rem;
+  box-sizing: border-box;
+}
+
+.contentInner {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+@media (max-width: 720px) {
+  .content {
+    padding: 1.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .content {
+    padding: 1rem;
+  }
+}
