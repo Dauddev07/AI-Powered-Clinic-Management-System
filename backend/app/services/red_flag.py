@@ -46,10 +46,15 @@ _RED_FLAG_PATTERNS = [
     # blanket-firing the canned redirect on the word "chest pain" alone with no
     # chance to ask anything first.
     r"\bheart\s*attack\b",
-    # Breathing difficulty — explicitly includes "shortness of breath" (previously missed)
-    r"\bshortness of breath\b",
-    r"\bshort of breath\b",
-    r"\b(can'?t|cannot|can not|difficulty|struggling to|trouble)\s*breath",
+    # Breathing difficulty — explicitly includes "shortness of breath" (previously missed).
+    # Negative lookbehinds guard against a patient explicitly denying it ("no shortness
+    # of breath", "not short of breath", "no trouble breathing") — without them the
+    # phrase itself still matched regardless of the negation word right in front of it,
+    # auto-firing on a patient's own reassurance that they're NOT having trouble
+    # breathing. Same technique as the bleeding-severity patterns below.
+    r"(?<!not )(?<!n't )(?<!no )\bshortness of breath\b",
+    r"(?<!not )(?<!n't )(?<!no )\bshort of breath\b",
+    r"(?<!not )(?<!n't )(?<!no )\b(can'?t|cannot|can not|difficulty|struggling to|trouble)\s*breath",
     r"\bnot breathing\b",
     r"\bgasping\b",
     r"\bsuffocat",

@@ -36,10 +36,10 @@
   opacity: 0.82;
 }
 
-/* Groups the home icon and the account launcher (see SettingsMenu) together
-   at the header's far right — a single flex item so .header's own
+/* Groups the home icon, notification bell, and account launcher together at
+   the header's far right - a single flex item so .header's own
    justify-content: space-between keeps them adjacent instead of spreading
-   three separate children evenly across the row. */
+   them apart. */
 .headerEnd {
   display: flex;
   align-items: center;

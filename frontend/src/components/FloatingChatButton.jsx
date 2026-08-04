@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import styles from "./FloatingChatButton.module.css";
 
-// Entry point into the AI chat, fixed bottom-right on the patient dashboard. The
+// Entry point into the AI chat, fixed bottom-left on the patient dashboard. The
 // tooltip bubble is permanent (not hover-only) — it fades in shortly after mount and
 // then stays up, so the invitation to chat is always legible, not just discoverable.
 export default function FloatingChatButton() {

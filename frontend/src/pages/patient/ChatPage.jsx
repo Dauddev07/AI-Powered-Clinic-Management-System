@@ -29,9 +29,23 @@ const DOCTOR_OPTIONS_MARKER = "DOCTOR_OPTIONS::";
 // A genuine cross-department question ("list every doctor across every department")
 // calls get_department_availability more than once in one turn — the backend
 // combines every call's real result into this marker's payload in code
-// ({ departments: [{ department_name, doctors: [...] }, ...] }), never summarized by
-// the LLM itself. See app.services.chat_tools.combine_department_availability_results.
+// ({ departments: [{ department_name, note, doctors: [...] }, ...], unavailable: [{
+// department_name, message }, ...] }), never summarized by the LLM itself. `note`
+// is the same one-sentence triage reasoning DOCTOR_OPTIONS_MARKER shows for a
+// single department — present when that department was reached by symptom
+// inference, omitted when the patient named it directly.
+// `unavailable` covers a real department that WAS checked but has nobody free right
+// now — previously silently dropped, so a reply could name a department (e.g. "you
+// may see Dermatology") with no card and no explanation for it. See
+// app.services.chat_tools.combine_department_availability_results.
 const DEPARTMENT_LIST_MARKER = "DEPARTMENT_LIST::";
+
+// appointment_agent's own disambiguation question — several real candidates match
+// what the patient typed (a doctor-name match, or a vague reference to more than one
+// of the patient's own appointments) — payload { kind, question, candidates: [{
+// doctor_name, department_name }, ...] }. See app/services/chat_markers.py and
+// app/services/orchestrator/agents/appointment_agent.py.
+const DOCTOR_DISAMBIGUATION_MARKER = "DOCTOR_DISAMBIGUATION::";
 
 const SUGGESTIONS = [
   "What are your clinic's opening hours?",
@@ -74,6 +88,15 @@ function parseDepartmentList(content) {
   if (!content.startsWith(DEPARTMENT_LIST_MARKER)) return null;
   try {
     return JSON.parse(content.slice(DEPARTMENT_LIST_MARKER.length));
+  } catch {
+    return null;
+  }
+}
+
+function parseDoctorDisambiguation(content) {
+  if (!content.startsWith(DOCTOR_DISAMBIGUATION_MARKER)) return null;
+  try {
+    return JSON.parse(content.slice(DOCTOR_DISAMBIGUATION_MARKER.length));
   } catch {
     return null;
   }
@@ -188,12 +211,41 @@ function DepartmentListCard({ list, onSelectSlot, disabled }) {
     <div className={styles.departmentListCard}>
       {list.departments.map((department) => (
         <div key={department.department_name} className={styles.departmentListSection}>
+          {department.note && <div className={styles.doctorOptionsNote}>{department.note}</div>}
           <div className={styles.doctorOptionsHeader}>{department.department_name}</div>
           {department.doctors.map((doctor) => (
             <DoctorGroup key={doctor.doctor_id} doctor={doctor} onSelectSlot={onSelectSlot} disabled={disabled} />
           ))}
         </div>
       ))}
+      {(list.unavailable || []).map((entry) => (
+        <div key={entry.department_name} className={styles.departmentListSection}>
+          <div className={styles.doctorOptionsHeader}>{entry.department_name}</div>
+          <div className={styles.doctorOptionsNote}>{entry.message}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DoctorDisambiguationCard({ disambiguation, onSelectCandidate, disabled }) {
+  return (
+    <div className={styles.doctorOptionsCard}>
+      {disambiguation.question && <div className={styles.doctorOptionsNote}>{disambiguation.question}</div>}
+      <div className={styles.doctorOptionSlots}>
+        {(disambiguation.candidates || []).map((candidate) => (
+          <button
+            key={`${candidate.doctor_name}-${candidate.department_name}`}
+            type="button"
+            className={styles.slotOptionBtn}
+            disabled={disabled}
+            onClick={() => onSelectCandidate(candidate.doctor_name, candidate.department_name)}
+          >
+            {candidate.doctor_name}
+            {candidate.department_name ? ` — ${candidate.department_name}` : ""}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -368,11 +420,13 @@ function formatMessageTime(iso) {
   return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-function ChatMessage({ message, onSelectSlot, sending, grouped }) {
+function ChatMessage({ message, onSelectSlot, onSelectCandidate, sending, grouped }) {
   const isUser = message.role === "user";
   const booking = !isUser ? parseBookingConfirmation(message.content) : null;
   const doctorOptions = !isUser && !booking ? parseDoctorOptions(message.content) : null;
   const departmentList = !isUser && !booking && !doctorOptions ? parseDepartmentList(message.content) : null;
+  const doctorDisambiguation =
+    !isUser && !booking && !doctorOptions && !departmentList ? parseDoctorDisambiguation(message.content) : null;
   const time = formatMessageTime(message.createdAt);
 
   if (message.redFlag) {
@@ -400,6 +454,12 @@ function ChatMessage({ message, onSelectSlot, sending, grouped }) {
             <DoctorOptionsCard options={doctorOptions} onSelectSlot={onSelectSlot} disabled={sending} />
           ) : departmentList ? (
             <DepartmentListCard list={departmentList} onSelectSlot={onSelectSlot} disabled={sending} />
+          ) : doctorDisambiguation ? (
+            <DoctorDisambiguationCard
+              disambiguation={doctorDisambiguation}
+              onSelectCandidate={onSelectCandidate}
+              disabled={sending}
+            />
           ) : isUser ? (
             stripSlotId(message.content)
           ) : (
@@ -700,6 +760,15 @@ export default function ChatPage() {
     );
   };
 
+  // A patient tapping one of appointment_agent's disambiguation candidates sends the
+  // doctor's exact full name back as the message text — nothing else — so
+  // find_doctors_by_name's exact-match tier resolves it directly on the next turn
+  // instead of re-triggering the same disambiguation. The friendlier wording only
+  // shows in the transcript (displayText), same pattern as selectSlot above.
+  const selectCandidate = (doctorName, departmentName) => {
+    submitMessage(doctorName, `I mean ${doctorName}${departmentName ? ` (${departmentName})` : ""}.`);
+  };
+
   const handleInputChange = (e) => {
     setInput(e.target.value);
     resizeTextarea();
@@ -895,6 +964,7 @@ export default function ChatPage() {
               key={i}
               message={message}
               onSelectSlot={selectSlot}
+              onSelectCandidate={selectCandidate}
               sending={sending}
               grouped={i > 0 && messages[i - 1].role === message.role && !messages[i - 1].redFlag && !message.redFlag}
             />

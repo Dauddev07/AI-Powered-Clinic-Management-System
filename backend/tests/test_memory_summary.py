@@ -48,6 +48,20 @@ class _FakeLLM:
         return SimpleNamespace(content=self._content)
 
 
+def test_system_prompt_captures_general_topics_asked_about_not_just_symptoms_and_personal_info():
+    # Reported gap: a chat containing only logistics questions ("is there any
+    # cardiologist available on fri") had nothing extracted at all (symptoms/personal
+    # info are the only two categories the original prompt captured), so a later
+    # "what are the things I told you" in a new chat got "I don't have anything
+    # stored" even though the patient clearly had asked something. The digest must
+    # capture the general SUBJECT of any question asked, not just symptoms/personal
+    # facts — while still excluding volatile specifics (booking results, exact
+    # date/time/slot details) that can go stale.
+    assert "The general SUBJECT of anything else the patient asked about" in memory_summary._SYSTEM_PROMPT
+    assert "the RESULT of any appointment booking/reschedule/cancellation" in memory_summary._SYSTEM_PROMPT
+    assert "Capture only the topic/subject, never the specific answer given" in memory_summary._SYSTEM_PROMPT
+
+
 def test_no_prior_messages_returns_empty_summary_and_creates_a_profile_row(db, clinic, patient):
     result = refresh_patient_summary_for_new_session(db, clinic.id, patient.id)
 

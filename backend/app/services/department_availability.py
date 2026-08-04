@@ -75,13 +75,23 @@ def _name_words(name: str) -> set[str]:
 
 
 def find_doctors_by_name(db: Session, clinic_id: uuid.UUID, name_query: str) -> list[DoctorMatch]:
-    """Word-level match: a real active doctor is returned whenever at least one
-    non-trivial word (first name, last name, etc.) of their full_name matches a word
-    the patient typed — case-insensitive, order-independent, so "Raza Iqra" still
-    matches a real "Dr. Iqra Raza" even though the words are reversed. Deliberately
-    broad rather than an exact/fuzzy-distance match: any overlap is surfaced to the
-    patient as a candidate to confirm or choose between, rather than the model
-    guessing silently or a near-miss going unmatched entirely."""
+    """Exact-first, word-overlap-fallback match against real active doctors.
+
+    A doctor is an EXACT match when EVERY non-trivial word of their full_name is
+    present among the patient's typed words — case-insensitive, order-independent, a
+    subset check rather than a set-equality check so it still matches when the name is
+    embedded in a full sentence (e.g. "I'd like to book with Dr. Ali Raza" still
+    exact-matches "Dr. Ali Raza", not just a bare "Ali Raza" query). Whenever at least
+    one exact match exists, ONLY exact matches are returned: a patient who typed a
+    specific, complete name must resolve directly to that one doctor, not get stuck
+    disambiguating against unrelated doctors who merely share a first or last name
+    (Babar Ali, Fatima Raza, ...).
+
+    When there is no exact match, falls back to the original broad word-overlap
+    behavior — any doctor sharing at least one non-trivial word is surfaced as a
+    candidate — since that's still the right behavior for a genuinely partial name
+    (just "Ali", or just "Raza") where the patient's input doesn't uniquely identify
+    anyone on its own."""
     query_words = _name_words(name_query)
     if not query_words:
         return []
@@ -92,10 +102,19 @@ def find_doctors_by_name(db: Session, clinic_id: uuid.UUID, name_query: str) -> 
         .where(Doctor.clinic_id == clinic_id, Doctor.is_active.is_(True), Department.is_active.is_(True))
     ).all()
 
-    matches = []
+    exact_matches = []
+    partial_matches = []
     for doctor, department_name in doctors:
-        if query_words & _name_words(doctor.full_name):
-            matches.append(DoctorMatch(doctor_id=doctor.id, full_name=doctor.full_name, department_name=department_name))
+        doctor_words = _name_words(doctor.full_name)
+        if not doctor_words:
+            continue
+        match = DoctorMatch(doctor_id=doctor.id, full_name=doctor.full_name, department_name=department_name)
+        if doctor_words <= query_words:
+            exact_matches.append(match)
+        elif query_words & doctor_words:
+            partial_matches.append(match)
+
+    matches = exact_matches or partial_matches
     matches.sort(key=lambda m: m.full_name)
     return matches
 

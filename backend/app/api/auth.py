@@ -10,7 +10,14 @@ from app.core.db import get_db
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.clinic import Clinic
 from app.models.user import User
-from app.schemas.auth import ChangePasswordRequest, LoginRequest, RegisterRequest, TokenResponse, UserPublicOut
+from app.schemas.auth import (
+    ChangePasswordRequest,
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+    UserPublicOut,
+    UserWithClinicOut,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -32,13 +39,16 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
     return TokenResponse(access_token=token, must_change_password=matched.must_change_password)
 
 
-@router.get("/me", response_model=UserPublicOut)
-def get_my_account(current_user: User = Depends(get_current_user)) -> User:
+@router.get("/me", response_model=UserWithClinicOut)
+def get_my_account(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> UserWithClinicOut:
     """Any authenticated role (patient or admin) — unlike /patients/me, which is
     patient-only. Read-only; account edits still go through the role-specific flows
-    that already exist (patient profile PATCH, superadmin CLI for admins).
+    that already exist (patient profile PATCH, superadmin CLI for admins). Includes
+    the clinic's display name (see UserWithClinicOut) for the app header.
     """
-    return current_user
+    clinic = db.get(Clinic, current_user.clinic_id)
+    base = UserPublicOut.model_validate(current_user)
+    return UserWithClinicOut(**base.model_dump(), clinic_name=clinic.name if clinic else "")
 
 
 @router.post("/register", response_model=UserPublicOut, status_code=status.HTTP_201_CREATED)

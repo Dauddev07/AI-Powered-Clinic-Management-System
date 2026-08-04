@@ -3,10 +3,11 @@
 Extracted from app/api/appointments.py so the REST endpoints AND the chatbot's
 function-calling tools (app/services/chat_tools.py) call the exact same functions.
 Neither caller re-implements a single rule: slot locking, past-slot rejection,
-patient overlap, same-day cancel/reschedule refusal, ownership, the daily
-per-department cap, and the transactional all-or-nothing reschedule all live here
-only. Callers pass clinic_id/patient_id that they themselves sourced from a verified
-JWT — this module trusts whatever is handed to it, same as any other service layer.
+patient overlap, cancel/reschedule refusal within CANCEL_RESCHEDULE_CUTOFF of the
+appointment's start time, ownership, the daily per-department cap, and the
+transactional all-or-nothing reschedule all live here only. Callers pass
+clinic_id/patient_id that they themselves sourced from a verified JWT — this module
+trusts whatever is handed to it, same as any other service layer.
 
 Uses HTTPException as the error type even outside a request context: its
 status_code/detail pair is exactly the shape both a REST response and a chat tool's
@@ -14,7 +15,7 @@ error-to-natural-language translation need, so there's no reason to invent a sec
 exception type that just wraps the same two fields.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
@@ -33,6 +34,12 @@ from app.services.appointments import auto_complete_past_appointments
 from app.services.notifications import create_notification, format_appointment_datetime
 
 DAILY_DEPARTMENT_BOOKING_CAP = 2
+
+# How close to the appointment's own start time a patient can still cancel or
+# reschedule it — a flat cutoff by actual time remaining, not by calendar day, so an
+# appointment later today booked well outside this window is still changeable, and
+# one starting soon (even "tomorrow" by the clock, e.g. 12:30am) is correctly blocked.
+CANCEL_RESCHEDULE_CUTOFF = timedelta(hours=2)
 
 
 def serialize_appointment(db: Session, appointment: Appointment) -> AppointmentOut:
@@ -197,16 +204,13 @@ def cancel_appointment(db: Session, clinic_id: uuid.UUID, patient_id: uuid.UUID,
 
     slot = db.get(Slot, appointment.slot_id)
     clinic = db.get(Clinic, clinic_id)
-    tz = ZoneInfo(clinic.timezone)
-    today_local = datetime.now(tz).date()
-    appointment_local_date = slot.start_utc.astimezone(tz).date()
 
-    if appointment_local_date == today_local:
+    if slot.start_utc - datetime.now(timezone.utc) <= CANCEL_RESCHEDULE_CUTOFF:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "Appointments cannot be cancelled on the same day as the appointment. "
-                "Please contact the clinic directly for same-day changes."
+                "Appointments cannot be cancelled within 2 hours of the appointment time. "
+                "Please contact the clinic directly for last-minute changes."
             ),
         )
 
@@ -261,15 +265,13 @@ def reschedule_appointment(
     old_slot = db.get(Slot, appointment.slot_id)
     clinic = db.get(Clinic, clinic_id)
     tz = ZoneInfo(clinic.timezone)
-    today_local = datetime.now(tz).date()
-    old_appointment_local_date = old_slot.start_utc.astimezone(tz).date()
 
-    if old_appointment_local_date == today_local:
+    if old_slot.start_utc - datetime.now(timezone.utc) <= CANCEL_RESCHEDULE_CUTOFF:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "Appointments cannot be rescheduled on the same day as the appointment. "
-                "Please contact the clinic directly for same-day changes."
+                "Appointments cannot be rescheduled within 2 hours of the appointment time. "
+                "Please contact the clinic directly for last-minute changes."
             ),
         )
 

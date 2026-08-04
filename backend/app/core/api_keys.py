@@ -1,14 +1,16 @@
-"""Thread-safe round-robin rotation across up to 3 Groq API keys.
+"""Thread-safe round-robin rotation across up to 6 Groq API keys.
 
 Every ChatGroq instantiation in app.services.llm pulls its key from api_key_manager
 here instead of a single fixed settings.LLM_API_KEY — this covers every Groq call
-(primary model, fallback model, retry) uniformly, without any of that call-site
-logic needing to know rotation exists. Order is fixed Key1 -> Key2 -> Key3 -> Key1
-..., never randomized, so distribution across keys stays even and predictable.
+(every attempt in _MODEL_RETRY_SEQUENCE) uniformly, without any of that call-site
+logic needing to know rotation exists. Order is fixed Key1 -> Key2 -> Key3 -> Key4
+-> Key5 -> Key6 -> Key1 ..., never randomized, so distribution across keys stays
+even and predictable.
 
-Only whichever of LLM_API_KEY / LLM_API_KEY_2 / LLM_API_KEY_3 are actually non-empty
-participate — an environment with only LLM_API_KEY set (the pre-rotation default)
-still works exactly as before, just without anything to rotate across.
+Only whichever of LLM_API_KEY / LLM_API_KEY_2 / LLM_API_KEY_3 / LLM_API_KEY_4 /
+LLM_API_KEY_5 / LLM_API_KEY_6 are actually non-empty participate — an environment
+with only LLM_API_KEY set (the pre-rotation default) still works exactly as
+before, just without anything to rotate across.
 """
 import itertools
 import threading
@@ -33,4 +35,13 @@ class ApiKeyManager:
             return next(self._cycle)
 
 
-api_key_manager = ApiKeyManager([settings.LLM_API_KEY, settings.LLM_API_KEY_2, settings.LLM_API_KEY_3])
+api_key_manager = ApiKeyManager(
+    [
+        settings.LLM_API_KEY,
+        settings.LLM_API_KEY_2,
+        settings.LLM_API_KEY_3,
+        settings.LLM_API_KEY_4,
+        settings.LLM_API_KEY_5,
+        settings.LLM_API_KEY_6,
+    ]
+)

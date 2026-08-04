@@ -8,10 +8,11 @@ import styles from "./AppHeader.module.css";
 
 const SECTION_IDS = ["departments-heading", "why-us-heading", "how-it-works-heading", "about-heading"];
 
-// Public landing nav only now — the authenticated patient/admin nav has moved
-// to the account menu (see SettingsMenu), so a signed-in visitor sees the
-// logo on the left and a home icon + account launcher grouped at the far
-// right of the header.
+// Public landing nav only now - the authenticated patient/admin nav has moved
+// to the account menu (see SettingsMenu). The brand mark (Logo) at the header's
+// left stays the same everywhere - login/register, landing, and the
+// authenticated patient/admin dashboards - rather than swapping to a
+// clinic-name text for signed-in users.
 export default function AppHeader() {
   const location = useLocation();
   const { isAuthenticated, user } = useAuth();
@@ -48,7 +49,7 @@ export default function AppHeader() {
   // Highlights whichever on-page section is currently in view while scrolling
   // the landing page, so the header nav reflects where the visitor actually is.
   // Tracks the last section heading that has scrolled past the sticky header
-  // rather than watching a thin band around the viewport's center — a
+  // rather than watching a thin band around the viewport's center - a
   // center-band approach goes stale for tall sections (e.g. the department
   // grid), whose heading exits the band long before its content does.
   useEffect(() => {
@@ -62,7 +63,7 @@ export default function AppHeader() {
     const updateActive = () => {
       ticking = false;
       // A short last section (e.g. About) can run out of page to scroll
-      // before its heading ever reaches the offset line below — snap to it
+      // before its heading ever reaches the offset line below - snap to it
       // once the page itself is scrolled to the bottom.
       const atBottom =
         window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
@@ -100,7 +101,7 @@ export default function AppHeader() {
   const closeMobileNav = () => setMobileNavOpen(false);
 
   // Scrolls directly on click rather than relying solely on the location-hash
-  // effect on the Landing page — that effect only fires when the hash string
+  // effect on the Landing page - that effect only fires when the hash string
   // actually changes, so clicking the same anchor twice in a row (or landing
   // on it via a different path) would otherwise silently do nothing.
   const handleAnchorClick = (id) => (e) => {
@@ -116,18 +117,18 @@ export default function AppHeader() {
   return (
     <header className={styles.header} ref={headerRef}>
       <div className={styles.headerStart}>
-        {isAuthenticated ? (
-          <SettingsMenu />
-        ) : (
-          <Link to="/" className={styles.brand}>
-            <Logo />
-          </Link>
-        )}
+        {/* Clicking this while authenticated takes the patient/admin out to
+            the public landing page (see the "Back to Dashboard" button
+            there, Landing.jsx) rather than back to their own dashboard,
+            which the home icon at the header's other end already covers. */}
+        <Link to="/" className={styles.brand}>
+          <Logo />
+        </Link>
       </div>
 
       {isAuthenticated && (
         <div className={styles.headerEnd}>
-          {/* Clicking this while already on the dashboard still navigates —
+          {/* Clicking this while already on the dashboard still navigates -
               react-router mints a fresh location.key for a Link to the
               current path, which remounts the routed page (see App.jsx's
               page-transition wrapper) and re-runs its data fetch, so it
@@ -160,9 +161,11 @@ export default function AppHeader() {
             </svg>
           </Link>
           {/* Notifications only exist for patient-initiated booking events (see
-              app/services/notifications.py) — there's no admin notification type
+              app/services/notifications.py) - there's no admin notification type
               yet, so the bell is patient-only rather than shown for every role. */}
           {user?.role === "patient" && <NotificationBell />}
+          {/* Account launcher - rightmost element in the header. */}
+          <SettingsMenu />
         </div>
       )}
 

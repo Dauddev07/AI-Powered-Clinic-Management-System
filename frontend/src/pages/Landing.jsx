@@ -1,5 +1,5 @@
 import { Fragment, useEffect } from "react";
-import { Link, Navigate, useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import Logo from "../components/Logo";
 import { useReveal, revealDelayClass } from "../hooks/useReveal";
@@ -70,12 +70,6 @@ export default function Landing() {
     if (el) el.scrollIntoView({ behavior: "smooth" });
   }, [location.hash]);
 
-  if (isAuthenticated) {
-    return (
-      <Navigate to={user?.role === "admin" ? "/admin" : "/patient"} replace />
-    );
-  }
-
   return (
     <div className={styles.page}>
       <p className={styles.emergencyBanner} role="note">
@@ -107,6 +101,16 @@ export default function Landing() {
             Quick Check Clinic lets you find a doctor, book an appointment, and
             manage your visits — all in one calm, simple place.
           </p>
+          {/* Shown only to a signed-in patient/admin who navigated here from the
+              header's clinic-name link (see AppHeader.jsx) — lets them return to
+              their dashboard without logging in again, rather than this page
+              auto-redirecting them straight back out (the previous behavior),
+              which would have made visiting it from the header pointless. */}
+          {isAuthenticated && (
+            <Link to={user?.role === "admin" ? "/admin" : "/patient"} className={styles.backToDashboardBtn}>
+              Back to Dashboard
+            </Link>
+          )}
         </div>
       </section>
 
@@ -131,9 +135,11 @@ export default function Landing() {
                 className={`reveal ${revealDelayClass(i % 6)}`}
                 ref={register}
               >
-                {/* Booking requires an account, and the landing page is only ever shown to
-                    signed-out visitors (an authenticated visit redirects above), so the useful
-                    next step from any department card is creating an account. */}
+                {/* Booking requires an account — the useful next step from any department
+                    card for a signed-out visitor is creating one. (A signed-in visitor can
+                    also reach this page now, via the header's clinic-name link — see the
+                    "Back to Dashboard" button above — but still has no account-scoped
+                    department browsing here to link to instead, so this stays as-is.) */}
                 <Link
                   to="/register"
                   className={styles.deptCard}

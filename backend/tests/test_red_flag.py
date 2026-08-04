@@ -57,6 +57,24 @@ def test_shortness_of_breath_specifically_fires():
     assert detect_red_flag("I have shortness of breath and feel dizzy")
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "no shortness of breath",
+        "not short of breath",
+        "there's no shortness of breath",
+        "no trouble breathing",
+        "it's not shortness of breath, just mild",
+    ],
+)
+def test_explicitly_denied_breathing_difficulty_does_not_false_fire(message):
+    # Reported live: a patient's own reassurance ("no shortness of breath") still
+    # tripped the emergency short-circuit before the LLM ever saw the message, since
+    # the phrase matched regardless of the negation word right in front of it — same
+    # failure mode as the bleeding-severity patterns below, fixed the same way.
+    assert not detect_red_flag(message)
+
+
 # --- stroke signs ---------------------------------------------------------------------
 
 

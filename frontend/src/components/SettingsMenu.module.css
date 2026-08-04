@@ -1,9 +1,13 @@
-/* Rendered inline as the header's leftmost item now (see AppHeader.jsx) —
+/* Rendered inline as the header's rightmost item now (see AppHeader.jsx) —
    no fixed positioning of its own; the backdrop/panel below stay position:
    fixed regardless of where in the DOM this trigger lives. */
 .launcher {
   display: inline-flex;
   flex: none;
+  /* Extra breathing room from the home icon/notification bell it now sits next
+     to in the header (see AppHeader.jsx) — .headerEnd's own gap is tuned for
+     those two, which read as more of a pair than either does with this. */
+  margin-left: 0.75rem;
 }
 
 .avatarBtn {
@@ -47,15 +51,15 @@
   pointer-events: auto;
 }
 
-/* Fixed, full-height, docked to the left edge — its own dedicated width means
+/* Fixed, full-height, docked to the right edge — its own dedicated width means
    nothing inside it ever has to compete for space with page content the way
-   the old bottom-left card popup did. Off-canvas (translateX(-100%)) rather
+   the old bottom-left card popup did. Off-canvas (translateX(100%)) rather
    than unmounted while closed, so both open and close animate instead of the
    panel just appearing/disappearing. */
 .panel {
   position: fixed;
   top: 0;
-  left: 0;
+  right: 0;
   bottom: 0;
   z-index: 81;
   width: min(340px, 88vw);
@@ -63,9 +67,9 @@
   display: flex;
   flex-direction: column;
   background: var(--app-bg-card);
-  border-right: 1px solid var(--app-border);
-  box-shadow: 8px 0 32px var(--app-shadow);
-  transform: translateX(-100%);
+  border-left: 1px solid var(--app-border);
+  box-shadow: -8px 0 32px var(--app-shadow);
+  transform: translateX(100%);
   transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
   overflow-y: auto;
   overflow-x: hidden;

@@ -102,7 +102,7 @@ function MenuRow({ icon, children, chevron }) {
 }
 
 // Account launcher rendered as the header's rightmost item (see AppHeader.jsx),
-// opening a fixed, full-height left-docked side panel (overlay + dimmed
+// opening a fixed, full-height right-docked side panel (overlay + dimmed
 // backdrop, not a push layout — pushing the whole app's content sideways for
 // an account menu would fight every page's own responsive layout far more
 // than an overlay does). The panel/backdrop are position: fixed regardless of

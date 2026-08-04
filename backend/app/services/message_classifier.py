@@ -27,7 +27,12 @@ from langchain_groq import ChatGroq
 
 from app.core.api_keys import api_key_manager
 from app.core.config import settings
-from app.services.chat_markers import DOCTOR_OPTIONS_MARKER
+from app.services.chat_markers import (
+    BOOKING_MARKER,
+    DEPARTMENT_LIST_MARKER,
+    DOCTOR_DISAMBIGUATION_MARKER,
+    DOCTOR_OPTIONS_MARKER,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,16 +59,31 @@ _CONVERSATIONAL_PHRASES = frozenset({
 # specific (unlike the broad, over-inclusive knowledge-seeking keyword list below):
 # a false positive here would let a real question skip grounding, so this only
 # matches clearly self-referential phrasing, not just any question with "I" in it.
+#
+# The "recall verb" group + flexible "what ... did/have ... i/we ... VERB" pattern
+# below replaced a growing list of individually-enumerated fixed phrases after this
+# same gap kept recurring for new phrasings the fixed list never anticipated
+# ("what have i described to u?", then "what i have discussed with u", then "what
+# info did i tell u" — each one a slightly different word order or an extra filler
+# word the old list didn't happen to include). Rather than add another one-off
+# phrase every time, this matches ANY "what ... (did|have) ... (i|we) ... <recall
+# verb>" shape regardless of word order (auxiliary-first "what have I discussed" or
+# subject-first "what I have discussed") or filler words in between ("what all did
+# I tell you", "what info did I tell u") — bounded gaps keep it from drifting into
+# an unrelated sentence, and requiring a past-tense-shaped auxiliary (did/have)
+# keeps it from matching a prospective question like "what should I tell the
+# doctor" (no did/have there at all, so it can't match).
+_RECALL_VERBS = r"(?:tell|told|say|said|share|shared|mention|mentioned|describe|described|discuss|discussed|talk|talked)"
+
 _PERSONAL_RECALL_RE = re.compile(
     r"\b("
     r"what(?:'s|s| is) my name"
-    r"|what did i (?:tell|say|mention)"
-    r"|what did i just (?:tell|say|mention)"
     r"|do you remember (?:what|that) i"
     r"|what do you (?:know|remember) about me"
     r"|what did you (?:say|tell) (?:i|me)"
-    r"|remind me what i (?:said|told)"
-    r"|what have i (?:told|said)"
+    r"|remind me what i (?:said|told|shared|described|discussed|talked about)"
+    r"|what are the things i (?:told|said|shared|mentioned|described|discussed)"
+    rf"|what\b.{{0,25}}\b(?:did\b.{{0,10}}\b(?:i|we)|have\b.{{0,10}}\b(?:i|we)|(?:i|we)\b.{{0,10}}\bhave)\b.{{0,20}}\b{_RECALL_VERBS}"
     r")\b",
     re.IGNORECASE,
 )
@@ -89,22 +109,158 @@ _LOGISTICS_KEYWORDS = frozenset({
     "policy", "policies", "contact", "phone", "email", "holiday", "holidays", "weekend",
 })
 
-# Common symptom/complaint vocabulary (including Roman Urdu, since a symptom
-# mention shouldn't slip through undetected just because it's not in English) —
-# used both by the broad knowledge-seeking heuristic below and by
-# is_symptom_message() to decide chat.py's retrieval routing (real department-list
-# context instead of medical_kb retrieval, which no longer exists).
+# Common symptom/complaint vocabulary — used both by the broad knowledge-seeking
+# heuristic below and by is_symptom_message() to decide chat.py's retrieval routing
+# (real department-list context instead of medical_kb retrieval, which no longer
+# exists). English only — this system is English-specific, Roman Urdu is out of
+# scope (same as app.services.language, which only detects English vs. real Urdu
+# script, never Roman Urdu).
 _SYMPTOM_KEYWORDS = frozenset({
     "pain", "ache", "aches", "aching", "fever", "cough", "symptom", "symptoms",
     "headache", "cold", "flu", "medicine", "medication", "prescription", "treatment",
     "diagnosis", "sick", "ill", "illness", "hurt", "hurts", "injury", "injured",
     "dizzy", "dizziness", "nausea", "vomit", "vomiting", "rash", "allergy", "allergic",
-    "bukhar", "dard", "khansi", "tabiyat", "kamzori", "zukam",
+    # Fractures/sprains/soft-tissue trauma — the gap that let "my hand got broken"
+    # slip through undetected entirely.
+    "broken", "break", "fracture", "fractured", "sprain", "sprained", "twisted",
+    "dislocated", "dislocation",
+    # Swelling/bruising/wounds
+    "swollen", "swelling", "bruise", "bruised", "bleeding", "bled", "cut", "wound",
+    "wounded", "gash", "blister", "blisters",
+    # Sensation/weakness
+    "numb", "numbness", "tingling", "weak", "weakness", "fatigue", "faint", "fainted",
+    "stiff", "stiffness",
+    # Respiratory/circulatory
+    "breathless", "wheeze", "wheezing", "palpitations", "chills", "sweating",
+    # Digestive
+    "diarrhea", "diarrhoea", "constipation", "cramp", "cramps", "bloating",
+    # Skin/infection
+    "infection", "infected", "itchy", "itching", "sting", "stung", "bite", "bitten",
+    "burn", "burned", "burning",
+    # Common named complaints
+    "migraine", "sore", "toothache", "earache", "backache", "stomachache", "nosebleed",
+    "lump", "bump", "discharge",
 })
 
 # Deliberately broad and erring toward false positives (routing more things to
 # knowledge_seeking than strictly necessary) per this module's fail-safe design.
 _KNOWLEDGE_KEYWORDS = _LOGISTICS_KEYWORDS | _SYMPTOM_KEYWORDS
+
+
+# PATH 2's own named-symptom list (llm.py's _TRIAGE_SECTION) — mirrored here only
+# to decide whether PATH 2's body is worth sending, deliberately broad/over-inclusive
+# since a false positive here just means PATH 2 stays included (the safe direction),
+# while a false negative would drop real screening guidance for a symptom that
+# needed it.
+_PATH2_SYMPTOM_KEYWORDS = frozenset({
+    "chest", "dizziness", "dizzy", "lightheaded", "lightheadedness", "faint",
+    "fainting", "fainted", "vomiting", "diarrhea", "diarrhoea", "sprain", "sprained",
+    "fracture", "fractured", "burn", "burned", "burning", "palpitations", "bite",
+    "bitten", "pregnant", "pregnancy",
+})
+
+_PATH2_SYMPTOM_PHRASES = (
+    "chest pain", "chest tightness", "chest pressure", "head pain", "severe headache",
+    "broken bone", "suspected fracture", "abdominal pain", "stomach pain",
+    "high fever", "persistent fever", "back pain", "deep cut", "vision change",
+    "vision loss", "vision changes", "ear pain", "tooth pain", "racing heart",
+    "irregular heart", "racing heartbeat", "irregular heartbeat",
+)
+
+# Reported live: "i am having pain in stomach" did NOT trigger PATH 2 screening and
+# routed straight to General Medicine with slots shown — _PATH2_SYMPTOM_PHRASES only
+# matches the fixed word order "stomach pain", not "pain in stomach", which is
+# exactly how a lot of patients actually phrase it. A fixed-phrase substring check is
+# inherently order-dependent; this is the order-independent backstop: any message
+# that mentions "pain" as its own word AND names one of these body parts, in either
+# order and with words in between, still needs PATH 2's screening question.
+_PATH2_PAIN_BODY_PARTS = frozenset({
+    "stomach", "abdominal", "abdomen", "chest", "head", "back", "ear", "tooth", "teeth",
+})
+
+# The one exception that skips PATH 2's screening question entirely (see
+# _TRIAGE_SECTION's EXCEPTION paragraph, which physically lives inside PATH 2's
+# body) — a message matching this must keep PATH 2 included, since the EXCEPTION
+# text itself is what tells the model to route straight to PATH 1 for this case.
+_MAJOR_BONE_FRACTURE_RE = re.compile(
+    r"\b(leg|hip|thigh|pelvis|spine)\b.{0,20}\b(broken|broke|fracture[d]?)\b"
+    r"|\b(broken|broke|fracture[d]?)\b.{0,20}\b(leg|hip|thigh|pelvis|spine)\b",
+    re.IGNORECASE,
+)
+
+
+def needs_path2_screening(message: str, history=None) -> bool:
+    """True when PATH 2's body (screening question, named-symptom list, the
+    major-bone EXCEPTION, the one-round limit) should be included this turn — see
+    app.services.llm.run_chat_agent's include_path2. Deliberately biased toward
+    True: only returns False for a confident, clean routine-symptom match with no
+    plausible screening need at all — every other case, including genuine
+    ambiguity, defaults to keeping PATH 2 included."""
+    lowered = message.lower()
+    words = set(re.findall(r"[a-z0-9]+", lowered))
+    if words & _PATH2_SYMPTOM_KEYWORDS:
+        return True
+    if any(phrase in lowered for phrase in _PATH2_SYMPTOM_PHRASES):
+        return True
+    if "pain" in words and words & _PATH2_PAIN_BODY_PARTS:
+        return True
+    if _preceding_assistant_turn_looks_like_a_question(history):
+        return True
+    if _MAJOR_BONE_FRACTURE_RE.search(message):
+        return True
+    return False
+
+
+def is_personal_recall_message(message: str) -> bool:
+    """True when the message is the patient directly asking the assistant to recall
+    something they themselves said earlier (e.g. "what's my name", "what are the
+    things I told you"). Used by app.services.orchestrator.agents.general_info_agent
+    to answer such a question deterministically from PATIENT MEMORY in code, rather
+    than trusting the model to reliably surface it from a long system prompt — live
+    testing showed even the primary model would still say "I don't have any details"
+    despite the memory being correctly present in the prompt with explicit
+    instructions to use it, a reliability gap this sidesteps entirely."""
+    return bool(_PERSONAL_RECALL_RE.search(message.strip()))
+
+
+# Reported live: "what are the available depts" / "show me available depts" wasn't
+# recognized at all — it contains "available", one of _BOOKING_ACTION_KEYWORDS below,
+# so the router sent it to appointment_agent (which has no tool that can list every
+# department — get_department_availability requires one specific department_name),
+# leaving nothing that could actually answer it. This is a request for the full
+# department list, not availability for one named department or a booking action —
+# a distinct case that needs its own deterministic detection and short-circuit (see
+# app.services.orchestrator.router and app.services.orchestrator.agents.
+# general_info_agent), the same "answer from real DB rows in code, never trust the
+# model to compose it" principle already used for personal recall above.
+#
+# Requires the PLURAL "departments"/"depts" specifically — "what department is Dr.
+# Smith in" (singular, about one specific doctor) must NOT match this, since that's
+# an entirely different question this pattern has no business answering. The
+# "all/every" alternative allows the singular too ("every department" is correct,
+# unambiguous English for the full list despite the singular noun).
+# NOTE: "dept" is NOT a prefix of "department" ("dep-a-rtment" vs "dep-t") — they're
+# matched as a genuine alternation, not concatenated as one shared stem.
+_DEPT_WORD = r"(?:dept|department)s"
+_DEPT_WORD_ANY = r"(?:dept|department)s?"
+
+_DEPARTMENT_LIST_RE = re.compile(
+    rf"\b("
+    rf"(?:what|which)\s+(?:are\s+)?(?:the\s+)?(?:available\s+)?{_DEPT_WORD}\b"
+    rf"|show\s+(?:me\s+)?(?:the\s+)?(?:available\s+)?{_DEPT_WORD}\b"
+    rf"|list\s+(?:of\s+)?(?:the\s+)?(?:available\s+)?{_DEPT_WORD}\b"
+    rf"|(?:all|every)\s+{_DEPT_WORD_ANY}\b"
+    rf"|available\s+{_DEPT_WORD}\b"
+    rf")",
+    re.IGNORECASE,
+)
+
+
+def is_department_list_request(message: str) -> bool:
+    """True when the patient is asking for the full list of departments the clinic
+    has, not asking about one specific named department/doctor. See the module-level
+    comment above _DEPARTMENT_LIST_RE for why plural is required."""
+    return bool(_DEPARTMENT_LIST_RE.search(message.strip()))
 
 
 def is_symptom_message(message: str) -> bool:
@@ -136,6 +292,63 @@ def _preceding_assistant_turn_looks_like_a_question(history) -> bool:
     if content.startswith(DOCTOR_OPTIONS_MARKER):
         return True
     return content.endswith("?") or content.endswith("؟")
+
+
+# Booking-action intent vocabulary for needs_booking_action_tools() below —
+# deliberately broad/over-inclusive, same fail-safe philosophy as
+# _KNOWLEDGE_KEYWORDS: binding book_appointment/reschedule_appointment/
+# cancel_appointment unnecessarily costs a few hundred prompt tokens; omitting one
+# that's actually needed breaks the booking flow outright. The asymmetry means this
+# should err toward matching too much, never too little.
+_BOOKING_ACTION_KEYWORDS = frozenset({
+    "book", "booking", "appointment", "appointments", "schedule", "reschedule",
+    "rescheduling", "cancel", "cancellation", "cancelled", "canceling", "cancelling",
+    "postpone", "postponing", "confirm", "confirmed", "slot", "slots",
+    # Reported gap: "is there any cardiologist available on Friday?" named no booking
+    # action word at all, so it fell through to general_info_agent (KB-only, no
+    # get_department_availability tool) and got answered from static Retrieved
+    # context prose about typical hours instead of real, current slots. "available"/
+    # "availability" is exactly how patients ask this without ever saying "book" or
+    # "slot" — must route to a tool-bound agent same as those do.
+    "available", "availability",
+})
+
+# Phrasal cancel/reschedule intent that a single-word keyword check would miss —
+# "I can't make it anymore" carries the same intent as "cancel" without using that
+# word at all.
+_BOOKING_ACTION_PHRASES = (
+    "can't make it", "cant make it", "won't be able to make it", "wont be able to make it",
+    "no longer need", "don't need it anymore", "dont need it anymore", "never mind",
+)
+
+
+def needs_booking_action_tools(message: str, history=None) -> bool:
+    """True when book_appointment/reschedule_appointment/cancel_appointment should be
+    bound for this agent turn (see app.services.chat_tools.build_tools). Deliberately
+    biased to return True whenever genuinely unsure — see the keyword-set comment
+    above for why that asymmetry matters. Only returns False when NONE of: the
+    message itself names a booking action, the conversation is already mid-question
+    (could be a slot pick or booking confirmation), or availability/booking has
+    already been shown earlier this session (a reschedule/cancel of THAT could come
+    up at any later point)."""
+    lowered = message.lower()
+    words = set(re.findall(r"[a-z0-9']+", lowered))
+    if words & _BOOKING_ACTION_KEYWORDS:
+        return True
+    if any(phrase in lowered for phrase in _BOOKING_ACTION_PHRASES):
+        return True
+    if _preceding_assistant_turn_looks_like_a_question(history):
+        return True
+    if history:
+        for row in history:
+            if getattr(row, "role", None) != "assistant":
+                continue
+            content = getattr(row, "content", "") or ""
+            if content.startswith(
+                (DOCTOR_OPTIONS_MARKER, DEPARTMENT_LIST_MARKER, BOOKING_MARKER, DOCTOR_DISAMBIGUATION_MARKER)
+            ):
+                return True
+    return False
 
 
 def _heuristic_classify(message: str, history=None) -> str | None:
@@ -233,7 +446,7 @@ def _llm_classify(message: str) -> str:
         return KNOWLEDGE_SEEKING
 
     try:
-        llm = ChatGroq(model=settings.GROQ_MODEL, api_key=api_key_manager.next_key(), temperature=0.0)
+        llm = ChatGroq(model=settings.GROQ_HELPER_MODEL, api_key=api_key_manager.next_key(), temperature=0.0)
         raw = llm.invoke(
             [SystemMessage(content=_CLASSIFY_SYSTEM_PROMPT), HumanMessage(content=message)]
         ).content.strip().upper()

@@ -11,7 +11,7 @@ from app.models.department import Department
 from app.models.doctor import Doctor
 from app.models.slot import Slot
 from app.models.user import User
-from app.services.chat_markers import BOOKING_MARKER, DEPARTMENT_LIST_MARKER, DOCTOR_OPTIONS_MARKER
+from app.services.chat_markers import BOOKING_MARKER, DEPARTMENT_LIST_MARKER, DOCTOR_OPTIONS_MARKER, NO_SLOTS_MARKER
 from app.services.chat_tools import (
     _book_appointment_impl,
     _cancel_appointment_impl,
@@ -21,6 +21,7 @@ from app.services.chat_tools import (
     _reschedule_appointment_impl,
     build_tools,
     combine_department_availability_results,
+    resolve_bare_weekday_window,
 )
 from app.services.department_availability import MAX_SLOTS_PER_DOCTOR
 
@@ -207,16 +208,69 @@ def test_reschedule_lost_race_apologizes_and_offers_fresh_alternatives(db, clini
 # --- cancel_appointment: verbatim REST-message pass-through --------------------------
 
 
-def test_cancel_appointment_same_day_refusal_matches_rest_endpoint_message(db, clinic, doctor, patient, ctx):
-    today_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(hours=1))
-    appointment = _appointment(db, clinic, patient, doctor, today_slot)
+def test_cancel_appointment_within_cutoff_refusal_matches_rest_endpoint_message(db, clinic, doctor, patient, ctx):
+    soon_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(hours=1))
+    appointment = _appointment(db, clinic, patient, doctor, soon_slot)
 
     result = _cancel_appointment_impl(db, ctx, str(appointment.id))
 
     assert result == (
-        "Appointments cannot be cancelled on the same day as the appointment. "
-        "Please contact the clinic directly for same-day changes."
+        "Appointments cannot be cancelled within 2 hours of the appointment time. "
+        "Please contact the clinic directly for last-minute changes."
     )
+
+
+def test_cancel_appointment_later_today_but_outside_cutoff_now_succeeds(db, clinic, doctor, patient, ctx):
+    # The restriction is a flat 2-hour window by actual time remaining, not "same
+    # calendar day" — a slot 6 hours away, even though still "today," must now be
+    # cancellable, which the old same-day rule would have wrongly refused.
+    later_today_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(hours=6))
+    appointment = _appointment(db, clinic, patient, doctor, later_today_slot)
+
+    result = _cancel_appointment_impl(db, ctx, str(appointment.id))
+
+    assert "cannot be cancelled" not in result
+    assert "has been cancelled" in result
+
+
+def test_cancel_appointment_within_cutoff_refused_regardless_of_calendar_day(db, clinic, doctor, patient, ctx):
+    # The flip side: a slot within 2 hours from now must still be blocked even if it
+    # falls on the NEXT calendar day (e.g. a request made at 11:15pm for a 12:30am
+    # slot) — the old same-day-only rule would have wrongly allowed this.
+    soon_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(minutes=90))
+    appointment = _appointment(db, clinic, patient, doctor, soon_slot)
+
+    result = _cancel_appointment_impl(db, ctx, str(appointment.id))
+
+    assert result == (
+        "Appointments cannot be cancelled within 2 hours of the appointment time. "
+        "Please contact the clinic directly for last-minute changes."
+    )
+
+
+def test_reschedule_appointment_within_cutoff_refusal_matches_rest_endpoint_message(
+    db, clinic, doctor, patient, ctx
+):
+    soon_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(hours=1))
+    new_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=2))
+    appointment = _appointment(db, clinic, patient, doctor, soon_slot)
+
+    result = _reschedule_appointment_impl(db, ctx, str(appointment.id), str(new_slot.id))
+
+    assert result == (
+        "Appointments cannot be rescheduled within 2 hours of the appointment time. "
+        "Please contact the clinic directly for last-minute changes."
+    )
+
+
+def test_reschedule_appointment_later_today_but_outside_cutoff_now_succeeds(db, clinic, doctor, patient, ctx):
+    later_today_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(hours=6))
+    new_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=2))
+    appointment = _appointment(db, clinic, patient, doctor, later_today_slot)
+
+    result = _reschedule_appointment_impl(db, ctx, str(appointment.id), str(new_slot.id))
+
+    assert "cannot be rescheduled" not in result
 
 
 def test_cancel_appointment_success_gives_plain_confirmation_sentence(db, clinic, doctor, patient, ctx):
@@ -228,6 +282,96 @@ def test_cancel_appointment_success_gives_plain_confirmation_sentence(db, clinic
     assert "Dr. Jane Example" in result
     assert "Cardiology" in result
     assert "cancelled" in result.lower()
+
+
+# --- list_upcoming_appointments (appointment_agent's deterministic ambiguity check) --
+
+
+def test_list_upcoming_appointments_returns_only_confirmed_future_ones(db, clinic, doctor, patient, ctx):
+    future_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=2))
+    past_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) - timedelta(days=2))
+    cancelled_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=3))
+    _appointment(db, clinic, patient, doctor, future_slot)
+    _appointment(db, clinic, patient, doctor, past_slot, status="completed")
+    _appointment(db, clinic, patient, doctor, cancelled_slot, status="cancelled")
+
+    from app.services.chat_tools import list_upcoming_appointments
+
+    result = list_upcoming_appointments(db, ctx)
+
+    assert len(result) == 1
+    assert result[0]["doctor_name"] == "Dr. Jane Example"
+    assert result[0]["department_name"] == "Cardiology"
+    assert result[0]["appointment_id"]
+    assert result[0]["when"]
+
+
+def test_list_upcoming_appointments_empty_when_none(db, ctx):
+    from app.services.chat_tools import list_upcoming_appointments
+
+    assert list_upcoming_appointments(db, ctx) == []
+
+
+# --- build_tools: reschedule/cancel redirect (deterministic tool-level enforcement) --
+
+
+def test_build_tools_redirects_book_appointment_to_reschedule_when_redirect_id_set(
+    db, clinic, doctor, patient, ctx
+):
+    # Reported live: the model still called book_appointment for a reschedule's
+    # slot-pick despite an explicit prompt rule against it, creating a stray
+    # duplicate appointment instead of moving the existing one. This is the
+    # deterministic enforcement that makes the outcome correct regardless of which
+    # tool the model actually calls.
+    existing_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=1))
+    appointment = _appointment(db, clinic, patient, doctor, existing_slot)
+    new_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=3))
+
+    tools = build_tools(db, ctx, reschedule_redirect_appointment_id=str(appointment.id))
+    book_tool = next(t for t in tools if t.name == "book_appointment")
+
+    result = book_tool.invoke({"slot_id": str(new_slot.id)})
+
+    payload = _parse_marker(result, BOOKING_MARKER)
+    assert payload["note"] == "Your appointment has been rescheduled."
+    # Still exactly one appointment for this patient — not a new, second one.
+    from sqlalchemy import select
+
+    from app.models.appointment import Appointment
+
+    all_appointments = db.execute(
+        select(Appointment).where(Appointment.patient_id == patient.id, Appointment.status == "confirmed")
+    ).scalars().all()
+    assert len(all_appointments) == 1
+    assert all_appointments[0].slot_id == new_slot.id
+
+
+def test_build_tools_forces_cancel_appointment_to_use_redirect_id_regardless_of_model_arg(
+    db, clinic, doctor, patient, ctx
+):
+    real_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=1))
+    real_appointment = _appointment(db, clinic, patient, doctor, real_slot)
+
+    tools = build_tools(db, ctx, cancel_redirect_appointment_id=str(real_appointment.id))
+    cancel_tool = next(t for t in tools if t.name == "cancel_appointment")
+
+    # The model supplies a bogus/wrong id — the redirect must still win.
+    result = cancel_tool.invoke({"appointment_id": str(uuid.uuid4())})
+
+    assert "has been cancelled" in result
+    assert "Dr. Jane Example" in result
+
+
+def test_build_tools_without_redirect_ids_behaves_exactly_as_before(db, clinic, doctor, patient, ctx):
+    slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=1))
+
+    tools = build_tools(db, ctx)
+    book_tool = next(t for t in tools if t.name == "book_appointment")
+
+    result = book_tool.invoke({"slot_id": str(slot.id)})
+
+    payload = _parse_marker(result, BOOKING_MARKER)
+    assert payload.get("note") is None
 
 
 # --- get_department_availability: note threading -------------------------------------
@@ -256,7 +400,21 @@ def test_get_department_availability_unknown_department_is_plain_text_not_a_card
     result = _get_department_availability_impl(db, ctx, "Neurology")
 
     assert not result.startswith(DOCTOR_OPTIONS_MARKER)
+    assert not result.startswith(NO_SLOTS_MARKER)
     assert "couldn't find" in result.lower()
+
+
+def test_get_department_availability_found_but_no_free_slots_is_tagged_no_slots_marker(db, clinic, department, ctx):
+    # department exists (has a real doctor) but that doctor has no upcoming free
+    # slots — distinct from "department doesn't exist" (test above), and must stay
+    # distinguishable so a multi-department turn can still surface it instead of
+    # silently dropping it (see combine_department_availability_results below).
+    result = _get_department_availability_impl(db, ctx, "Cardiology")
+
+    assert result.startswith(NO_SLOTS_MARKER)
+    payload = json.loads(result[len(NO_SLOTS_MARKER):])
+    assert payload["department_name"] == "Cardiology"
+    assert "couldn't find any doctors" in payload["message"].lower()
 
 
 # --- get_my_appointments: structured data, never a raw dump on empty ----------------
@@ -344,6 +502,76 @@ def test_get_department_availability_malformed_earliest_date_is_ignored_not_an_e
     assert len(payload["doctors"][0]["slots"]) == 1
 
 
+# --- resolve_bare_weekday_window / build_tools forced_date_window -------------------
+# Reported live: "book a slot on sun" silently showed Friday's slots instead of
+# "nothing open Sunday, earliest is Friday" — the model never set earliest_date/
+# latest_date for the bare weekday. This resolves the weekday deterministically in
+# code and forces it onto the tool call regardless of what the model passes.
+
+
+def test_resolve_bare_weekday_window_resolves_full_weekday_name_to_next_occurrence():
+    today = datetime.now(timezone.utc).date()
+    # Today's own weekday name should resolve to today, not seven days out.
+    todays_name = today.strftime("%A")
+    assert resolve_bare_weekday_window(f"is there anything available on {todays_name}?") == (
+        today.isoformat(),
+        today.isoformat(),
+    )
+    # Three days out should resolve to that future date, not today.
+    future = today + timedelta(days=3)
+    future_name = future.strftime("%A")
+    assert resolve_bare_weekday_window(f"is there anything available on {future_name}?") == (
+        future.isoformat(),
+        future.isoformat(),
+    )
+
+
+def test_resolve_bare_weekday_window_resolves_abbreviation_after_a_preposition():
+    window = resolve_bare_weekday_window("book a slot on sun")
+    assert window is not None
+    earliest, latest = window
+    resolved = datetime.fromisoformat(earliest).date()
+    assert resolved.strftime("%A") == "Sunday"
+    assert earliest == latest
+
+
+def test_resolve_bare_weekday_window_none_when_no_weekday_named():
+    assert resolve_bare_weekday_window("book a slot for cardiology") is None
+
+
+def test_resolve_bare_weekday_window_none_for_a_bare_abbreviation_not_after_a_preposition():
+    # "sat"/"sun" collide with ordinary English words ("I sat down", "the sun is
+    # out") - only trigger when preceded by a date-shaped preposition.
+    assert resolve_bare_weekday_window("I sat in the waiting room") is None
+
+
+def test_resolve_bare_weekday_window_none_when_more_than_one_weekday_named():
+    assert resolve_bare_weekday_window("anything monday or tuesday?") is None
+
+
+def test_build_tools_forces_the_resolved_weekday_window_regardless_of_model_args(
+    db, clinic, department, doctor, patient, ctx
+):
+    now = datetime.now(timezone.utc)
+    # Find the next Sunday and put a slot there, plus a nearer slot on a different day.
+    days_until_sunday = (6 - now.weekday()) % 7 or 7
+    sunday = (now + timedelta(days=days_until_sunday)).date()
+    sunday_slot = _slot(db, clinic, doctor, datetime.combine(sunday, datetime.min.time(), tzinfo=timezone.utc) + timedelta(hours=9))
+    nearer_slot = _slot(db, clinic, doctor, now + timedelta(days=1))
+
+    forced_window = resolve_bare_weekday_window("book a slot on sun")
+    tools = build_tools(db, ctx, forced_date_window=forced_window)
+    availability_tool = next(t for t in tools if t.name == "get_department_availability")
+
+    # The model omits earliest_date/latest_date entirely, same as the live report.
+    result = availability_tool.invoke({"department_name": "Cardiology"})
+
+    payload = _parse_marker(result, DOCTOR_OPTIONS_MARKER)
+    slot_ids = {s["slot_id"] for doc in payload["doctors"] for s in doc["slots"]}
+    assert str(sunday_slot.id) in slot_ids
+    assert str(nearer_slot.id) not in slot_ids
+
+
 # --- combine_department_availability_results (item 4: multi-department combiner) ---
 
 
@@ -366,7 +594,70 @@ def test_combine_preserves_every_department_and_all_their_doctors():
     assert payload["departments"][1]["doctors"][0]["doctor_name"] == "Dr. B"
 
 
-def test_combine_skips_non_card_results_like_not_found_or_no_slots():
+def test_combine_preserves_each_departments_own_note():
+    # Reported live: a symptom-based multi-department reply (nose pain + skin
+    # issues -> ENT + Dermatology) showed both departments' doctors but explained
+    # the reasoning for neither — the note each call carried was silently dropped
+    # when merged into a DEPARTMENT_LIST_MARKER, even though the single-department
+    # card has always shown its note.
+    result_a = DOCTOR_OPTIONS_MARKER + json.dumps(
+        {
+            "note": "The nose pain points to ENT.",
+            "department_name": "ENT",
+            "doctors": [{"doctor_id": "d1", "doctor_name": "Dr. A", "specialization": None, "slots": []}],
+        }
+    )
+    result_b = DOCTOR_OPTIONS_MARKER + json.dumps(
+        {
+            "note": "The skin issue points to Dermatology.",
+            "department_name": "Dermatology",
+            "doctors": [{"doctor_id": "d2", "doctor_name": "Dr. B", "specialization": None, "slots": []}],
+        }
+    )
+
+    combined = combine_department_availability_results([result_a, result_b])
+
+    payload = json.loads(combined[len(DEPARTMENT_LIST_MARKER):])
+    notes = {d["department_name"]: d["note"] for d in payload["departments"]}
+    assert notes == {"ENT": "The nose pain points to ENT.", "Dermatology": "The skin issue points to Dermatology."}
+
+
+def test_combine_omits_note_when_the_department_was_named_directly_not_inferred():
+    # A direct request ("book me with a cardiologist") never gets a note in the
+    # first place (see the TOOL USE RULES' "Omit note entirely" rule) — this must
+    # not resurface reasoning for a case that genuinely never had any.
+    result_a = DOCTOR_OPTIONS_MARKER + json.dumps(
+        {"note": None, "department_name": "Cardiology", "doctors": [{"doctor_id": "d1", "doctor_name": "Dr. A", "specialization": None, "slots": []}]}
+    )
+    result_b = DOCTOR_OPTIONS_MARKER + json.dumps(
+        {"note": None, "department_name": "Dermatology", "doctors": [{"doctor_id": "d2", "doctor_name": "Dr. B", "specialization": None, "slots": []}]}
+    )
+
+    combined = combine_department_availability_results([result_a, result_b])
+
+    payload = json.loads(combined[len(DEPARTMENT_LIST_MARKER):])
+    assert all(d["note"] is None for d in payload["departments"])
+
+
+def test_combine_deduplicates_the_same_department_called_more_than_once():
+    # Reported bug: the model called get_department_availability twice for the same
+    # department in one turn (confused by a typo'd day name) and the same
+    # department/doctors/slots rendered twice, back-to-back, in the resulting card.
+    result_a = DOCTOR_OPTIONS_MARKER + json.dumps(
+        {"note": None, "department_name": "Cardiology", "doctors": [{"doctor_id": "d1", "doctor_name": "Dr. A", "specialization": None, "slots": []}]}
+    )
+    result_a_again = DOCTOR_OPTIONS_MARKER + json.dumps(
+        {"note": None, "department_name": "Cardiology", "doctors": [{"doctor_id": "d1", "doctor_name": "Dr. A", "specialization": None, "slots": []}]}
+    )
+
+    combined = combine_department_availability_results([result_a, result_a_again])
+
+    payload = json.loads(combined[len(DEPARTMENT_LIST_MARKER):])
+    assert len(payload["departments"]) == 1
+    assert payload["departments"][0]["department_name"] == "Cardiology"
+
+
+def test_combine_skips_a_not_found_department_but_keeps_a_real_card():
     real_card = DOCTOR_OPTIONS_MARKER + json.dumps(
         {"note": None, "department_name": "Cardiology", "doctors": [{"doctor_id": "d1", "doctor_name": "Dr. A", "specialization": None, "slots": []}]}
     )
@@ -377,6 +668,38 @@ def test_combine_skips_non_card_results_like_not_found_or_no_slots():
     payload = json.loads(combined[len(DEPARTMENT_LIST_MARKER):])
     assert len(payload["departments"]) == 1
     assert payload["departments"][0]["department_name"] == "Cardiology"
+    assert payload["unavailable"] == []
+
+
+def test_combine_surfaces_a_real_department_with_no_free_slots_instead_of_dropping_it():
+    # Reported live: "neck pain and itchy skin" resolved Orthopedics (real card) and
+    # Dermatology (no doctor free) — the reply's own note named both departments, but
+    # the card only ever showed Orthopedics, with no mention of Dermatology at all.
+    real_card = DOCTOR_OPTIONS_MARKER + json.dumps(
+        {"note": None, "department_name": "Orthopedics", "doctors": [{"doctor_id": "d1", "doctor_name": "Dr. A", "specialization": None, "slots": []}]}
+    )
+    no_slots = NO_SLOTS_MARKER + json.dumps(
+        {"department_name": "Dermatology", "message": "I couldn't find any doctors with free upcoming slots in Dermatology right now. Please check back later or contact the clinic directly."}
+    )
+
+    combined = combine_department_availability_results([real_card, no_slots])
+
+    payload = json.loads(combined[len(DEPARTMENT_LIST_MARKER):])
+    assert [d["department_name"] for d in payload["departments"]] == ["Orthopedics"]
+    assert len(payload["unavailable"]) == 1
+    assert payload["unavailable"][0]["department_name"] == "Dermatology"
+    assert "dermatology" in payload["unavailable"][0]["message"].lower()
+
+
+def test_combine_with_only_no_slots_results_returns_their_messages_not_a_card():
+    no_slots_a = NO_SLOTS_MARKER + json.dumps({"department_name": "Cardiology", "message": "Nothing free in Cardiology."})
+    no_slots_b = NO_SLOTS_MARKER + json.dumps({"department_name": "Dermatology", "message": "Nothing free in Dermatology."})
+
+    combined = combine_department_availability_results([no_slots_a, no_slots_b])
+
+    assert not combined.startswith(DEPARTMENT_LIST_MARKER)
+    assert "Nothing free in Cardiology." in combined
+    assert "Nothing free in Dermatology." in combined
 
 
 def test_combine_with_no_real_results_returns_plain_text_not_a_card():
@@ -415,3 +738,29 @@ def test_build_tools_registers_find_doctors_by_name(db, ctx):
 
     assert "find_doctors_by_name" in names
     assert len(tools) == 6
+
+
+_BOOKING_ACTION_TOOL_NAMES = {"book_appointment", "reschedule_appointment", "cancel_appointment"}
+_INFO_TOOL_NAMES = {"get_my_appointments", "get_department_availability", "find_doctors_by_name"}
+
+
+def test_build_tools_omits_booking_action_tools_when_told_to(db, ctx):
+    tools = build_tools(db, ctx, include_booking_action_tools=False)
+    names = {t.name for t in tools}
+
+    assert names == _INFO_TOOL_NAMES
+    assert len(tools) == 3
+
+
+def test_build_tools_includes_booking_action_tools_by_default(db, ctx):
+    tools = build_tools(db, ctx)
+    names = {t.name for t in tools}
+
+    assert names == _INFO_TOOL_NAMES | _BOOKING_ACTION_TOOL_NAMES
+
+
+def test_build_tools_includes_booking_action_tools_when_explicitly_true(db, ctx):
+    tools = build_tools(db, ctx, include_booking_action_tools=True)
+    names = {t.name for t in tools}
+
+    assert names == _INFO_TOOL_NAMES | _BOOKING_ACTION_TOOL_NAMES

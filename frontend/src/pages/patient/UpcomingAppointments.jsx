@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   cancelAppointment,
@@ -48,11 +48,17 @@ export default function UpcomingAppointments() {
   const [clinicTimezone, setClinicTimezone] = useState(null);
   const [error, setError] = useState(null);
   const showToast = useToast();
+  // Guards against React StrictMode's dev-only double-invocation of this effect
+  // (mount -> cleanup -> mount again, both runs seeing the same pre-navigation
+  // location.state) — without this, a fresh manual booking showed the same
+  // "Appointment booked successfully" toast twice, stacked at the top.
+  const bookingMessageShownRef = useRef(false);
 
   // Clear the navigation state once consumed, so refreshing or navigating back
   // to this page doesn't re-show the same booking confirmation.
   useEffect(() => {
-    if (location.state?.bookingMessage) {
+    if (location.state?.bookingMessage && !bookingMessageShownRef.current) {
+      bookingMessageShownRef.current = true;
       showToast(location.state.bookingMessage);
       navigate(location.pathname, { replace: true, state: {} });
     }

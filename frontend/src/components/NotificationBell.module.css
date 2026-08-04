@@ -113,6 +113,30 @@
   }
 }
 
+/* Reported live: on a narrow phone screen the panel rendered mostly off-canvas,
+   text clipped on both edges. Root cause is `position: absolute; right: 0`
+   anchoring to .wrapper (the bell button itself, which sits well right-of-center
+   in the header, not the screen edge) — on a wide screen that's fine because the
+   panel's fixed max-width fits comfortably to its left, but on a narrow screen
+   the bell can end up close enough to the header's own edge that the panel's
+   left edge is pushed past 0 while `min(380px, 100vw - 2rem)` still tries to
+   claim its full width, overflowing whichever side runs out of room first. Below
+   this width the panel switches to `position: fixed`, docked to the viewport's
+   own left/right edges (not the bell's position) and dropped just under the
+   header via --app-header-height (published by AppHeader.jsx) — this can never
+   overflow regardless of exactly where the bell icon sits. */
+@media (max-width: 480px) {
+  .panel {
+    position: fixed;
+    top: calc(var(--app-header-height, 64px) + 0.5rem);
+    left: 0.75rem;
+    right: 0.75rem;
+    width: auto;
+    max-height: calc(100vh - var(--app-header-height, 64px) - 1.5rem);
+    transform-origin: top center;
+  }
+}
+
 .panelHeader {
   display: flex;
   align-items: center;
@@ -127,6 +151,8 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
   font-size: var(--font-size-label);
   font-weight: 700;
   color: var(--app-text-title);
@@ -142,6 +168,13 @@
   font-weight: 700;
 }
 
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: none;
+}
+
 .markAllBtn {
   background: none;
   border: none;
@@ -155,6 +188,28 @@
 
 .markAllBtn:hover {
   text-decoration: underline;
+}
+
+.closeBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  margin-left: 0.15rem;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--app-text-subtitle);
+  cursor: pointer;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.closeBtn:hover {
+  background: var(--app-bg-card);
+  color: var(--app-accent);
 }
 
 .filterBar {

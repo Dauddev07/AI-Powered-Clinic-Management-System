@@ -54,7 +54,7 @@ class _FakeLLM:
     """Stand-in for a ChatGroq instance, wrapping a shared per-model iterator (see
     _patch_chat_groq) rather than owning its own — real code builds a brand-new
     ChatGroq(...).bind_tools(tools) on every call to _invoke_with_fallback, including
-    across separate run_chat_agent loop iterations reusing the same model, so the
+    across separate run_tool_calling_agent loop iterations reusing the same model, so the
     canned response queue for a given model must persist across multiple
     constructions, not restart from the top each time. bind_tools() is a no-op
     returning self, matching real ChatGroq usage."""
@@ -86,14 +86,14 @@ def _patch_chat_groq(monkeypatch, responses_by_model):
     monkeypatch.setattr(llm, "ChatGroq", _fake_chat_groq)
 
 
-# --- item: Groq-only retry sequence (gpt-oss-120b -> qwen/qwen3.6-27b -> gpt-oss-120b) ---
+# --- item: Groq-only retry sequence (same model, 6 attempts, 6 different keys) -----
 
 
-def test_retry_sequence_is_gpt_oss_then_qwen_then_gpt_oss_again():
-    first, second, third = llm._MODEL_RETRY_SEQUENCE
-    assert first == "openai/gpt-oss-120b"
-    assert second == "qwen/qwen3.6-27b"
-    assert third == "openai/gpt-oss-120b"
+def test_retry_sequence_is_the_same_primary_model_all_six_times():
+    # No second model (previously Qwen) in the sequence — every attempt retries on
+    # a different API key (see api_key_manager's own round-robin) rather than a
+    # different model, per explicit request. One attempt per configured key (6).
+    assert llm._MODEL_RETRY_SEQUENCE == ("openai/gpt-oss-120b",) * 6
 
 
 # --- token-reduction: reasoning_effort is model-specific, never one-size-fits-all --
@@ -109,16 +109,16 @@ def test_reasoning_effort_is_low_for_gpt_oss_models():
     assert llm._reasoning_effort_for("openai/gpt-oss-20b") == "low"
 
 
-def test_reasoning_effort_is_omitted_for_qwen():
-    # Reproduces a real 400 error verified directly against Groq's API: qwen rejects
-    # "low"/"medium"/"high" outright (the opposite constraint from gpt-oss) — passing
-    # it would break the qwen fallback attempt in the retry sequence every time it's
-    # actually needed (i.e. right when the primary model is rate-limited), silently
-    # degrading _MODEL_RETRY_SEQUENCE down to two real attempts instead of three.
+def test_reasoning_effort_is_omitted_for_a_non_gpt_oss_model():
+    # Not exercised by the current retry sequence (single-model now — see above),
+    # but _reasoning_effort_for stays a per-model function rather than a bare
+    # constant precisely so a future non-gpt-oss fallback doesn't silently get the
+    # wrong value and 400 every time it's actually needed. Reproduces a real 400
+    # verified directly against Groq's API for Qwen specifically.
     assert llm._reasoning_effort_for("qwen/qwen3.6-27b") is None
 
 
-def test_get_chat_reply_and_run_chat_agent_pass_per_model_reasoning_effort(monkeypatch):
+def test_run_plain_reply_and_run_tool_calling_agent_pass_per_model_reasoning_effort(monkeypatch):
     seen_kwargs = []
 
     def fake_chat_groq(**kwargs):
@@ -126,14 +126,13 @@ def test_get_chat_reply_and_run_chat_agent_pass_per_model_reasoning_effort(monke
         return _FakeLLM(iter([_FakeFinalResponse("hi")]))
 
     monkeypatch.setattr(llm, "ChatGroq", fake_chat_groq)
-    llm.get_chat_reply(message="hi", language="en", context_chunks=[], history=[])
+    llm.run_plain_reply("test system prompt", "hi", [])
 
     assert seen_kwargs[0]["reasoning_effort"] == "low"
     assert seen_kwargs[0]["model"] == "openai/gpt-oss-120b"
 
 
-def test_no_rate_limit_uses_the_primary_model_only_happy_path_unchanged(monkeypatch):
-    first, second, _third = llm._MODEL_RETRY_SEQUENCE
+def test_no_rate_limit_uses_a_single_attempt_only_happy_path_unchanged(monkeypatch):
     calls = []
 
     def _fake_chat_groq(model, **kwargs):
@@ -142,146 +141,165 @@ def test_no_rate_limit_uses_the_primary_model_only_happy_path_unchanged(monkeypa
 
     monkeypatch.setattr(llm, "ChatGroq", _fake_chat_groq)
 
-    result = llm.get_chat_reply(message="hi", language="en", context_chunks=[], history=[])
+    result = llm.run_plain_reply("test system prompt", "hi", [])
 
     assert result == "Hello there."
-    assert calls == [first]
-    assert second not in calls
+    assert calls == ["openai/gpt-oss-120b"]
 
 
-def test_rate_limit_on_gpt_oss_only_succeeds_via_qwen(monkeypatch):
-    first, second, _third = llm._MODEL_RETRY_SEQUENCE
+def test_rate_limit_on_first_key_succeeds_via_second_key(monkeypatch):
+    model = llm._MODEL_RETRY_SEQUENCE[0]
+    # Same model at every position now — its queue holds one entry per attempt,
+    # consumed in order regardless of which API key each attempt actually drew
+    # (key selection is api_key_manager's own concern, not this module's).
     _patch_chat_groq(
         monkeypatch,
-        {
-            first: [_rate_limit_error(first)],
-            second: [_FakeFinalResponse("Served by qwen/qwen3.6-27b.")],
-        },
+        {model: [_rate_limit_error(model), _FakeFinalResponse("Served on the second attempt.")]},
     )
 
-    result = llm.get_chat_reply(message="hi", language="en", context_chunks=[], history=[])
+    result = llm.run_plain_reply("test system prompt", "hi", [])
 
     # Succeeds via the second attempt — no error surfaced to the patient.
-    assert result == "Served by qwen/qwen3.6-27b."
+    assert result == "Served on the second attempt."
 
 
-def test_token_limit_413_on_gpt_oss_falls_back_to_qwen_same_as_a_rate_limit(monkeypatch):
+def test_token_limit_413_falls_back_to_the_next_attempt_same_as_a_rate_limit(monkeypatch):
     # Regression: a plain groq.APIStatusError (413, tokens-per-minute cap) used to
     # NOT be caught here at all (only the 429 RateLimitError subclass was), so it
-    # crashed the whole request instead of advancing to the next model — surfacing
-    # as an unhandled 500 to the patient instead of the graceful fallback reply.
-    first, second, _third = llm._MODEL_RETRY_SEQUENCE
+    # crashed the whole request instead of advancing to the next attempt —
+    # surfacing as an unhandled 500 to the patient instead of the graceful
+    # fallback reply.
+    model = llm._MODEL_RETRY_SEQUENCE[0]
     _patch_chat_groq(
         monkeypatch,
-        {
-            first: [_token_limit_error(first)],
-            second: [_FakeFinalResponse("Served by qwen/qwen3.6-27b.")],
-        },
+        {model: [_token_limit_error(model), _FakeFinalResponse("Served on the second attempt.")]},
     )
 
-    result = llm.get_chat_reply(message="hi", language="en", context_chunks=[], history=[])
+    result = llm.run_plain_reply("test system prompt", "hi", [])
 
-    assert result == "Served by qwen/qwen3.6-27b."
+    assert result == "Served on the second attempt."
 
 
 def test_token_limit_413_on_every_attempt_gives_the_graceful_fallback_not_a_crash(monkeypatch):
-    first, second, third = llm._MODEL_RETRY_SEQUENCE
+    model = llm._MODEL_RETRY_SEQUENCE[0]
     _patch_chat_groq(
         monkeypatch,
-        {
-            first: [_token_limit_error(first), _token_limit_error(first)],
-            second: [_token_limit_error(second)],
-        },
+        {model: [_token_limit_error(model) for _ in llm._MODEL_RETRY_SEQUENCE]},
     )
-    assert third == first  # sanity: the sequence really does circle back to `first`
 
-    result = llm.get_chat_reply(message="hi", language="en", context_chunks=[], history=[])
+    result = llm.run_plain_reply("test system prompt", "hi", [])
 
     assert result == llm._RATE_LIMIT_REPLY
 
 
-def test_rate_limit_on_gpt_oss_and_qwen_succeeds_on_the_second_gpt_oss_attempt(monkeypatch):
-    first, second, _third = llm._MODEL_RETRY_SEQUENCE
-    # `first` (gpt-oss-120b) appears at both position 1 and position 3 of the
-    # sequence, so its queue holds two entries: the first exhausted at position 1,
-    # the second consumed when the sequence circles back at position 3.
+def test_rate_limit_on_first_two_attempts_succeeds_on_the_third(monkeypatch):
+    model = llm._MODEL_RETRY_SEQUENCE[0]
+    _patch_chat_groq(
+        monkeypatch,
+        {model: [_rate_limit_error(model), _rate_limit_error(model), _FakeFinalResponse("Served on the third attempt.")]},
+    )
+
+    result = llm.run_plain_reply("test system prompt", "hi", [])
+
+    assert result == "Served on the third attempt."
+
+
+def test_rate_limit_on_first_four_attempts_succeeds_on_the_fifth(monkeypatch):
+    model = llm._MODEL_RETRY_SEQUENCE[0]
     _patch_chat_groq(
         monkeypatch,
         {
-            first: [_rate_limit_error(first), _FakeFinalResponse("Served by the second gpt-oss-120b attempt.")],
-            second: [_rate_limit_error(second)],
+            model: [
+                _rate_limit_error(model),
+                _rate_limit_error(model),
+                _rate_limit_error(model),
+                _rate_limit_error(model),
+                _FakeFinalResponse("Served on the fifth attempt."),
+            ]
         },
     )
 
-    result = llm.get_chat_reply(message="hi", language="en", context_chunks=[], history=[])
+    result = llm.run_plain_reply("test system prompt", "hi", [])
 
-    assert result == "Served by the second gpt-oss-120b attempt."
+    assert result == "Served on the fifth attempt."
 
 
-def test_rate_limit_on_all_three_attempts_returns_the_plain_message_not_an_error(monkeypatch):
-    first, second, _third = llm._MODEL_RETRY_SEQUENCE
+def test_rate_limit_on_first_five_attempts_succeeds_on_the_sixth(monkeypatch):
+    # Confirms the sequence really does go all 6 attempts (6 configured keys) deep
+    # before giving up, not just 5 — a regression here would silently give up early
+    # and show the patient an error when the 6th key would have worked.
+    model = llm._MODEL_RETRY_SEQUENCE[0]
     _patch_chat_groq(
         monkeypatch,
         {
-            first: [_rate_limit_error(first), _rate_limit_error(first)],
-            second: [_rate_limit_error(second)],
+            model: [
+                _rate_limit_error(model),
+                _rate_limit_error(model),
+                _rate_limit_error(model),
+                _rate_limit_error(model),
+                _rate_limit_error(model),
+                _FakeFinalResponse("Served on the sixth attempt."),
+            ]
         },
     )
 
-    result = llm.get_chat_reply(message="hi", language="en", context_chunks=[], history=[])
+    result = llm.run_plain_reply("test system prompt", "hi", [])
+
+    assert result == "Served on the sixth attempt."
+
+
+def test_rate_limit_on_all_six_attempts_returns_the_plain_message_not_an_error(monkeypatch):
+    model = llm._MODEL_RETRY_SEQUENCE[0]
+    _patch_chat_groq(
+        monkeypatch,
+        {model: [_rate_limit_error(model) for _ in llm._MODEL_RETRY_SEQUENCE]},
+    )
+
+    result = llm.run_plain_reply("test system prompt", "hi", [])
 
     assert result == llm._RATE_LIMIT_REPLY
 
 
 def test_a_non_rate_limit_error_is_not_retried_against_the_next_attempt(monkeypatch):
-    first, _second, _third = llm._MODEL_RETRY_SEQUENCE
-    _patch_chat_groq(monkeypatch, {first: [RuntimeError("some other failure")]})
+    model = llm._MODEL_RETRY_SEQUENCE[0]
+    _patch_chat_groq(monkeypatch, {model: [RuntimeError("some other failure")]})
 
     with pytest.raises(RuntimeError):
-        llm.get_chat_reply(message="hi", language="en", context_chunks=[], history=[])
+        llm.run_plain_reply("test system prompt", "hi", [])
 
 
-def test_run_chat_agent_rate_limit_on_gpt_oss_only_succeeds_via_qwen(monkeypatch):
-    first, second, _third = llm._MODEL_RETRY_SEQUENCE
+def test_run_tool_calling_agent_rate_limit_on_first_key_succeeds_via_second_key(monkeypatch):
+    model = llm._MODEL_RETRY_SEQUENCE[0]
     _patch_chat_groq(
         monkeypatch,
-        {
-            first: [_rate_limit_error(first)],
-            second: [_FakeFinalResponse("Agent reply from qwen/qwen3.6-27b.")],
-        },
+        {model: [_rate_limit_error(model), _FakeFinalResponse("Agent reply from the second attempt.")]},
     )
 
-    result = llm.run_chat_agent(message="hi", language="en", context_chunks=[], history=[], tools=[])
+    result = llm.run_tool_calling_agent("test system prompt", "hi", [], [])
 
-    assert result == "Agent reply from qwen/qwen3.6-27b."
+    assert result == "Agent reply from the second attempt."
 
 
-def test_run_chat_agent_rate_limit_on_gpt_oss_and_qwen_succeeds_on_second_gpt_oss_attempt(monkeypatch):
-    first, second, _third = llm._MODEL_RETRY_SEQUENCE
+def test_run_tool_calling_agent_rate_limit_on_first_two_attempts_succeeds_on_the_third(monkeypatch):
+    model = llm._MODEL_RETRY_SEQUENCE[0]
     _patch_chat_groq(
         monkeypatch,
-        {
-            first: [_rate_limit_error(first), _FakeFinalResponse("Agent reply from the second gpt-oss-120b attempt.")],
-            second: [_rate_limit_error(second)],
-        },
+        {model: [_rate_limit_error(model), _rate_limit_error(model), _FakeFinalResponse("Agent reply from the third attempt.")]},
     )
 
-    result = llm.run_chat_agent(message="hi", language="en", context_chunks=[], history=[], tools=[])
+    result = llm.run_tool_calling_agent("test system prompt", "hi", [], [])
 
-    assert result == "Agent reply from the second gpt-oss-120b attempt."
+    assert result == "Agent reply from the third attempt."
 
 
-def test_run_chat_agent_returns_plain_message_when_all_three_attempts_are_rate_limited(monkeypatch):
-    first, second, _third = llm._MODEL_RETRY_SEQUENCE
+def test_run_tool_calling_agent_returns_plain_message_when_all_six_attempts_are_rate_limited(monkeypatch):
+    model = llm._MODEL_RETRY_SEQUENCE[0]
     _patch_chat_groq(
         monkeypatch,
-        {
-            first: [_rate_limit_error(first), _rate_limit_error(first)],
-            second: [_rate_limit_error(second)],
-        },
+        {model: [_rate_limit_error(model) for _ in llm._MODEL_RETRY_SEQUENCE]},
     )
 
-    result = llm.run_chat_agent(message="hi", language="en", context_chunks=[], history=[], tools=[])
+    result = llm.run_tool_calling_agent("test system prompt", "hi", [], [])
 
     assert result == llm._RATE_LIMIT_REPLY
 
@@ -321,12 +339,8 @@ def test_a_raising_tool_call_never_crashes_the_turn_and_gives_a_safe_reply(monke
         },
     )
 
-    result = llm.run_chat_agent(
-        message="is there no doctor available for tommorow?",
-        language="en",
-        context_chunks=[],
-        history=[],
-        tools=[_RaisingTool()],
+    result = llm.run_tool_calling_agent(
+        "test system prompt", "is there no doctor available for tommorow?", [], [_RaisingTool()]
     )
 
     assert "sorry" in result.lower()
@@ -346,13 +360,7 @@ def test_a_raising_unknown_named_tool_still_never_crashes_the_turn(monkeypatch):
         {llm._MODEL_RETRY_SEQUENCE[0]: [_FakeToolCallResponse([_tool_call("book_appointment", {"slot_id": "abc"}, "call-1")])]},
     )
 
-    result = llm.run_chat_agent(
-        message="book that slot",
-        language="en",
-        context_chunks=[],
-        history=[],
-        tools=[_RaisingTool()],
-    )
+    result = llm.run_tool_calling_agent("test system prompt", "book that slot", [], [_RaisingTool()])
 
     assert "sorry" in result.lower()
 
@@ -366,12 +374,23 @@ def test_agent_prompt_instructs_an_emergency_screening_clarifying_question():
     # is actually present in the system prompt the model is given, since that's the
     # only lever this feature is implemented through.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "help you tell an urgent presentation apart from a routine one" in prompt
+    assert "help distinguish urgent from routine for that symptom area" in prompt
+
+
+def test_agent_prompt_never_calls_availability_tool_for_a_plain_emergency_routing_question():
+    # A patient asking "which department handles emergencies?" is an informational
+    # question, not a request to book into a department named "Emergency" — the
+    # prompt must steer this to a plain-text answer instead of a guessed
+    # department_name call (this exact bug: get_department_availability called with
+    # "Emergency" as department_name, which then surfaced the tool's own real
+    # not-found response as if "Emergency" had actually been looked up).
+    assert "do NOT call get_department_availability for them at all" in llm._AGENT_SYSTEM_PROMPT
+    assert "does not have a dedicated emergency/ER department" in llm._AGENT_SYSTEM_PROMPT
 
 
 def test_agent_prompt_instructs_plain_urgent_recommendation_on_a_worrying_answer():
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "plainly and directly tell the patient this sounds like an emergency" in prompt
+    assert "plainly tell the patient this sounds like an emergency" in prompt
     assert "do not call get_department_availability" in prompt.lower()
 
 
@@ -381,8 +400,8 @@ def test_agent_prompt_emergency_backstop_applies_to_any_message_not_just_answers
     # same-message regex check happened to miss, e.g. a typo or an unusual injury
     # combination) must trigger it too.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "not only an answer to your own clarifying question" in prompt
-    assert "including the very first message" in prompt
+    assert "not just an answer to your own question" in prompt
+    assert "including the first message" in prompt
 
 
 def test_agent_prompt_handles_emergency_with_no_matching_department():
@@ -390,8 +409,8 @@ def test_agent_prompt_handles_emergency_with_no_matching_department():
     # must still say so plainly rather than silently forcing a department match or
     # treating it as routine triage.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "if none of them are actually the right fit for a genuine emergency" in prompt
-    assert "rather than silently forcing a" in prompt
+    assert "If no real department fits, still state plainly" in prompt
+    assert "just to force a department match" in prompt
 
 
 def test_agent_prompt_defers_to_the_same_message_emergency_check_as_authoritative():
@@ -399,7 +418,7 @@ def test_agent_prompt_defers_to_the_same_message_emergency_check_as_authoritativ
     # non-authoritative and subordinate to red_flag.py's same-message check — never
     # implying it could override or delay that check.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "non-authoritative" in prompt
+    assert "Secondary layer only" in prompt
     assert "takes priority" in prompt
 
 
@@ -407,7 +426,7 @@ def test_agent_prompt_requires_first_aid_guidance_on_confirmed_emergency():
     # PATH 1 must tell the patient to go to the ER AND give 2-3 safe, generic
     # first-aid tips for the wait — never medication or a home remedy.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "give 2–3 short, generic, safe first-aid actions" in prompt
+    assert "give 2-3 short, generic, safe first-aid actions" in prompt
     assert "Never suggest medication" in prompt
     assert "while you're on your way" in prompt
 
@@ -420,8 +439,8 @@ def test_agent_prompt_requires_severity_screening_for_ambiguous_symptoms():
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
     assert "PATH 2" in prompt
     assert "is it severe, bearable, or mild?" in prompt
-    assert "Do NOT decide a department, do NOT call get_department_availability" in prompt
-    assert "chest pain, chest tightness or pressure; head pain or a severe headache" in prompt
+    assert "Do NOT decide a department, call get_department_availability, or state/imply" in prompt
+    assert "chest pain, tightness, or pressure; head pain or severe headache" in prompt
 
 
 def test_agent_prompt_path2_covers_broad_real_world_symptom_list_not_just_examples():
@@ -431,8 +450,8 @@ def test_agent_prompt_path2_covers_broad_real_world_symptom_list_not_just_exampl
     # real-world categories (abdominal pain, high fever, dizziness, etc.) with
     # their own differentiator guidance.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "this is not a short fixed list" in prompt
-    assert "severe or persistent abdominal" in prompt
+    assert "not a fixed list" in prompt
+    assert "severe/persistent abdominal" in prompt
     assert "stomach pain" in prompt
     assert "high or persistent fever" in prompt
     assert "dizziness, lightheadedness, or feeling faint" in prompt
@@ -458,16 +477,17 @@ def test_agent_prompt_includes_broken_bone_in_ambiguous_symptom_screening():
     # about severity/deformity/numbness first instead of asserting a diagnosis.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
     assert "a broken bone or suspected fracture" in prompt
-    assert "visible deformity, or bone visible through the skin" in prompt
-    assert 'asserting "this is a fracture" is not' in prompt
+    assert "visible deformity, bone through skin" in prompt
+    assert 'asserting "this is a fracture" isn\'t' in prompt
 
 
-def test_agent_prompt_requires_two_to_three_questions_for_routine_symptoms():
-    # PATH 3: routine (non-ambiguous) symptoms now require 2-3 clarifying
-    # questions before routing, up from the earlier 1-2.
+def test_agent_prompt_requires_one_to_two_questions_for_routine_symptoms():
+    # PATH 3: routine (non-ambiguous) symptoms require 1-2 clarifying questions
+    # before routing — lowered from 2-3 to cut turns (and the triage prompt's token
+    # cost) off the common, unambiguous case, per explicit request.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
     assert "PATH 3" in prompt
-    assert "ask 2–3 real clarifying questions" in prompt
+    assert "ask 1-2 real clarifying questions" in prompt
 
 
 def test_agent_prompt_caps_path2_at_one_screening_round():
@@ -479,15 +499,15 @@ def test_agent_prompt_caps_path2_at_one_screening_round():
     # screening reply before a mandatory decision.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
     assert "PATH 2 IS EXACTLY ONE ROUND — HARD LIMIT" in prompt
-    assert "Do not ask a second round of differentiator questions" in prompt
-    assert "decide on your very next reply, no exceptions" in prompt
+    assert "no second round of differentiator questions" in prompt
+    assert "then you MUST decide" in prompt
 
 
-def test_agent_prompt_caps_path3_at_three_questions_hard_ceiling():
+def test_agent_prompt_caps_path3_at_two_questions_hard_ceiling():
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "3 QUESTIONS IS A HARD CEILING, NOT A TARGET" in prompt
-    assert "your very next reply MUST call get_department_availability" in prompt
-    assert "counting any PATH 2 screening reply as one of them" in prompt
+    assert "2 QUESTIONS IS A HARD CEILING, NOT A TARGET" in prompt
+    assert "your very next reply MUST call the tool" in prompt
+    assert "counting any PATH 2 screening reply as one," in prompt
 
 
 def test_agent_prompt_treats_a_string_of_denied_red_flags_as_enough_to_route_early():
@@ -496,7 +516,8 @@ def test_agent_prompt_treats_a_string_of_denied_red_flags_as_enough_to_route_ear
     # questions, and the model kept probing instead of routing once it already had a
     # clearly mild, stable picture.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "a string of \"no\"s across several questions is the ceiling being hit early" in prompt
+    assert "A string of denied differentiators/red-flags" in prompt
+    assert "already enough to route immediately, not a cue to keep probing" in prompt
 
 
 def test_agent_prompt_forbids_ending_path3_with_freehand_advice_instead_of_the_tool_call():
@@ -504,8 +525,8 @@ def test_agent_prompt_forbids_ending_path3_with_freehand_advice_instead_of_the_t
     # freehand paragraph of home-remedy/OTC-medication advice and never once called
     # get_department_availability — no department was ever offered.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "PATH 3 ALWAYS ENDS WITH THE TOOL CALL — NEVER WITH FREE-TEXT ADVICE INSTEAD OF IT" in prompt
-    assert "never as a multi-point home-remedy essay" in prompt
+    assert "PATH 3 ALWAYS ENDS WITH THE TOOL CALL, NEVER FREE-TEXT ADVICE INSTEAD" in prompt
+    assert "never a multi-point home-remedy essay" in prompt
 
 
 def test_agent_prompt_forbids_inventing_a_nonexistent_department():
@@ -522,7 +543,7 @@ def test_agent_prompt_forbids_inventing_a_nonexistent_department():
 def test_agent_prompt_gives_first_aid_and_er_escalation_for_notable_injuries():
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
     assert "NOTABLE-BUT-NOT-CLEARLY-EMERGENCY INJURIES" in prompt
-    assert "go to the nearest ER right away instead of a scheduled visit" in prompt
+    assert "go to the ER now instead of waiting for the visit" in prompt
 
 
 def test_agent_prompt_forbids_red_flag_jargon_in_patient_facing_text():
@@ -585,6 +606,39 @@ def test_agent_prompt_forbids_writing_out_appointment_id_like_slot_id():
     # not to leak it in prose, same as the existing slot_id rule.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
     assert "never write an appointment_id out in your reply text" in prompt
+
+
+def test_agent_prompt_requires_actually_answering_a_direct_memory_recall_question():
+    # Reported bug: patient_memory was correctly populated ("Asked about Cardiology
+    # availability...") and passed into the prompt, yet a direct "what are the
+    # things I told you" in a new session still got "I don't have any details" — the
+    # model treated the "don't volunteer it unprompted" guidance as covering direct
+    # questions too. Must be unambiguous that a direct recall question requires
+    # actually using PATIENT MEMORY, not defaulting to "nothing stored".
+    prompt = llm._AGENT_SYSTEM_PROMPT
+    assert "IMPORTANT — WHEN THE PATIENT DIRECTLY ASKS ABOUT IT" in prompt
+    assert "what are the things I told you" in prompt
+    assert "you must actually use it rather than defaulting to" in prompt
+
+
+def test_plain_system_prompt_requires_actually_answering_a_direct_memory_recall_question():
+    prompt = llm._SYSTEM_PROMPT
+    assert "IMPORTANT — WHEN THE PATIENT DIRECTLY ASKS ABOUT IT" in prompt
+    assert "what are the things I told you" in prompt
+    assert "you must actually use it rather than defaulting to" in prompt
+
+
+def test_agent_prompt_forbids_booking_fresh_when_picking_a_slot_resolves_a_reschedule():
+    # Reported bug: mid-reschedule, once the model showed the patient a list of new
+    # times (via get_department_availability) and they picked one, the model called
+    # book_appointment instead of reschedule_appointment — creating a stray extra
+    # appointment instead of moving the existing one. The generic "call
+    # book_appointment once a slot is picked from a shown list" rule alone doesn't
+    # distinguish a reschedule's slot-pick from a fresh booking's.
+    prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
+    assert "DO NOT confuse a slot-pick that resolves a RESCHEDULE with a fresh booking" in prompt
+    assert "never book_appointment" in prompt
+    assert "creates a stray extra" in prompt
 
 
 def test_agent_prompt_rejects_unrecognizable_department_strings_instead_of_guessing():
@@ -666,8 +720,8 @@ def test_agent_prompt_major_weight_bearing_bone_broken_skips_path2_straight_to_p
     # Reproduces a reported bug: "my leg got broken" still went through a PATH 2
     # screening question instead of being treated as an immediate emergency.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "A MAJOR/WEIGHT-BEARING BONE STATED AS BROKEN SKIPS PATH 2 ENTIRELY" in prompt
-    assert '"my leg is broken", "I broke my leg" — go straight to PATH 1 immediately, no screening question first' in prompt
+    assert "A MAJOR/WEIGHT-BEARING BONE STATED AS BROKEN/FRACTURED SKIPS PATH 2" in prompt
+    assert '"my leg is broken" — go straight to PATH 1, no screening first' in prompt
 
 
 def test_agent_prompt_requires_fresh_tool_call_for_yes_no_day_questions():
@@ -694,8 +748,8 @@ def test_agent_prompt_permits_general_knowledge_for_emergency_judgment():
     # to reason about severity from its own general knowledge, not just retrieved
     # clinic context, and explicit confirmation this isn't a forbidden diagnosis.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "reason from your own general real-world medical/safety knowledge" in prompt
-    assert "diagnoses nothing" in prompt
+    assert "reason from general real-world medical/safety knowledge" in prompt
+    assert "names no condition" in prompt
 
 
 def test_agent_prompt_instructs_omitting_note_when_patient_named_the_department():
@@ -706,7 +760,7 @@ def test_agent_prompt_instructs_omitting_note_when_patient_named_the_department(
     # themselves. The prompt must explicitly instruct omitting `note` in that case.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
     assert "Omit `note`" in prompt
-    assert "the patient already named the department or specialty themselves" in prompt
+    assert "the patient already named the department/specialty themselves" in prompt
 
 
 def test_agent_prompt_instructs_checking_both_departments_on_a_genuine_tie():
@@ -717,18 +771,44 @@ def test_agent_prompt_instructs_checking_both_departments_on_a_genuine_tie():
     # calls into one reply (used for explicit cross-department requests) — this rule
     # extends that same mechanism to a genuine symptom-routing tie.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "AMBIGUOUS BETWEEN MULTIPLE REAL DEPARTMENTS" in prompt
-    assert "do NOT silently pick just one" in prompt
-    assert "Call get_department_availability once for EACH plausible real department" in prompt
-    assert "Reserve this for a genuine tie between real options" in prompt
-    assert "they already told you X" in prompt
+    assert "MULTIPLE DEPARTMENTS IN ONE TURN" in prompt
+    assert "TIE:" in prompt
+    assert "do NOT silently pick one" in prompt
+    assert "get_department_availability once per real department in the same turn" in prompt
+    assert "Reserve for a genuine tie" in prompt
+    assert "they did the routing, not you" in prompt
 
 
-def test_current_date_is_injected_into_the_system_prompt():
-    messages = llm._build_agent_messages("hello", "en", [], [])
-    system_content = messages[0].content
-    assert "Today's date is" in system_content
-    assert llm._current_date_str() in system_content
+def test_agent_prompt_instructs_covering_multiple_distinct_symptoms_in_one_turn():
+    # Reported gap: a patient describing two separate, unrelated complaints in one
+    # message (e.g. ear pain AND itchy skin -> ENT and Dermatology, no ambiguity
+    # about either individually) got routed to only the first department, and had to
+    # explicitly ask again before the second one was addressed. This is distinct from
+    # the genuine-tie case above (one symptom uncertain between departments) — here
+    # each complaint has its own clear department, so both departments must be called
+    # in the same turn once the bot is ready to conclude.
+    prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
+    assert "DISTINCT SYMPTOMS:" in prompt
+    assert "no tie to reason about" in prompt
+    assert "get_department_availability once per real department in the same turn" in prompt
+    assert "never leave one for the patient to raise again" in prompt
+
+
+def test_agent_prompt_instructs_a_separate_symptom_specific_note_per_department():
+    # Reported live: ear pain + blurry vision (a genuine DISTINCT SYMPTOMS case, ENT
+    # and Ophthalmology) got the exact same TIE-style note ("this could be evaluated
+    # by either ENT or Ophthalmology") repeated identically on both cards, reading
+    # as if one ambiguous symptom was being hedged across two departments instead of
+    # two different symptoms each being explained on their own terms.
+    prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
+    assert "Each call gets its OWN `note` naming the SPECIFIC symptom it's for" in prompt
+    assert "never the TIE phrasing" in prompt
+
+
+# current-date injection into an agent's system prompt is now tested via
+# app.services.orchestrator.agents.symptom_agent in tests/test_orchestrator.py,
+# since _build_agent_messages() (which built the old fixed template) no longer
+# exists — each specialist agent composes its own prompt now.
 
 
 # --- regression: a cross-department question must not stop after the first call ----
@@ -772,12 +852,8 @@ def test_cross_department_sweep_calls_the_tool_more_than_once_before_final_reply
         },
     )
 
-    result = llm.run_chat_agent(
-        message="list every doctor across every department",
-        language="en",
-        context_chunks=[],
-        history=[],
-        tools=[dept_tool],
+    result = llm.run_tool_calling_agent(
+        "test system prompt", "list every doctor across every department", [], [dept_tool]
     )
 
     # The tool was called twice (once per department) before the loop accepted a
@@ -813,17 +889,36 @@ def test_single_department_call_returns_the_tools_raw_result_never_the_models_pa
         },
     )
 
-    result = llm.run_chat_agent(
-        message="who's available in Cardiology",
-        language="en",
-        context_chunks=[],
-        history=[],
-        tools=[dept_tool],
-    )
+    result = llm.run_tool_calling_agent("test system prompt", "who's available in Cardiology", [], [dept_tool])
 
     assert len(dept_tool.calls) == 1
     assert result == card
     assert "slot_id" not in result
+
+
+def test_single_department_call_with_no_free_slots_unwraps_the_internal_marker_to_plain_text(monkeypatch):
+    # _get_department_availability_impl tags a "found but nobody's free" result with
+    # NO_SLOTS_MARKER internally (see chat_tools.py) so a multi-department combine can
+    # tell it apart from "department doesn't exist" instead of silently dropping it.
+    # For a SINGLE call, that internal marker must never leak to the patient — this
+    # must still read exactly like the old plain-text message.
+    no_slots = "NO_SLOTS::{\"department_name\": \"Dermatology\", \"message\": \"I couldn't find any doctors with free upcoming slots in Dermatology right now. Please check back later or contact the clinic directly.\"}"
+    dept_tool = _FakeTool("get_department_availability", result=no_slots)
+
+    _patch_chat_groq(
+        monkeypatch,
+        {
+            llm._MODEL_RETRY_SEQUENCE[0]: [
+                _FakeToolCallResponse([_tool_call("get_department_availability", {"department_name": "Dermatology"}, "call-1")]),
+                _FakeFinalResponse("Dermatology has nothing free — sorry about that."),
+            ]
+        },
+    )
+
+    result = llm.run_tool_calling_agent("test system prompt", "who's available in Dermatology", [], [dept_tool])
+
+    assert result == "I couldn't find any doctors with free upcoming slots in Dermatology right now. Please check back later or contact the clinic directly."
+    assert not result.startswith("NO_SLOTS::")
 
 
 def test_terminal_tool_short_circuits_immediately(monkeypatch):
@@ -835,13 +930,7 @@ def test_terminal_tool_short_circuits_immediately(monkeypatch):
         {llm._MODEL_RETRY_SEQUENCE[0]: [_FakeToolCallResponse([_tool_call("book_appointment", {"slot_id": "abc"}, "call-1")])]},
     )
 
-    result = llm.run_chat_agent(
-        message="book that slot",
-        language="en",
-        context_chunks=[],
-        history=[],
-        tools=[book_tool],
-    )
+    result = llm.run_tool_calling_agent("test system prompt", "book that slot", [], [book_tool])
 
     # Terminal tools return their own result the moment they're called — no second
     # LLM round-trip needed (a second .invoke() on the primary model's fake would
@@ -851,79 +940,64 @@ def test_terminal_tool_short_circuits_immediately(monkeypatch):
 
 
 # --- token-reduction: conditional triage section (item 1 of the token-usage work) ---
+#
+# Whether the triage section is included at all is now decided by which specialist
+# agent the orchestrator router sends a message to (symptom_agent always includes
+# it; appointment_agent/general_info_agent never do) rather than an include_triage
+# flag on a single shared agent function — see tests/test_orchestrator.py for the
+# equivalent coverage (symptom_agent always includes SYMPTOM TRIAGE RULE/PATH 1;
+# appointment_agent/general_info_agent's prompts never contain it at all).
 
 
-def test_build_agent_messages_includes_triage_section_by_default():
-    messages = llm._build_agent_messages("hi", "en", [], [])
-    assert "SYMPTOM TRIAGE RULE" in messages[0].content
-    assert "PATH 1" in messages[0].content
+# --- token-reduction: conditionally droppable PATH 2 body --------------------------
 
 
-def test_build_agent_messages_omits_triage_section_when_not_symptom_related():
-    messages = llm._build_agent_messages("hi", "en", [], [], include_triage=False)
-    content = messages[0].content
-    assert "SYMPTOM TRIAGE RULE" not in content
-    assert "PATH 1" not in content
-    # Everything else must still be present — this is purely a token-savings change,
-    # never a behavior change for non-triage turns.
-    assert "STRICT GROUNDING RULE" in content
-    assert "TOOL USE RULES" in content
-    assert "`note` ALSO doubles" in content
+def test_triage_always_plus_path2_reassembles_byte_for_byte_into_the_original():
+    # The mechanical-split guarantee: _TRIAGE_ALWAYS/_TRIAGE_PATH2 were derived by
+    # slicing the original _TRIAGE_SECTION text, never retyped — this proves that
+    # slicing round-trips exactly, with include_path2=True behaving identically to
+    # the pre-split single block.
+    assert llm._triage_section(include_path2=True) == llm._TRIAGE_SECTION
 
 
-def test_omitting_triage_section_meaningfully_shrinks_the_prompt():
-    with_triage = llm._build_agent_messages("hi", "en", [], [], include_triage=True)[0].content
-    without_triage = llm._build_agent_messages("hi", "en", [], [], include_triage=False)[0].content
-    assert len(without_triage) < len(with_triage) - 10000
+def test_triage_section_with_path2_excluded_drops_only_path2_specific_text():
+    without_path2 = llm._triage_section(include_path2=False)
+    # PATH 2's own body, and the EXCEPTION that lives inside it, must be gone.
+    assert "PATH 2 — AMBIGUOUS" not in without_path2
+    assert "EXCEPTION — A MAJOR/WEIGHT-BEARING BONE" not in without_path2
+    assert "PATH 2 IS EXACTLY ONE ROUND" not in without_path2
+    assert "NOTABLE-BUT-NOT-CLEARLY-EMERGENCY" not in without_path2
+    # Everything else — PATH 1, PATH 3, and the cross-cutting safety nets — must
+    # still be fully present; none of these are separable from PATH 1/3.
+    assert "SYMPTOM TRIAGE RULE" in without_path2
+    assert "PATH 1 — CONFIRMED EMERGENCY" in without_path2
+    assert "PATH 3 — ROUTINE SYMPTOM" in without_path2
+    assert "PATH 3 ALWAYS ENDS WITH THE TOOL CALL" in without_path2
+    assert "EMERGENCY BACKSTOP — SECONDARY LAYER" in without_path2
+    assert "Judging THIS" in without_path2
+    assert "MULTIPLE DEPARTMENTS IN ONE TURN" in without_path2
 
 
-def test_run_chat_agent_passes_include_triage_through_to_the_prompt(monkeypatch):
-    captured = {}
+def test_excluding_path2_meaningfully_shrinks_the_triage_section():
+    with_path2 = llm._triage_section(include_path2=True)
+    without_path2 = llm._triage_section(include_path2=False)
+    assert len(without_path2) < len(with_path2) - 3000
 
-    class _FakeLLM:
-        def bind_tools(self, tools):
-            return self
 
-        def invoke(self, messages):
-            captured["system_content"] = messages[0].content
-            return _FakeToolCallResponse([])
-
-    monkeypatch.setattr(llm, "ChatGroq", lambda **kwargs: _FakeLLM())
-
-    llm.run_chat_agent(
-        message="what are your hours",
-        language="en",
-        context_chunks=[],
-        history=[],
-        tools=[],
-        include_triage=False,
-    )
-
-    assert "SYMPTOM TRIAGE RULE" not in captured["system_content"]
+# include_path2 wiring through an actual agent call is now tested via
+# app.services.orchestrator.agents.symptom_agent.run_symptom_agent in
+# tests/test_orchestrator.py — the _triage_section() tests above already cover the
+# content-level guarantee (PATH 1/3 always present, PATH 2 the only droppable
+# piece); the orchestrator tests cover that symptom_agent actually wires
+# needs_path2_screening()'s decision through to it correctly.
 
 
 # --- cross-session patient memory digest --------------------------------------------
-
-
-def test_build_messages_defaults_patient_memory_to_none_placeholder():
-    messages = llm._build_messages("hi", "en", [], [])
-    assert "PATIENT MEMORY" in messages[0].content
-    assert "(none)" in messages[0].content
-
-
-def test_build_messages_includes_patient_memory_text_when_given():
-    messages = llm._build_messages("hi", "en", [], [], patient_memory="Patient has recurring migraines.")
-    assert "Patient has recurring migraines." in messages[0].content
-
-
-def test_build_agent_messages_defaults_patient_memory_to_none_placeholder():
-    messages = llm._build_agent_messages("hi", "en", [], [])
-    assert "PATIENT MEMORY" in messages[0].content
-
-
-def test_build_agent_messages_includes_patient_memory_text_when_given():
-    messages = llm._build_agent_messages("hi", "en", [], [], patient_memory="Patient has a penicillin allergy.")
-    assert "Patient has a penicillin allergy." in messages[0].content
+#
+# Patient-memory wiring through an actual agent call (defaulting to "(none)", or
+# carrying real digest text through) is now tested per-agent in
+# tests/test_orchestrator.py, since _build_messages()/_build_agent_messages() (which
+# built the old fixed templates) no longer exist.
 
 
 def test_agent_prompt_forbids_using_patient_memory_as_a_tool_argument_source():
@@ -932,28 +1006,3 @@ def test_agent_prompt_forbids_using_patient_memory_as_a_tool_argument_source():
     # that could be stale or imprecise.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
     assert "never use it as a source for a tool call argument" in prompt
-
-
-def test_run_chat_agent_passes_patient_memory_through_to_the_prompt(monkeypatch):
-    captured = {}
-
-    class _FakeLLM:
-        def bind_tools(self, tools):
-            return self
-
-        def invoke(self, messages):
-            captured["system_content"] = messages[0].content
-            return _FakeToolCallResponse([])
-
-    monkeypatch.setattr(llm, "ChatGroq", lambda **kwargs: _FakeLLM())
-
-    llm.run_chat_agent(
-        message="hi",
-        language="en",
-        context_chunks=[],
-        history=[],
-        tools=[],
-        patient_memory="Patient previously described knee pain.",
-    )
-
-    assert "Patient previously described knee pain." in captured["system_content"]

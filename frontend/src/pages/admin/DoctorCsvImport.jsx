@@ -164,7 +164,15 @@ export default function DoctorCsvImport() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv"
+              // Reported live: the OS file picker opened but selecting a CSV never
+              // registered (no filename appeared) — many mobile file-browsing apps
+              // filter `accept` by MIME type rather than extension, and a CSV's
+              // actual MIME type varies a lot by app/OS (text/csv,
+              // application/vnd.ms-excel, text/comma-separated-values, or none at
+              // all) instead of reliably being "text/csv". Listing the extension
+              // AND every MIME type it commonly gets tagged with covers pickers
+              // that filter either way.
+              accept=".csv,text/csv,application/vnd.ms-excel,text/comma-separated-values,text/plain"
               onChange={handleFileChange}
               disabled={busy}
               className={styles.hiddenFileInput}

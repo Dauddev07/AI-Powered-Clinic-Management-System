@@ -62,7 +62,7 @@ def rewrite_query(message: str, history: list[ConversationMemory]) -> str:
         return message
 
     try:
-        llm = ChatGroq(model=settings.GROQ_MODEL, api_key=api_key_manager.next_key(), temperature=0.0)
+        llm = ChatGroq(model=settings.GROQ_HELPER_MODEL, api_key=api_key_manager.next_key(), temperature=0.0)
         messages = [
             SystemMessage(content=_SYSTEM_PROMPT),
             HumanMessage(

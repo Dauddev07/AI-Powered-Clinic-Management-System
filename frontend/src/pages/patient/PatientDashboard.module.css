@@ -4,6 +4,20 @@
   gap: 1rem;
 }
 
+/* Reported live: on a short/narrow phone screen the page content runs all the
+   way to the bottom edge, so FloatingChatButton (fixed bottom-left, see its
+   own module.css) ends up sitting directly on top of the last card's text
+   ("0 Upcoming" etc.) instead of floating in empty space below it. Reserving
+   room here — sized to the button's own small-screen footprint (54px + 1rem
+   offset, see FloatingChatButton.module.css's <=480px breakpoint) plus a
+   little breathing room — keeps a clear gap for it without touching that
+   component itself. */
+@media (max-width: 480px) {
+  .grid {
+    padding-bottom: 96px;
+  }
+}
+
 .card {
   /* Grid items default to min-width: auto (their content's intrinsic width) —
      without this, one long unbroken value (a doctor/department name, a

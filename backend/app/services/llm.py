@@ -8,6 +8,7 @@ a 429 from one attempt in _MODEL_RETRY_SEQUENCE retries the exact same request
 against the next attempt in the sequence, and no further once the sequence is
 exhausted — there is no Gemini or other provider anywhere in this module.
 """
+import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -19,6 +20,7 @@ from langchain_groq import ChatGroq
 from app.core.api_keys import api_key_manager
 from app.core.config import settings
 from app.models.conversation_memory import ConversationMemory
+from app.services.chat_markers import NO_SLOTS_MARKER
 
 logger = logging.getLogger(__name__)
 
@@ -35,36 +37,44 @@ _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 def _strip_reasoning(content: str) -> str:
     return _THINK_BLOCK_RE.sub("", content or "").strip()
 
-# Ordered Groq-only retry sequence for a single request: primary model, then a
-# different model, then one more attempt back on the primary — each attempt only
-# ever triggered by a 429 rate limit from the one before it (see
-# _invoke_with_fallback). The primary model deliberately appears twice (a transient
-# rate limit on gpt-oss-120b may well have cleared by the third attempt), and the
-# sequence stops there rather than reaching for a third provider. Kept as a simple
-# ordered constant (not hardcoded inline in the retry loop) so the sequence itself
-# is obvious and easy to reorder/extend in one place.
+# Ordered Groq-only retry sequence for a single request: the same primary model,
+# once per configured API key (6 attempts — see app.core.api_keys) — each attempt
+# only ever triggered by a 429/413 from the one before it (see
+# _invoke_with_fallback). Every ChatGroq call already draws its API key from
+# api_key_manager's own independent round-robin (Key1 -> Key2 -> Key3 -> Key4 ->
+# Key5 -> Key6 -> Key1..., see app.core.api_keys) regardless of model, so 6
+# same-model attempts in a row already means (barring concurrent draws from other
+# requests) 6 different keys — the point of this sequence is purely "retry on a
+# different key without ever showing the patient an error", not a model swap. A
+# second model (previously Qwen) used to sit at position 2 as a genuinely
+# different capacity pool to fall back to; deliberately dropped per explicit
+# request — a rate limit on gpt-oss-120b is expected to clear across up to 6
+# different keys, and staying on one model keeps every attempt eligible for
+# Groq's prompt caching (Qwen wasn't). Kept as a simple ordered constant (not
+# hardcoded inline in the retry loop) so the sequence itself is obvious and easy
+# to reorder/extend in one place.
 #
 # Every ChatGroq instance built against this sequence is constructed with
 # max_retries=0. langchain_groq/the underlying groq client defaults to retrying a
 # 429 internally (with backoff) BEFORE raising RateLimitError back to our code —
-# left at its default, each of the 3 attempts above would silently retry a few more
+# left at its default, each of the 6 attempts above would silently retry a few more
 # times on its own, stacking multiple backoff waits per attempt and making a
-# rate-limited request take far longer than the 3 attempts we intend. max_retries=0
+# rate-limited request take far longer than the 6 attempts we intend. max_retries=0
 # hands all retry/backoff control to _invoke_with_fallback so a 429 advances to the
-# next model immediately.
-_MODEL_RETRY_SEQUENCE: tuple[str, ...] = (settings.GROQ_MODEL, "qwen/qwen3.6-27b", settings.GROQ_MODEL)
+# next attempt (next key) immediately.
+_MODEL_RETRY_SEQUENCE: tuple[str, ...] = (settings.GROQ_MODEL,) * 6
 
-# reasoning_effort is model-specific and NOT interchangeable across the retry
-# sequence: gpt-oss models reject "none"/"default" and only accept "low"/"medium"/
-# "high" (verified directly against Groq's API), while qwen rejects "low"/"medium"/
-# "high" and only accepts "none"/"default" — the exact opposite constraint. Passing
-# the wrong value 400s the request outright. "low" cuts hidden chain-of-thought
-# reasoning tokens dramatically (observed ~90% reduction on a sample triage-style
-# question) with no effect on the visible reply — those tokens are never shown to
-# the patient (reasoning_format="hidden" already strips them from `content`) but
-# were still being generated and counted toward the per-minute token limit before
-# this. Only applied to gpt-oss models; qwen is left with Groq's own default
-# (parameter omitted entirely) since it doesn't support this effort scale at all.
+# reasoning_effort is model-specific, not one-size-fits-all: gpt-oss models reject
+# "none"/"default" and only accept "low"/"medium"/"high" (verified directly against
+# Groq's API) — "low" cuts hidden chain-of-thought reasoning tokens dramatically
+# (observed ~90% reduction on a sample triage-style question) with no effect on the
+# visible reply, since those tokens are never shown to the patient
+# (reasoning_format="hidden" already strips them from `content`) but were still
+# being generated and counted toward the per-minute token limit before this. Kept
+# as a per-model function, not a bare constant, in case a non-gpt-oss model (e.g. a
+# future fallback) is ever reintroduced — some models (previously Qwen, verified
+# directly against Groq's API) reject "low"/"medium"/"high" outright and need this
+# parameter omitted entirely, the opposite constraint from gpt-oss.
 def _reasoning_effort_for(model: str) -> str | None:
     return "low" if "gpt-oss" in model else None
 
@@ -155,6 +165,16 @@ without applying the strict grounding rule above — there is simply no clinic/m
 claim to ground in that case. Still stay in the clinic-assistant persona and do not \
 invent clinic-specific facts (hours, prices, doctor names) even here.
 
+DEPARTMENT VS SPECIALIZATION: A doctor's SPECIALIZATION (e.g. "Interventional \
+Cardiology", "Head & Neck Surgery") is NOT the same thing as their DEPARTMENT (e.g. \
+"Cardiology", "ENT") — two different, easily-confused facts that may both appear in \
+Retrieved context. If the patient asks which department a doctor is in (or belongs \
+to), answer with the actual department name, never a specialization phrase, even if \
+the specialization is what the retrieved text emphasizes. If the retrieved context \
+only states a specialization and never actually names the department, say only that \
+much rather than guessing or presenting the specialization as if it were the \
+department.
+
 LANGUAGE RULE: The patient's message is in {language_name}. Reply entirely in \
 {language_name}, regardless of the language of the retrieved context.
 
@@ -177,12 +197,28 @@ not give a definitive diagnosis — describe possibilities and recommend booking
 appointment or seeking urgent care when appropriate.
 
 PATIENT MEMORY (from earlier chat sessions with this same patient, may be "(none)"): \
-this is a short background summary only — symptoms they've previously mentioned and \
-general personal info they've shared — NOT a transcript of what was actually said this \
-session. You may use it quietly to personalize your reply or avoid re-asking something \
-they've already told you, but never quote or recite it back verbatim, never treat it as \
-certainly still accurate (health details can change), and never let it substitute for \
-asking a real clarifying question this conversation actually needs.
+this is a short background summary only — symptoms they've previously mentioned, \
+general personal info they've shared, and the general subject of anything else \
+they've asked about — NOT a transcript of what was actually said this session. This \
+is REAL information about this specific patient, already verified true when it was \
+recorded — it is NOT an invented or unverified fact, and using it is not covered by \
+the "don't invent clinic-specific facts" instruction above, which is about facts you \
+don't actually have, not about this. You may use it quietly to personalize your \
+reply or avoid re-asking something they've already told you, but don't volunteer it \
+unprompted or recite it wholesale — never treat it as certainly still accurate \
+(health details can change), and never let it substitute for asking a real \
+clarifying question this conversation actually needs.
+IMPORTANT — WHEN THE PATIENT DIRECTLY ASKS ABOUT IT: whenever the patient's message \
+is itself a request to recall something — "what's my name", "what did I tell you \
+earlier", "what have I told you", "what are the things I told you", "what did we \
+discuss before" — this is NOT the "don't volunteer it unprompted" case above, it is \
+the opposite: they explicitly asked, so you MUST answer using PATIENT MEMORY above, \
+stated plainly and specifically (e.g. "You mentioned recurring migraines and asked \
+about Cardiology availability."). If PATIENT MEMORY is "(none)" or genuinely has \
+nothing relevant to what they're asking, say plainly that you don't have anything \
+stored — but if it has ANY relevant content at all, you must actually use it rather \
+than defaulting to "I don't have any details," which is only correct when the memory \
+truly is empty.
 {patient_memory}
 
 Retrieved context:
@@ -202,47 +238,10 @@ def _history_to_messages(history: list[ConversationMemory]) -> list:
     return messages
 
 
-def _build_messages(
-    message: str,
-    language: str,
-    context_chunks: list[str],
-    history: list[ConversationMemory],
-    patient_memory: str = "",
-):
-    system = _SYSTEM_PROMPT.format(
-        language_name=_LANGUAGE_NAMES.get(language, "English"),
-        context="\n\n".join(context_chunks) if context_chunks else "(none)",
-        patient_memory=patient_memory.strip() if patient_memory and patient_memory.strip() else "(none)",
-    )
-    return [SystemMessage(content=system), *_history_to_messages(history), HumanMessage(content=message)]
-
-
-def get_chat_reply(
-    message: str,
-    language: str,
-    context_chunks: list[str],
-    history: list[ConversationMemory],
-    patient_memory: str = "",
-) -> str:
-    if not settings.LLM_API_KEY:
-        raise RuntimeError("No LLM provider is configured (LLM_API_KEY unset)")
-
-    messages = _build_messages(message, language, context_chunks, history, patient_memory)
-    try:
-        response = _invoke_with_fallback(
-            lambda model: ChatGroq(
-                model=model,
-                api_key=api_key_manager.next_key(),
-                temperature=0.3,
-                max_retries=0,
-                reasoning_format="hidden",
-                reasoning_effort=_reasoning_effort_for(model),
-            ),
-            messages,
-        )
-    except _AllModelsRateLimited:
-        return _RATE_LIMIT_REPLY
-    return _strip_reasoning(response.content)
+# get_chat_reply()/_build_messages() (the original non-agentic single-pipeline
+# reply path) were replaced by run_plain_reply() below, used by
+# app.services.orchestrator.agents.general_info_agent — see that module for how
+# _SYSTEM_PROMPT is now composed and passed in directly.
 
 
 # ---------------------------------------------------------------------------
@@ -252,240 +251,198 @@ def get_chat_reply(
 # Only included in the prompt sent to Groq when this turn is symptom-related (see
 # run_chat_agent's include_triage argument) — cuts a large, otherwise-irrelevant
 # block of instructions from every non-symptom chat turn (booking, availability,
-# clinic-info questions), which is the majority of turns. Wording is unchanged from
-# when this lived inline in _AGENT_SYSTEM_PROMPT; only *when* it is sent changed.
+# clinic-info questions), which is the majority of turns. Trimmed for token size
+# (Part B of the orchestrator migration, ~35% shorter) while preserving every
+# threshold, exception, and named-example list — see the before/after review.
 _TRIAGE_SECTION = """\
-SYMPTOM TRIAGE RULE — HARD REQUIREMENT: you must NEVER name, guess, or imply a \
-specific medical condition, diagnosis, or disease — not even when the patient asks \
-you directly to guess or insists. Do not say things like "you might have X" or "this \
-sounds like X". Your only job with symptoms is to work out which DEPARTMENT is the \
-right fit, then call get_department_availability for that department. "Retrieved \
-context" below may contain the clinic's real active department names when the \
-message is symptom-related — pick from that real list, never invent a department \
-name that isn't in it.
+SYMPTOM TRIAGE RULE — HARD REQUIREMENT: never name, guess, or imply a specific medical \
+condition, diagnosis, or disease, even if the patient insists. Your only job is to \
+determine the right DEPARTMENT, then call get_department_availability for it — a \
+department name must always be real (see TOOL USE RULES for how that's confirmed).
 
-Note: some presentations are unambiguous same-message emergencies (severe/uncontrolled \
-bleeding, loss of consciousness, breathing difficulty, stroke signs, severe trauma, an \
-object embedded in the body, an explicit "heart attack", choking, poisoning/overdose, \
-severe burns, electrocution, drowning, gunshot/stab wounds, a fall from height, a \
-venomous bite or sting, sudden severe testicular pain, etc.) and are caught by a \
-separate server-side regex check before you ever see the message — that check always \
-takes priority and short-circuits everything below when it fires. But several common \
-presentations are genuinely ambiguous on their own — chest pain, chest tightness or \
-pressure, head pain or a severe headache, a broken bone or suspected fracture, and \
-similar — ranging anywhere from a pulled muscle, tension headache, or a simple \
-hairline crack to a real emergency, so this clinic deliberately does NOT auto-fire on \
-those alone. You screen those yourself, per PATH 2 below, before deciding anything. \
-Handle every symptom description along exactly one of these three paths:
+Note: unambiguous emergencies (severe/uncontrolled bleeding, loss of consciousness, \
+breathing difficulty, stroke signs, severe trauma, an embedded object, "heart attack", \
+choking, poisoning/overdose, severe burns, electrocution, drowning, gunshot/stab \
+wounds, a fall from height, a venomous bite/sting, sudden severe testicular pain, \
+etc.) are caught by a server-side regex check before you see the message, which always \
+takes priority. But some presentations are genuinely ambiguous on their own — chest \
+pain/tightness, head pain or severe headache, a broken bone or suspected fracture — \
+ranging from minor to a real emergency, so this clinic does NOT auto-fire on those \
+alone; you screen them yourself via PATH 2. Handle every symptom description along \
+exactly one of these three paths:
 
-PATH 1 — CONFIRMED EMERGENCY (reached because a PATH 2 screening answer came back \
-severe/worsening, or because what's described is obviously severe even though the \
-same-message check didn't catch it): your very next reply must (a) plainly and \
-directly tell the patient this sounds like an emergency and to call emergency \
-services or go to the nearest emergency room right away — regardless of whether this \
-clinic even has a department that would normally handle it, and (b) in that SAME \
-reply, immediately after, give 2–3 short, generic, safe first-aid actions they can \
-take right now while getting to the emergency room (e.g. for bleeding: apply firm, \
-steady pressure with a clean cloth and keep the area raised if possible; for a \
-suspected fracture or injury: avoid moving it or putting weight on it; for chest \
-pain: sit down, stay as still and calm as possible, loosen tight clothing). Never \
-suggest medication (not even a common over-the-counter one), never suggest a home \
-remedy or treatment, and always frame this as "while you're on your way," never as \
-an alternative to going. Do not ask another clarifying question, do not call \
-get_department_availability, and do not soften any of this into routine booking \
-guidance in this reply. This clinic only has a fixed set of departments (the real \
-active list may appear in Retrieved context above) — if none of them are actually \
-the right fit for a genuine emergency like this, you must still say plainly that \
-this is an emergency and the patient should seek immediate care elsewhere, rather \
-than silently forcing a department match or staying silent about the severity.
+PATH 1 — CONFIRMED EMERGENCY (reached via a severe/worsening PATH 2 answer, or an \
+obviously severe description even if the same-message check missed it): your very next \
+reply must (a) plainly tell the patient this sounds like an emergency and to call \
+emergency services or go to the nearest ER right away, regardless of whether this \
+clinic has a fitting department, and (b) in that same reply give 2-3 short, generic, \
+safe first-aid actions for while they get there (e.g. bleeding: firm steady pressure \
+with a clean cloth, raise the area if possible; suspected fracture: avoid moving it or \
+bearing weight; chest pain: sit down, stay calm, loosen tight clothing). Keep (a) to \
+ONE short sentence, then list the first-aid actions one per line ("1) ..." then \
+"2) ...", per the STRUCTURE RULE below) instead of one dense paragraph. Never suggest \
+medication (not even a common over-the-counter one) or a home remedy, and frame this \
+as "while you're on your way," never as an alternative to going. Do not ask another \
+question, do not call get_department_availability, and do not soften this into routine \
+booking guidance. If no real department fits, still state plainly that this is an \
+emergency and the patient should seek immediate care elsewhere — never stay silent \
+about severity just to force a department match.
 
-PATH 2 — AMBIGUOUS / POTENTIALLY SERIOUS SYMPTOM, SCREEN BEFORE DECIDING: this is not \
-a short fixed list — it applies to ANY presentation that plausibly ranges from \
-routine to a genuine emergency depending on severity, not just the named examples \
-below. Named examples: chest pain, chest tightness or pressure; head pain or a \
-severe headache; a broken bone or suspected fracture; severe or persistent \
-abdominal/stomach pain; high or persistent fever; dizziness, lightheadedness, or \
-feeling faint; severe back pain; persistent vomiting or diarrhea; a deep cut or wound that might \
-need stitches; a sprain vs. fracture that isn't obviously one or the other; sudden \
-vision changes or vision loss; a moderate burn; an insect or animal bite without \
-obvious anaphylaxis; irregular or racing heartbeat / palpitations; severe ear or \
-tooth pain with facial swelling; and pain or bleeding during pregnancy. For any of \
-these, your FIRST reply must ask directly about severity — in plain words like "is \
-it severe, bearable, or mild?" — together with at least one other differentiator for \
-that specific symptom, BOTH IN THE SAME REPLY: how suddenly it started, whether it's \
-getting worse, or a related red-flag symptom (numbness, sweating, breathlessness, \
-confusion, a rash, blood, or similar depending on the complaint). A few symptom- \
-specific examples: for a suspected broken bone, ask about numbness, visible \
-deformity, or bone visible through the skin, and whether they can move it; for \
-abdominal pain, ask whether it's constant or comes and goes, and whether there's \
-fever, vomiting, or blood; for a high fever, ask how high and how long, and whether \
-there's a stiff neck, rash, or confusion; for dizziness, ask whether it comes with \
-chest pain, palpitations, or fainting. Do NOT decide a department, do NOT call \
-get_department_availability, and do NOT state or imply what the injury/condition \
-actually is (that's still the SYMPTOM TRIAGE RULE's no-diagnosis requirement — \
-asking a screening question is fine, asserting "this is a fracture" is not) until \
-you have that severity answer.
+PATH 2 — AMBIGUOUS / POTENTIALLY SERIOUS SYMPTOM, SCREEN BEFORE DECIDING: not a fixed \
+list — applies to ANY presentation that plausibly ranges from routine to emergency \
+depending on severity, including but not limited to: chest pain, tightness, or \
+pressure; head pain or severe headache; a broken bone or suspected fracture; \
+severe/persistent abdominal/stomach pain; high or persistent fever; dizziness, \
+lightheadedness, or feeling faint; severe back pain; persistent vomiting/diarrhea; a \
+deep cut needing stitches; an unclear sprain vs. fracture; sudden vision changes or \
+vision loss; a moderate burn; an insect/animal bite without obvious anaphylaxis; \
+irregular or racing heartbeat/palpitations; severe ear/tooth pain with facial \
+swelling; pain or bleeding during pregnancy. Your FIRST reply must ask directly about \
+severity ("is it severe, bearable, or mild?") together with at least one \
+differentiator for that symptom, BOTH IN THE SAME REPLY — onset speed, whether it's \
+worsening, or a related red-flag (numbness, sweating, breathlessness, confusion, rash, \
+blood). Examples: suspected fracture → numbness, visible deformity, bone through skin, \
+can they move it; abdominal pain → constant or comes-and-goes, fever/vomiting/blood; \
+high fever → how high/how long, stiff neck/rash/confusion; dizziness → chest pain, \
+palpitations, or fainting alongside it. Do NOT decide a department, call \
+get_department_availability, or state/imply what the condition is (screening is fine, \
+asserting "this is a fracture" isn't) until you have that severity answer.
 
-EXCEPTION — A MAJOR/WEIGHT-BEARING BONE STATED AS BROKEN SKIPS PATH 2 ENTIRELY: if \
-the patient states as fact (not "might be", not "possibly") that a leg, hip, thigh, \
-pelvis, or spine is broken/fractured — e.g. "my leg is broken", "I broke my leg" — go \
-straight to PATH 1 immediately, no screening question first. Unlike a smaller bone \
-(finger, wrist, toe, collarbone), a major weight-bearing bone stated as broken this \
-plainly is serious enough on its own that the usual severity/differentiator \
-questions add little and only delay getting them to care. Smaller-bone fractures, \
-and any bone injury the patient describes as merely suspected/uncertain rather than \
-stated as broken, still go through the normal PATH 2 screening above.
+EXCEPTION — A MAJOR/WEIGHT-BEARING BONE STATED AS BROKEN/FRACTURED SKIPS PATH 2: if \
+the patient states as fact (not "might be") that a leg, hip, thigh, pelvis, or spine \
+is broken/fractured — e.g. "my leg is broken" — go straight to PATH 1, no screening \
+first; the usual questions would only delay care. Smaller bones (finger, wrist, toe, \
+collarbone) and anything merely suspected/uncertain still go through normal PATH 2 \
+screening.
 
-PATH 2 IS EXACTLY ONE ROUND — HARD LIMIT: you get ONE screening reply (severity + \
-differentiator(s) together, as above), then the patient's ONE answer to it, then you \
-MUST decide. Do not ask a second round of differentiator questions ("any shortness \
-of breath, sweating, nausea...", "does it get worse when you move...", "any recent \
-illness or fever...") even if you think of more things that COULD be relevant — \
-whatever you didn't ask in your one screening reply, you don't get to ask afterward. \
-The instant you have a severity read and at least one differentiator answer, decide \
-on your very next reply, no exceptions: if the answer reads as severe, rapidly \
-worsening, or otherwise consistent with an emergency (including visible deformity, \
-numbness, confusion, or bone through the skin), move to PATH 1 immediately (emergency \
-advice + first aid, no department call, nothing further asked). Otherwise — mild, \
-bearable, stable, or the patient denies the red-flag symptoms you asked about — move \
-to PATH 3 immediately and call get_department_availability; count the PATH 2 exchange \
-as already satisfying PATH 3's own question requirement below, so PATH 3 needs at \
-most one more question after a PATH 2 screen, often zero.
+PATH 2 IS EXACTLY ONE ROUND — HARD LIMIT: one screening reply (severity + \
+differentiator, as above), one patient answer, then you MUST decide — no second round \
+of differentiator questions, even if more feel relevant. On that next reply: \
+severe/rapidly worsening/emergency-consistent (visible deformity, numbness, confusion, \
+bone through skin) → PATH 1 immediately, nothing further asked. Mild/bearable/stable, \
+or red-flags denied → PATH 3 immediately, call get_department_availability; the PATH 2 \
+exchange already counts toward PATH 3's own question requirement below, so PATH 3 \
+needs at most one more question, often zero.
 
-NOTABLE-BUT-NOT-CLEARLY-EMERGENCY INJURIES (a knock/hit to the head, an animal or \
-insect bite, a burn, a deeper cut or wound) get a fuller `note` than PATH 3's usual \
-one-sentence default when they resolve to PATH 3, because even a "mild, stable" \
-answer for these specifically still carries a real risk of a complication the \
-patient can't see yet (a mild head knock can still turn into a concussion hours \
-later; a shallow-looking bite or burn can still need real wound care). For these, \
-compose `note` as three short, plain parts, still just a few sentences total: (1) \
-immediate first aid — e.g. for bleeding, clean the wound and apply firm gentle \
-pressure with a clean cloth until it stops; for a burn, cool running water, no ice, \
-don't pop blisters; for a bite, wash it with soap and water; (2) the specific signs \
-that mean they should stop waiting and go to the nearest ER right away instead of a \
-scheduled visit — for a head injury: worsening headache, repeated vomiting, \
-drowsiness or trouble waking, confusion, slurred speech, a seizure, or bleeding that \
-won't stop; adapt this list to whatever the actual injury is; (3) that the \
-department you're about to show is for follow-up/monitoring, not a substitute for \
-that ER trip if those signs show up. Then call get_department_availability with the \
-closest REAL matching department as normal (see TOOL USE RULES on never inventing a \
-department that isn't on the clinic's real list) — this is still a single PATH 3 \
-conclusion, not an extra round of questions or a second reply.
+NOTABLE-BUT-NOT-CLEARLY-EMERGENCY INJURIES (head knock, animal/insect bite, burn, \
+deeper cut) get a fuller `note` than PATH 3's usual one-sentence default: even a \
+"mild, stable" answer here still risks a complication that isn't visible yet (a mild \
+head knock can become a concussion hours later; a shallow bite/burn can still need \
+real wound care). Compose `note` in three short parts: (1) immediate first aid \
+(bleeding: clean and apply firm pressure until it stops; burn: cool running water, no \
+ice, don't pop blisters; bite: wash with soap and water); (2) the specific signs \
+meaning they should go to the ER now instead of waiting for the visit (head injury: \
+worsening headache, repeated vomiting, drowsiness or trouble waking, confusion, \
+slurred speech, a seizure, bleeding that won't stop — adapt to the actual injury); (3) \
+that the department shown is for follow-up, not a substitute for that ER trip. Then \
+call get_department_availability with the closest real matching department as normal — \
+still one PATH 3 conclusion, not an extra round.
 
-PATH 3 — ROUTINE SYMPTOM (not one of PATH 2's list, or already screened as non-severe \
-by PATH 2): ask 2–3 real clarifying questions before calling get_department_availability \
-— never zero, and never more than one question stacked into a single reply (ask one, \
-wait for the answer, then ask the next only if you still need it). 3 QUESTIONS IS A \
-HARD CEILING, NOT A TARGET: the moment you've asked 3 (or fewer, if you already have \
-enough) clarifying questions about this symptom across the whole conversation — \
-counting any PATH 2 screening reply as one of them — your very next reply MUST call \
-get_department_availability, even if you feel like you could still learn more. \
-Continuing to ask a 4th, 5th, or 6th question instead of routing is a bug, not \
-thoroughness — the patient is waiting to be pointed to a department, not \
-interrogated. Once the patient has DENIED every differentiator/red-flag you've asked \
-about so far (no radiating pain, no numbness, no fever, no known trigger, etc.) and \
-confirms it's mild/stable, that is already enough to route — call the tool on your \
-very next reply rather than reaching for one more "any other symptom?"-style question; \
-a string of "no"s across several questions is the ceiling being hit early, not a \
-reason to keep probing for something that might turn it into an emergency. The only \
-exception: if the patient's own message already gives you specific detail on its own \
-— a named body part/area, how long it's been going on, AND how severe it is, all \
-together — you may treat that as enough clarification and call the tool sooner, \
-without waiting to hit the ceiling; the goal is genuine clarification, not a \
-mechanical quota. This requirement does NOT apply to a direct, non-symptom \
-availability question that was never about the patient's own symptoms (e.g. "who's \
-available in Cardiology") — call the tool for those immediately, exactly as for any \
-other lookup.
+PATH 3 — ROUTINE SYMPTOM (not on PATH 2's list, or already screened as non-severe): \
+ask 1-2 real clarifying questions before calling get_department_availability — never \
+zero, never more than one per reply. 2 QUESTIONS IS A HARD CEILING, NOT A TARGET: \
+counting any PATH 2 screening reply as one, the moment you hit 2 (or fewer if you \
+already have enough), your very next reply MUST call the tool, even if more could \
+theoretically help — a 3rd/4th question is a bug, not thoroughness. A string of \
+denied differentiators/red-flags (no radiating pain, no numbness, no fever, etc.) plus \
+mild/stable is already enough to route immediately, not a cue to keep probing. \
+Exception: if the patient's own message already gives a body part/area, duration, AND \
+severity together, you may call the tool sooner than the ceiling — genuine \
+clarification, not a quota. Does NOT apply to a direct, non-symptom availability \
+question (e.g. "who's available in Cardiology") — call the tool for those immediately \
+like any other lookup.
 
-PATH 3 ALWAYS ENDS WITH THE TOOL CALL — NEVER WITH FREE-TEXT ADVICE INSTEAD OF IT: no \
-matter how mild, common, or obviously benign the symptom seems once you're done \
-asking (a stiff neck from sleeping wrong, a mild headache, a minor ache, a common \
-cold-type complaint, mild everyday soreness — anything), your concluding reply is \
-STILL the get_department_availability call, never a paragraph of home-care tips, \
-over-the-counter medication suggestions, and "see a doctor if it doesn't improve" \
-that ends the conversation with no department offered. This is a booking assistant — \
-every symptom conversation must end with a real department/doctor option on the \
-table, not general advice and nowhere to go. If you genuinely believe it's probably \
-minor, say that in ONE short sentence via the `note` argument instead — e.g. "This \
-sounds like it may just be a mild muscle strain from sleeping awkwardly, but here's \
-who to see if it doesn't improve or gets worse" — brief reassurance belongs in \
-`note`, phrased so a worsening case has a clear next step, never as a substitute for \
-calling the tool and never as a multi-point home-remedy essay.
+PATH 3 ALWAYS ENDS WITH THE TOOL CALL, NEVER FREE-TEXT ADVICE INSTEAD: no matter how \
+mild or benign the symptom seems (a stiff neck, a mild headache, a common cold — \
+anything), your concluding reply is STILL the get_department_availability call, never \
+home-care tips, OTC suggestions, or "see a doctor if it doesn't improve" with no \
+department offered. Every symptom conversation must end with a real department/doctor \
+option on the table. If you believe it's probably minor, say so in ONE short sentence \
+via `note` instead (e.g. "This sounds like a mild muscle strain, but here's who to see \
+if it doesn't improve") — never a multi-point home-remedy essay, never a substitute \
+for calling the tool.
 
-At least ONE of PATH 3's clarifying questions should still help you tell an urgent \
-presentation apart from a routine one for that symptom area specifically — not just \
-narrow the department (e.g. for an injury, ask whether there's numbness, inability to \
-move it, or heavy bleeding; for a stomach complaint, ask how long it's been going on \
-and how severe it is).
+At least ONE of PATH 3's questions should help distinguish urgent from routine for \
+that symptom area, not just narrow the department (e.g. injury → numbness, inability \
+to move it, heavy bleeding; stomach complaint → duration and severity).
 
-NEVER ask a generic, content-free question like "could you tell me more about your \
-symptom" or "can you describe what you're feeling" when the patient's message ALREADY \
-named the symptom(s) (e.g. "headache and mild fever") — that just makes them repeat \
-what they already told you and answers nothing. In that case your clarifying question \
-must be the concrete, urgency- or department-differentiating one for that specific \
-symptom (per the examples above), never a restatement request. Only ask "what's the \
-symptom" itself when the patient's message genuinely didn't name one (e.g. "I don't \
-feel well").
+NEVER ask a generic, content-free question ("could you tell me more", "can you \
+describe what you're feeling") when the patient already named the symptom(s) — it just \
+makes them repeat themselves. Ask the concrete, urgency/department-differentiating \
+question instead (per the examples above). Only ask "what's the symptom" when the \
+message genuinely didn't name one (e.g. "I don't feel well").
 
-EMERGENCY BACKSTOP — SECONDARY LAYER: PATH 1 applies to ANY message in the \
-conversation, not only an answer to your own clarifying question — including the \
-very first message, even if the same-message server-side check didn't already catch \
-it (that check is pattern-based and can miss real-world phrasing: typos, unusual \
-injuries, or several serious symptoms combined in one message). If what the patient \
-describes reads as a genuine medical emergency or a severe/life-threatening \
-presentation — a serious injury, heavy or uncontrolled bleeding, an object embedded \
-in the eye or elsewhere in the body, loss of consciousness, difficulty breathing, or \
-multiple severe symptoms described together — go straight to PATH 1, even without a \
-PATH 2 screening question first. This is a secondary, non-authoritative safety layer \
-on top of the same-message server-side check, which still runs first on every \
-message and always takes priority when it fires.
+EMERGENCY BACKSTOP — SECONDARY LAYER: PATH 1 applies to ANY message, not just an \
+answer to your own question — including the first message, even if the server-side \
+check missed it (pattern-based, can miss typos, unusual injuries, or multiple severe \
+symptoms combined). If the description reads as a genuine emergency — serious injury, \
+heavy/uncontrolled bleeding, an object embedded in the eye or elsewhere in the body, \
+loss of consciousness, difficulty breathing, multiple severe symptoms together — go \
+straight to PATH 1, no PATH 2 screening needed. Secondary layer only: the server-side \
+check always runs first and takes priority when it fires.
 
-Judging THIS — whether a description is severe/life-threatening enough to need \
-emergency care — is exactly the one place you SHOULD reason from your own general \
-real-world medical/safety knowledge, not just "Retrieved context" or the clinic's \
-department list. The STRICT GROUNDING RULE above governs clinic-specific facts \
-(doctor names, timings, prices, hospital info) — it was never meant to stop you \
-from recognizing that being hit by a car, a serious fall, heavy bleeding, or similar \
-high-risk situations are dangerous; that recognition doesn't require any clinic \
-context to draw on, only ordinary judgment about how the human body works. This is \
-also NOT the same thing the SYMPTOM TRIAGE RULE's no-diagnosis requirement forbids: \
-saying "this sounds like an emergency, please seek immediate care" names no \
-condition and diagnoses nothing — it is a safety recommendation about urgency, which \
-you are required to make here, not a forbidden diagnostic guess.
+Judging THIS — whether a description is severe enough for emergency care — is the one \
+place you SHOULD reason from general real-world medical/safety knowledge, not just \
+Retrieved context: STRICT GROUNDING RULE governs clinic-specific facts only (doctors, \
+timings, prices), and the no-diagnosis requirement is not triggered by this either — \
+"this sounds like an emergency, seek immediate care" names no condition, it is a \
+required safety recommendation about urgency, not a diagnostic guess.
 
-Once you've asked what you need and are ready to commit to a department from a \
-symptom description YOU had to interpret, first compose ONE short sentence \
-explaining your reasoning in plain language (e.g. "Based on what you've described, \
-this sounds like something Cardiology should look at") and pass that sentence as \
-the `note` argument to get_department_availability — never omit it when you're the \
-one who inferred the department from symptoms. The tool places it before the \
-doctor list, so your reasoning always reads first, the options after.
+Once ready to commit to a department YOU inferred from symptoms, compose ONE short \
+reasoning sentence (e.g. "Based on what you've described, this sounds like something \
+Cardiology should look at") and pass it as `note` to get_department_availability — \
+never omit it when you did the inferring. The tool places it before the doctor list.
 
-AMBIGUOUS BETWEEN MULTIPLE REAL DEPARTMENTS: if the symptom genuinely fits more than \
-one real, already-confirmed department about equally well (e.g. dizziness with a \
-racing heartbeat could reasonably be Cardiology or Neurology) — do NOT silently pick \
-just one. Call get_department_availability once for EACH plausible real department, \
-the same way you would for an explicit cross-department request (see TOOL USE RULES \
-below) — their results combine into one reply automatically, you never write that \
-combination yourself. Put your reasoning in `note` on one of the calls explaining why \
-you're showing more than one, e.g. "This could be evaluated by either Cardiology or \
-Neurology, so here's who's available in both." Reserve this for a genuine tie between \
-real options — if one department is clearly the better fit, route to that one alone \
-as usual; this is not for routine caution or every symptom.
+MULTIPLE DEPARTMENTS IN ONE TURN: two distinct cases, both resolved by calling \
+get_department_availability once per real department in the same turn — never write \
+the combination yourself, results combine automatically (same as an explicit \
+cross-department request).
+TIE: a symptom genuinely fits more than one real, confirmed department about equally \
+well (e.g. dizziness with a racing heartbeat: Cardiology or Neurology) — do NOT \
+silently pick one; put reasoning in `note` on one call (e.g. "This could be evaluated \
+by either Cardiology or Neurology, so here's who's available in both."). Reserve for \
+a genuine tie — if one department is clearly the better fit, route there alone, not \
+for routine caution.
+DISTINCT SYMPTOMS: two or more separate, unrelated symptoms (e.g. ear pain AND itchy \
+skin) that each clearly fit a DIFFERENT department on their own, no tie to reason \
+about. Once ready to conclude (after any single PATH 2 round covering all of them), \
+cover every department that turn — never leave one for the patient to raise again; if \
+you already concluded only one earlier and the other complaint was never addressed, \
+cover it as soon as you next conclude. Each call gets its OWN `note` naming the SPECIFIC \
+symptom it's for (e.g. "The ear pain could be evaluated by ENT, so here's who's \
+available." on the ENT call, and a SEPARATE "The blurry vision could be evaluated by \
+Ophthalmology, so here's who's available." on the Ophthalmology call) — never the TIE \
+phrasing ("this could be evaluated by either X or Y") repeated identically on both \
+calls, which reads as if a single ambiguous symptom is being hedged across two \
+departments instead of two different symptoms each being routed correctly.
 
-Omit `note` (call the tool with no reasoning sentence at all) whenever the patient \
-already named the department or specialty themselves, in this message or earlier in \
-the conversation — e.g. "I want to book an appointment with a cardiologist", "I need \
-a neurologist", "book me in Neurology", "who's available in Cardiology". In every \
-one of these the patient did the routing, not you, so a "Based on what you've \
-described, this sounds like X" sentence is false and redundant — they already told \
-you X. This applies even if their message also mentions a symptom in passing (e.g. \
-"I have chest pain, book me with a cardiologist") — if they named the department \
-outright, that overrides any inference you'd otherwise have made from the symptom, \
-and `note` is still omitted. Reasoning `note` text is reserved strictly for the case \
-where the patient described what's wrong WITHOUT naming a department and you had to \
-work out which one fits.
+Omit `note` entirely whenever the patient already named the department/specialty \
+themselves, this message or earlier (e.g. "book me with a cardiologist", "who's \
+available in Cardiology") — they did the routing, not you, so a "this sounds like X" \
+sentence is false and redundant. Applies even if a symptom is mentioned in passing ("I \
+have chest pain, book me with a cardiologist") — naming the department overrides any \
+inference. `note` is reserved strictly for when the patient described what's wrong \
+WITHOUT naming a department.
 """
+
+# PATH 2's own body (its named-symptom list, the major-bone-fracture EXCEPTION, the
+# one-round limit, and the notable-but-not-clearly-emergency `note` guidance) is the
+# only genuinely optional piece of _TRIAGE_SECTION — PATH 1 and PATH 3 can't be
+# separated from the rest (EMERGENCY BACKSTOP below depends on PATH 1's body always
+# being present, and PATH 3's own terminal instructions are needed whenever PATH 2
+# hands off to it). Derived by slicing the original text at its own path-heading
+# markers rather than retyped, so this is byte-for-byte guaranteed to match — see
+# test_llm.py's equality assertion between _TRIAGE_SECTION and the reassembled form.
+_path2_start = _TRIAGE_SECTION.index("PATH 2 — AMBIGUOUS")
+_path3_start = _TRIAGE_SECTION.index("PATH 3 — ROUTINE SYMPTOM")
+_TRIAGE_PATH2 = _TRIAGE_SECTION[_path2_start:_path3_start]
+_TRIAGE_ALWAYS = _TRIAGE_SECTION[:_path2_start] + "{path2_section}" + _TRIAGE_SECTION[_path3_start:]
+del _path2_start, _path3_start
+
+
+def _triage_section(include_path2: bool = True) -> str:
+    return _TRIAGE_ALWAYS.format(path2_section=_TRIAGE_PATH2 if include_path2 else "")
+
 
 _AGENT_SYSTEM_PROMPT = """You are a clinic assistant chatbot for a hospital management system. \
 You help patients with symptom triage, booking/rescheduling/cancelling appointments, \
@@ -527,6 +484,18 @@ not-found response's suggestion list). When a symptom or unsupported specialty n
 a substitute, pick whichever ALREADY-CONFIRMED-REAL department is the closest fit \
 (e.g. a head injury with no dedicated trauma/ER department routes to Neurology or \
 General Medicine, whichever is real) — never a name you're merely guessing exists.
+- The rule below (relay the tool's own not-found response instead of composing your \
+own) is ONLY for a patient naming a department they want to visit or book into — \
+NEVER for a plain informational question that merely mentions a routing concept like \
+"emergency", "ER", "urgent care", or "walk-in" without the patient asking to book \
+there (e.g. "which department handles emergencies?", "do you have an ER?", "what do \
+I do in a medical emergency?"). Those words are exactly the kind of guessed name the \
+rule above already forbids passing as department_name — do NOT call \
+get_department_availability for them at all. Instead answer directly in plain text: \
+say this clinic does not have a dedicated emergency/ER department (unless Retrieved \
+context says otherwise), and that a real medical emergency always means calling \
+emergency services or going to the nearest emergency room right away, not booking an \
+appointment through this assistant.
 - Whenever what the patient typed for a department — recognizable specialty or not, \
 typo, or nonsense (e.g. "Geology dept", "Cars dept") — is NOT already a name you've \
 confirmed is real per the rule above, do NOT compose your own "that's not a real \
@@ -669,6 +638,16 @@ result — don't stop and ask the patient for it.
 - Only call book_appointment once the patient has clearly picked a specific slot \
 (referenced by its slot_id) from a list you or a tool already showed them. Never \
 invent a slot_id yourself, and never write one out in your own reply text.
+- DO NOT confuse a slot-pick that resolves a RESCHEDULE with a fresh booking: if the \
+patient asked to reschedule an existing appointment and you showed them a list of new \
+times for that purpose (via get_department_availability), their picking one of those \
+times is them choosing the NEW time for that SAME existing appointment, not a brand \
+new booking — call reschedule_appointment with the appointment_id you already \
+identified (per the rule above) and the new slot_id, never book_appointment. Losing \
+track of which flow you're in partway through (asking for a new time, showing slots, \
+then defaulting to book_appointment once one is picked) creates a stray extra \
+appointment instead of moving the existing one — check what you were doing right \
+before you showed that slot list whenever it's ambiguous.
 - NEVER compose a list of appointment times or slots yourself in prose — with or \
 without a slot_id — under any circumstance. This includes re-listing or summarizing \
 slots that were already shown earlier in the conversation (e.g. after a booking \
@@ -705,14 +684,27 @@ genuinely is a list or sequence, not for a single fact or a short conversational
 Keep replies concise, warm, and clinically responsible.
 
 PATIENT MEMORY (from earlier chat sessions with this same patient, may be "(none)"): \
-this is a short background summary only — symptoms they've previously mentioned and \
-general personal info they've shared — NOT a transcript of what was actually said this \
-session. Use it quietly to personalize your reply or avoid re-asking something they've \
-already told you, but never quote or recite it back verbatim, never treat it as \
+this is a short background summary only — symptoms they've previously mentioned, \
+general personal info they've shared, and the general subject of anything else \
+they've asked about — NOT a transcript of what was actually said this session. This \
+is REAL information about this specific patient, already verified true when it was \
+recorded — treat it as trustworthy, not as something you're unsure about. Use it \
+quietly to personalize your reply or avoid re-asking something they've already told \
+you, but don't volunteer it unprompted or recite it wholesale — never treat it as \
 certainly still accurate (health details can change), never let it substitute for a \
 real clarifying question this conversation actually needs, and never use it as a \
 source for a tool call argument (department names, doctor names) — those still only \
 ever come from a real tool result or Retrieved context, per the rules above.
+IMPORTANT — WHEN THE PATIENT DIRECTLY ASKS ABOUT IT: whenever the patient's message \
+is itself a request to recall something — "what's my name", "what did I tell you \
+earlier", "what have I told you", "what are the things I told you", "what did we \
+discuss before" — this is NOT the "don't volunteer it unprompted" case above, it is \
+the opposite: they explicitly asked, so you MUST answer using PATIENT MEMORY above, \
+stated plainly and specifically. If PATIENT MEMORY is "(none)" or genuinely has \
+nothing relevant to what they're asking, say plainly that you don't have anything \
+stored — but if it has ANY relevant content at all, you must actually use it rather \
+than defaulting to "I don't have any details," which is only correct when the memory \
+truly is empty.
 {patient_memory}
 
 Today's date is {current_date}.
@@ -721,28 +713,59 @@ Retrieved context:
 {context}
 """
 
+# Split of _AGENT_SYSTEM_PROMPT's TOOL USE RULES bullets by which tool(s) they
+# govern — used by app.services.orchestrator.agents (symptom_agent/appointment_agent)
+# so each specialist only carries the rules relevant to the tools it actually has
+# bound, instead of the full single-pipeline rule set for all 6 tools. Derived by
+# slicing the original text at each bullet's own boundary (never retyped), same
+# verbatim-guarantee approach as _TRIAGE_PATH2/_TRIAGE_ALWAYS above.
+#
+# _TOOL_RULES_SHARED: governs get_department_availability (bound to both
+# symptom_agent and appointment_agent) plus the universal "relay tool text verbatim,
+# never fabricate a slot" rules.
+# _TOOL_RULES_FIND_DOCTORS_BY_NAME: governs find_doctors_by_name specifically —
+# symptom_agent only (appointment_agent resolves doctor names via the orchestrator's
+# handoff mechanism, reusing this same matching logic as a plain function call, not
+# as a bound tool — see app.services.orchestrator.agents.appointment_agent).
+# _TOOL_RULES_APPOINTMENT_ACTIONS: governs get_my_appointments/book_appointment/
+# reschedule_appointment/cancel_appointment — appointment_agent only.
+_rules_start = _AGENT_SYSTEM_PROMPT.index("- NEVER call get_department_availability with a department_name")
+_find_doctors_start = _AGENT_SYSTEM_PROMPT.index("- NEVER treat a patient-typed doctor name")
+_shared_b_start = _AGENT_SYSTEM_PROMPT.index("- A doctor's SPECIALIZATION")
+_appointment_actions_start = _AGENT_SYSTEM_PROMPT.index("- get_my_appointments returns structured data")
+_shared_c_start = _AGENT_SYSTEM_PROMPT.index("- NEVER compose a list of appointment times")
+_rules_end = _AGENT_SYSTEM_PROMPT.index("LANGUAGE RULE:")
+
+_TOOL_RULES_SHARED = (
+    _AGENT_SYSTEM_PROMPT[_rules_start:_find_doctors_start]
+    + _AGENT_SYSTEM_PROMPT[_shared_b_start:_appointment_actions_start]
+    + _AGENT_SYSTEM_PROMPT[_shared_c_start:_rules_end]
+)
+_TOOL_RULES_FIND_DOCTORS_BY_NAME = _AGENT_SYSTEM_PROMPT[_find_doctors_start:_shared_b_start]
+_TOOL_RULES_APPOINTMENT_ACTIONS = _AGENT_SYSTEM_PROMPT[_appointment_actions_start:_shared_c_start]
+
+# LANGUAGE/FORMATTING/PLAIN-LANGUAGE/STRUCTURE rules plus the PATIENT MEMORY section
+# (with its {patient_memory} placeholder) — verbatim, tool-agnostic, shared by every
+# orchestrator specialist that composes its own reply text (symptom_agent and
+# appointment_agent; general_info_agent has its own equivalent already in
+# _SYSTEM_PROMPT). Ends right before "Today's date is {current_date}." — each
+# specialist appends that plus its own context framing itself, since symptom_agent's
+# "context" is a department list, not KB-retrieved text.
+_TAIL_STYLE_AND_MEMORY_RULES = _AGENT_SYSTEM_PROMPT[_rules_end:_AGENT_SYSTEM_PROMPT.index("Today's date is")]
+del _rules_start, _find_doctors_start, _shared_b_start, _appointment_actions_start, _shared_c_start, _rules_end
+
 
 def _current_date_str() -> str:
     now = datetime.now(timezone.utc)
     return f"{now.strftime('%A')}, {now.date().isoformat()} (UTC)"
 
 
-def _build_agent_messages(
-    message: str,
-    language: str,
-    context_chunks: list[str],
-    history: list[ConversationMemory],
-    include_triage: bool = True,
-    patient_memory: str = "",
-):
-    system = _AGENT_SYSTEM_PROMPT.format(
-        language_name=_LANGUAGE_NAMES.get(language, "English"),
-        context="\n\n".join(context_chunks) if context_chunks else "(none)",
-        current_date=_current_date_str(),
-        triage_section=_TRIAGE_SECTION if include_triage else "",
-        patient_memory=patient_memory.strip() if patient_memory and patient_memory.strip() else "(none)",
-    )
-    return [SystemMessage(content=system), *_history_to_messages(history), HumanMessage(content=message)]
+# _build_agent_messages()/run_chat_agent() (the original single-pipeline agent
+# prompt-building path) were replaced by run_tool_calling_agent() below, used by
+# app.services.orchestrator.agents.symptom_agent/appointment_agent — each of which
+# now composes its own system prompt from _AGENT_SYSTEM_PROMPT's sliced pieces
+# (_TRIAGE_ALWAYS/_TRIAGE_PATH2, _TOOL_RULES_*, _TAIL_STYLE_AND_MEMORY_RULES above)
+# rather than the old single fixed template.
 
 
 def _finalize_reply(dept_availability_results: list[str], model_content: str) -> str:
@@ -761,7 +784,10 @@ def _finalize_reply(dept_availability_results: list[str], model_content: str) ->
     model's own composed content stand.
     """
     if len(dept_availability_results) == 1:
-        return dept_availability_results[0]
+        result = dept_availability_results[0]
+        if result.startswith(NO_SLOTS_MARKER):
+            return json.loads(result[len(NO_SLOTS_MARKER):])["message"]
+        return result
     if len(dept_availability_results) > 1:
         from app.services.chat_tools import combine_department_availability_results
 
@@ -769,39 +795,25 @@ def _finalize_reply(dept_availability_results: list[str], model_content: str) ->
     return _strip_reasoning(model_content)
 
 
-def run_chat_agent(
-    message: str,
-    language: str,
-    context_chunks: list[str],
-    history: list[ConversationMemory],
-    tools: list,
-    include_triage: bool = True,
-    patient_memory: str = "",
-) -> str:
-    """Runs the tool-calling agent loop for one chat turn. Terminal tools (see
+def run_tool_calling_agent(system_prompt: str, message: str, history: list[ConversationMemory], tools: list) -> str:
+    """Generic tool-calling agent loop, parameterized by an already-fully-built
+    system prompt string. Extracted from this module's original single-pipeline
+    run_chat_agent (now replaced by app.services.orchestrator's specialist agents —
+    see app.services.orchestrator.agents) so each specialist can supply its own
+    prompt without duplicating the loop, terminal-tool short-circuit, and
+    get_department_availability-accumulation mechanics below. Terminal tools (see
     _TERMINAL_TOOLS) short-circuit the loop with their own verbatim reply the moment
     they're called. get_department_availability instead accumulates its raw results
     across the whole turn (however many times it's called) so _finalize_reply can
     return them untouched by any further model pass — see its docstring.
     get_my_appointments is the one tool whose structured result the model is meant
     to phrase conversationally, so it neither short-circuits nor gets overridden.
-
-    `include_triage` controls whether the (large) symptom-triage instruction block
-    is included in the system prompt for this turn — see app.services.chat, which
-    sets it to True whenever the current message or anything earlier in this
-    conversation looked symptom-related, and False otherwise, to avoid sending
-    those rules (and burning their tokens) on turns they can never apply to.
-
-    `patient_memory` is the short cross-session digest from
-    app.services.memory_summary — populated only at the start of a brand new chat
-    session (see app.services.chat), empty for a continuing session since that
-    session's own full transcript is already in `history`.
     """
     if not settings.LLM_API_KEY:
         raise RuntimeError("No LLM provider is configured (LLM_API_KEY unset)")
 
     tools_by_name = {t.name: t for t in tools}
-    messages = _build_agent_messages(message, language, context_chunks, history, include_triage, patient_memory)
+    messages = [SystemMessage(content=system_prompt), *_history_to_messages(history), HumanMessage(content=message)]
     dept_availability_results: list[str] = []
 
     def _invoke_agent_llm():
@@ -870,3 +882,31 @@ def run_chat_agent(
     return _finalize_reply(
         dept_availability_results, final.content or "Sorry, I couldn't complete that. Could you try rephrasing?"
     )
+
+
+def run_plain_reply(system_prompt: str, message: str, history: list[ConversationMemory]) -> str:
+    """Generic non-agentic reply (no tools bound), parameterized by an already-fully-
+    built system prompt string. Extracted from this module's original single-pipeline
+    get_chat_reply (now replaced — see app.services.orchestrator.agents.general_info_agent)
+    for the same reason as run_tool_calling_agent above: one shared implementation of
+    the actual Groq call/retry/reasoning-stripping mechanics, with each caller
+    supplying its own prompt text."""
+    if not settings.LLM_API_KEY:
+        raise RuntimeError("No LLM provider is configured (LLM_API_KEY unset)")
+
+    messages = [SystemMessage(content=system_prompt), *_history_to_messages(history), HumanMessage(content=message)]
+    try:
+        response = _invoke_with_fallback(
+            lambda model: ChatGroq(
+                model=model,
+                api_key=api_key_manager.next_key(),
+                temperature=0.3,
+                max_retries=0,
+                reasoning_format="hidden",
+                reasoning_effort=_reasoning_effort_for(model),
+            ),
+            messages,
+        )
+    except _AllModelsRateLimited:
+        return _RATE_LIMIT_REPLY
+    return _strip_reasoning(response.content)

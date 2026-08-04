@@ -12,13 +12,21 @@ class Settings(BaseSettings):
 
     LLM_API_KEY: str = ""
     # Optional additional Groq API keys — when set, app.core.api_keys round-robins
-    # every Groq call across whichever of the three are non-empty. Unset (the
+    # every Groq call across whichever of the six are non-empty. Unset (the
     # default) just means rotation degenerates to always using LLM_API_KEY, same as
     # before these existed.
     LLM_API_KEY_2: str = ""
     LLM_API_KEY_3: str = ""
+    LLM_API_KEY_4: str = ""
+    LLM_API_KEY_5: str = ""
+    LLM_API_KEY_6: str = ""
     LLM_PROVIDER: str = "groq"
     GROQ_MODEL: str = "openai/gpt-oss-120b"
+    # Used only for small, narrow helper calls (message intent classification, query
+    # rewriting) that don't need the main model's reasoning depth — a separate,
+    # smaller model here draws from its own rate-limit bucket instead of competing
+    # with the main conversational/agent calls for the same TPM budget.
+    GROQ_HELPER_MODEL: str = "openai/gpt-oss-20b"
 
     # LangSmith tracing — LangChain auto-detects these from the process environment,
     # so nothing here needs to call them explicitly. They're declared as Settings

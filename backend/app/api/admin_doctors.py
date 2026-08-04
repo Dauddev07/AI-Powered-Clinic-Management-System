@@ -1,9 +1,7 @@
 import json
 import uuid
-from datetime import date
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -488,10 +486,10 @@ def update_doctor_status(
     treatment regeneration and the CSV-absence path already give an inactive
     doctor — so it's blocked by the identical find_confirmed_appointment_conflicts
     check those paths use, never a separate/weaker rule. Either direction
-    immediately regenerates this doctor's slots (same as the block-dates endpoint
-    always does), so a deactivation stops showing bookable slots right away and a
-    reactivation's normal shifts start producing them again right away — neither
-    has to wait on a CSV upload or the daily scheduled job.
+    immediately regenerates this doctor's slots, so a deactivation stops showing
+    bookable slots right away and a reactivation's normal shifts start producing
+    them again right away — neither has to wait on a CSV upload or the daily
+    scheduled job.
     """
     clinic_id = current_user.clinic_id
     doctor = db.execute(
@@ -547,93 +545,3 @@ def update_doctor_status(
     return _serialize_doctor(doctor, department)
 
 
-class BlockDatesRequest(BaseModel):
-    dates: list[date] = Field(min_length=1)
-    reason: str | None = Field(default=None, max_length=255)
-
-
-class BlockDatesOut(BaseModel):
-    doctor_id: uuid.UUID
-    dates_blocked: int
-    dates_already_blocked: int
-    slots_blocked: int
-    slots_flagged_for_review: int
-
-
-@router.post("/{doctor_id}/block-dates", response_model=BlockDatesOut)
-def block_doctor_dates(
-    doctor_id: uuid.UUID,
-    payload: BlockDatesRequest,
-    current_user: User = Depends(require_role("admin")),
-    db: Session = Depends(get_db),
-) -> BlockDatesOut:
-    """The service-layer action behind the admin block-a-date feature (its UI is Day 6)
-    — inserts admin_block leave dates (surviving future CSV re-uploads, unlike the CSV's
-    own leave dates) and immediately regenerates this doctor's slots so the block takes
-    effect right away, still honoring the booking-preservation diff for any already-
-    booked slot the block newly covers.
-    """
-    clinic_id = current_user.clinic_id
-    doctor = db.execute(
-        select(Doctor).where(Doctor.clinic_id == clinic_id, Doctor.id == doctor_id)
-    ).scalar_one_or_none()
-    if doctor is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found")
-
-    existing_dates = {
-        row.leave_date_utc
-        for row in db.execute(
-            select(DoctorLeaveDate).where(
-                DoctorLeaveDate.clinic_id == clinic_id, DoctorLeaveDate.doctor_id == doctor_id
-            )
-        ).scalars().all()
-    }
-
-    dates_blocked = 0
-    dates_already_blocked = 0
-    for d in payload.dates:
-        if d in existing_dates:
-            dates_already_blocked += 1
-            continue
-        db.add(
-            DoctorLeaveDate(
-                clinic_id=clinic_id,
-                doctor_id=doctor_id,
-                leave_date_utc=d,
-                reason=payload.reason,
-                source="admin_block",
-            )
-        )
-        dates_blocked += 1
-    db.flush()
-
-    clinic = db.get(Clinic, clinic_id)
-    regen_stats = regenerate_slots_for_doctor(
-        db, clinic_id, doctor_id, clinic.timezone, actor_user_id=current_user.id
-    )
-
-    db.add(
-        AuditLog(
-            clinic_id=clinic_id,
-            actor_user_id=current_user.id,
-            action="doctor_dates_blocked",
-            entity_type="doctor",
-            entity_id=doctor_id,
-            metadata_json={
-                "dates": [d.isoformat() for d in payload.dates],
-                "reason": payload.reason,
-                "slots_blocked": regen_stats.blocked,
-                "slots_flagged_for_review": regen_stats.flagged_for_review,
-            },
-        )
-    )
-
-    db.commit()
-
-    return BlockDatesOut(
-        doctor_id=doctor_id,
-        dates_blocked=dates_blocked,
-        dates_already_blocked=dates_already_blocked,
-        slots_blocked=regen_stats.blocked,
-        slots_flagged_for_review=regen_stats.flagged_for_review,
-    )

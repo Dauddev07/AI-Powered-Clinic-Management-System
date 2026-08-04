@@ -98,3 +98,13 @@ class UserPublicOut(BaseModel):
     gender: str | None
     must_change_password: bool
     created_at: datetime
+
+
+class UserWithClinicOut(UserPublicOut):
+    """GET /auth/me only — adds the clinic's display name so the frontend header
+    can show it without a second round-trip. Kept as its own subclass rather than
+    adding clinic_name to UserPublicOut directly: that base schema is also used by
+    POST /register's response, which returns the freshly-created User row straight
+    from the ORM (from_attributes) with no clinic name resolved alongside it."""
+
+    clinic_name: str

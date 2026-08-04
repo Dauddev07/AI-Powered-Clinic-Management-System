@@ -6,8 +6,9 @@ Design principles enforced throughout this module:
 - THE LLM NEVER DECIDES; IT ONLY CALLS. book_appointment/reschedule_appointment/
   cancel_appointment each call straight into app.services.booking_engine — the exact
   same functions the REST endpoints use — so every booking rule (slot lock, overlap,
-  no past slots, no same-day cancel, ownership, transactional reschedule, daily
-  department cap) re-runs server-side exactly once, never re-implemented here.
+  no past slots, no cancel/reschedule within the 2-hour cutoff, ownership,
+  transactional reschedule, daily department cap) re-runs server-side exactly once,
+  never re-implemented here.
 - patient_id/clinic_id are captured from the ClinicContext (itself built only from
   the verified JWT — see app.core.tenancy) at tool-build time via closures. The
   model-facing tool schemas below deliberately have NO patient_id/clinic_id
@@ -21,8 +22,9 @@ Design principles enforced throughout this module:
   LLM summarize, never a raw dump" requirement for that one tool only.
 """
 import json
+import re
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
@@ -36,7 +38,7 @@ from app.models.clinic import Clinic
 from app.models.doctor import Doctor
 from app.models.slot import Slot
 from app.services import booking_engine
-from app.services.chat_markers import BOOKING_MARKER, DEPARTMENT_LIST_MARKER, DOCTOR_OPTIONS_MARKER
+from app.services.chat_markers import BOOKING_MARKER, DEPARTMENT_LIST_MARKER, DOCTOR_OPTIONS_MARKER, NO_SLOTS_MARKER
 from app.services.department_availability import find_doctors_by_name, get_department_availability
 
 
@@ -112,11 +114,72 @@ def _no_slots_in_window_message(db: Session, clinic_id: uuid.UUID, department_na
     )
 
 
+def _no_slots_payload(department_name: str, message: str) -> str:
+    """Tags a "department is real but nothing's free" message with NO_SLOTS_MARKER so
+    combine_department_availability_results can tell it apart from a plain "not
+    found" string instead of silently dropping it — see NO_SLOTS_MARKER's docstring.
+    _finalize_reply strips this marker back off for the single-call case, so a lone
+    get_department_availability call still reads exactly as before."""
+    return NO_SLOTS_MARKER + json.dumps({"department_name": department_name, "message": message})
+
+
 def _department_not_found_message(availability) -> str:
     if availability.available_department_names:
         names = ", ".join(availability.available_department_names)
         return f"I couldn't find a department called that. The departments we have are: {names}."
     return "I couldn't find a matching department, and no departments are currently configured."
+
+
+_WEEKDAY_INDEX = {
+    "monday": 0, "mon": 0,
+    "tuesday": 1, "tue": 1, "tues": 1,
+    "wednesday": 2, "wed": 2,
+    "thursday": 3, "thu": 3, "thurs": 3,
+    "friday": 4, "fri": 4,
+    "saturday": 5, "sat": 5,
+    "sunday": 6, "sun": 6,
+}
+
+# Full weekday names are unambiguous anywhere in the message. Abbreviations
+# ("sun", "sat", "mon"...) collide with ordinary English words ("the sun",
+# "I sat down"), so those are only matched right after a preposition that's
+# actually date-shaped ("on sun", "for sat", "by mon") — narrow enough to
+# avoid a false positive while still covering how patients actually type a
+# bare day-of-week reference.
+_FULL_WEEKDAY_RE = re.compile(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.IGNORECASE)
+_ABBR_WEEKDAY_RE = re.compile(
+    r"\b(?:on|for|this|next|by|until|til)\s+(mon|tue|tues|wed|thu|thurs|fri|sat|sun)\b",
+    re.IGNORECASE,
+)
+
+
+def resolve_bare_weekday_window(message: str) -> tuple[str, str] | None:
+    """Reported live: "book a slot on sun" got silently answered with Friday's
+    slots instead of "nothing open on Sunday, the earliest is Friday" — the system
+    prompt already instructs the model to resolve a bare weekday to a real date and
+    set earliest_date/latest_date, but it simply didn't call the tool with those
+    arguments set, the same "prompt instruction alone isn't a reliable guarantee"
+    gap already fixed elsewhere in this codebase for other tool-calling steps. This
+    is the deterministic backstop: resolve the weekday actually named in the
+    patient's own message, in code, to the next real occurrence of that weekday
+    on/after today (UTC, matching app.services.llm._current_date_str) — the caller
+    forces this onto the get_department_availability call regardless of what the
+    model passed. Returns None when the message names no single weekday (including
+    when it names more than one, e.g. a real date range, which this deliberately
+    doesn't try to resolve) so an unrelated turn is left completely untouched.
+    """
+    matches = _FULL_WEEKDAY_RE.findall(message)
+    if not matches:
+        abbr_matches = _ABBR_WEEKDAY_RE.findall(message)
+        matches = abbr_matches
+    if len(matches) != 1:
+        return None
+    target_weekday = _WEEKDAY_INDEX[matches[0].lower()]
+    today = datetime.now(timezone.utc).date()
+    delta_days = (target_weekday - today.weekday()) % 7
+    resolved = today + timedelta(days=delta_days)
+    iso = resolved.isoformat()
+    return iso, iso
 
 
 def _parse_date_arg(value: str | None) -> date | None:
@@ -135,23 +198,64 @@ def combine_department_availability_results(raw_results: list[str]) -> str:
     """Assembles a DEPARTMENT_LIST:: payload from multiple get_department_availability
     calls made within one agent turn — built entirely in code from each call's own
     real result, never handed to the LLM to summarize itself (that's how a raw
-    slot_id previously leaked into freehand prose). Results that aren't a
-    DOCTOR_OPTIONS:: card (a not-found or no-free-slots message) are skipped rather
-    than fabricated into a fake department entry."""
-    departments = []
-    for raw in raw_results:
-        if not raw.startswith(DOCTOR_OPTIONS_MARKER):
-            continue
-        payload = json.loads(raw[len(DOCTOR_OPTIONS_MARKER):])
-        departments.append({"department_name": payload["department_name"], "doctors": payload["doctors"]})
+    slot_id previously leaked into freehand prose).
 
-    if not departments:
+    A "department not found" result (bad/invented name) is skipped rather than
+    fabricated into a fake department entry — but a NO_SLOTS_MARKER result (a REAL
+    department with nobody free right now) is kept and surfaced under
+    "unavailable", not dropped. Silently skipping both alike used to mean a
+    multi-department turn (e.g. neck pain + itchy skin) would show a card for
+    Orthopedics but say nothing at all about Dermatology, even though the model's
+    own note named both — reported live. The patient now sees why the department
+    they were told about isn't in the card, instead of it just vanishing.
+
+    Deduplicated by department_name, first-call-wins: the model can call the tool
+    more than once for the SAME department in one turn (e.g. confused by a typo'd day
+    name and retrying), and without this the same department/doctor/slot list would
+    render twice in one card — reported live as "Cardiology" appearing back-to-back
+    with identical doctors and slots.
+
+    Each department entry also carries its own `note` (omitted/None when that call
+    didn't have one) — reported live: a symptom-based multi-department reply (nose
+    pain + skin issues -> ENT + Dermatology) showed both departments' doctors but
+    explained the reasoning for NEITHER, even though the single-department card
+    (DOCTOR_OPTIONS_MARKER) has always shown its note. This was silently dropped
+    here, not a deliberate omission — the patient could see the doctors but never
+    why they were routed there. A department reached via a direct request naming
+    it (e.g. "book me with a cardiologist") never gets a note in the first place —
+    see the TOOL USE RULES' "Omit `note` entirely" rule — so this doesn't
+    resurface reasoning for a case that never had any."""
+    departments = []
+    unavailable = []
+    seen_department_names = set()
+    for raw in raw_results:
+        if raw.startswith(DOCTOR_OPTIONS_MARKER):
+            payload = json.loads(raw[len(DOCTOR_OPTIONS_MARKER):])
+            department_name = payload["department_name"]
+            if department_name in seen_department_names:
+                continue
+            seen_department_names.add(department_name)
+            departments.append(
+                {"department_name": department_name, "note": payload.get("note"), "doctors": payload["doctors"]}
+            )
+        elif raw.startswith(NO_SLOTS_MARKER):
+            payload = json.loads(raw[len(NO_SLOTS_MARKER):])
+            department_name = payload["department_name"]
+            if department_name in seen_department_names:
+                continue
+            seen_department_names.add(department_name)
+            unavailable.append({"department_name": department_name, "message": payload["message"]})
+        # else: a "department not found" string — skipped, not fabricated into an entry.
+
+    if not departments and not unavailable:
         return (
             "I couldn't find any departments with doctors who have free upcoming slots right now. "
             "Please check back later or contact the clinic directly."
         )
+    if not departments:
+        return " ".join(entry["message"] for entry in unavailable)
 
-    return DEPARTMENT_LIST_MARKER + json.dumps({"departments": departments}, default=str)
+    return DEPARTMENT_LIST_MARKER + json.dumps({"departments": departments, "unavailable": unavailable}, default=str)
 
 
 # ---------------------------------------------------------------------------
@@ -255,13 +359,58 @@ def _cancel_appointment_impl(db: Session, ctx: ClinicContext, appointment_id: st
             db, clinic_id=ctx.clinic_id, patient_id=ctx.user_id, appointment_id=parsed_appointment_id
         )
     except HTTPException as exc:
-        # Verbatim pass-through, including the same-day-cancel refusal — must read
+        # Verbatim pass-through, including the 2-hour-cutoff refusal — must read
         # identically to what the REST /appointments/{id}/cancel endpoint returns.
         return exc.detail
 
     out = booking_engine.serialize_appointment(db, appointment)
     tz = _clinic_timezone(db, ctx.clinic_id)
     return f"Your appointment with {out.doctor_name} in {out.department_name} on {_format_when(out.start_utc, tz)} has been cancelled."
+
+
+def list_upcoming_appointments(db: Session, ctx: ClinicContext) -> list[dict]:
+    """Real, current confirmed-and-future appointments for this patient — used by
+    appointment_agent's deterministic pre-check (see
+    app.services.orchestrator.agents.appointment_agent) to decide whether a cancel/
+    reschedule request is already unambiguous or genuinely needs to ask which
+    appointment, rather than trusting the model's own get_my_appointments call plus
+    freehand reasoning for that decision. Reported live: with 2 real upcoming
+    appointments, "cancel my upcoming appointments" silently cancelled the most
+    recently booked one instead of asking which — the model never actually asked as
+    instructed. Mirrors _get_my_appointments_impl's own "upcoming" query, kept as its
+    own function since that one also serializes a `status` field and serves several
+    other filters this doesn't need."""
+    from sqlalchemy import select
+
+    from app.models.appointment import Appointment
+
+    now = datetime.now(timezone.utc)
+    stmt = (
+        select(Appointment)
+        .join(Slot, Slot.id == Appointment.slot_id)
+        .where(
+            Appointment.clinic_id == ctx.clinic_id,
+            Appointment.patient_id == ctx.user_id,
+            Appointment.status == "confirmed",
+            Slot.start_utc >= now,
+        )
+        .order_by(Slot.start_utc.asc())
+    )
+    appointments = db.execute(stmt).scalars().all()
+    tz = _clinic_timezone(db, ctx.clinic_id)
+
+    results = []
+    for appointment in appointments:
+        out = booking_engine.serialize_appointment(db, appointment)
+        results.append(
+            {
+                "appointment_id": str(out.id),
+                "doctor_name": out.doctor_name,
+                "department_name": out.department_name,
+                "when": _format_when(out.start_utc, tz),
+            }
+        )
+    return results
 
 
 @traceable(name="get_my_appointments")
@@ -331,10 +480,12 @@ def _get_department_availability_impl(
         return _department_not_found_message(availability)
     if not availability.doctors:
         if availability.next_available_when is not None:
-            return _no_slots_in_window_message(
+            message = _no_slots_in_window_message(
                 db, ctx.clinic_id, availability.department_name, availability.next_available_when
             )
-        return _no_slots_message(availability.department_name)
+        else:
+            message = _no_slots_message(availability.department_name)
+        return _no_slots_payload(availability.department_name, message)
     # `note` carries the model's own one-sentence triage reasoning (e.g. "Based on
     # what you've described, this sounds like something Cardiology should look at")
     # so it renders in the DOCTOR_OPTIONS:: card BEFORE the doctor/slot list, never
@@ -410,19 +561,68 @@ class _FindDoctorsByNameArgs(BaseModel):
     )
 
 
-def build_tools(db: Session, ctx: ClinicContext) -> list[StructuredTool]:
-    """Builds the six tools bound to this request's db session and verified
+def build_tools(
+    db: Session,
+    ctx: ClinicContext,
+    include_booking_action_tools: bool = True,
+    reschedule_redirect_appointment_id: str | None = None,
+    cancel_redirect_appointment_id: str | None = None,
+    forced_date_window: tuple[str, str] | None = None,
+) -> list[StructuredTool]:
+    """Builds the tools bound to this request's db session and verified
     ClinicContext via closures — clinic_id/patient_id are never parameters the model
-    can set, they are captured here from the JWT-derived ctx."""
+    can set, they are captured here from the JWT-derived ctx.
+
+    get_my_appointments/get_department_availability/find_doctors_by_name (the three
+    information-gathering tools) are always bound. book_appointment/
+    reschedule_appointment/cancel_appointment (the three that actually mutate an
+    appointment) are only bound when include_booking_action_tools is True — see
+    app.services.message_classifier.needs_booking_action_tools for the caller-side
+    decision, which is deliberately biased toward True whenever unsure. Omitting
+    them when genuinely not needed saves a few hundred prompt tokens on turns with
+    no booking-action signal at all (e.g. a fresh symptom description, a plain
+    clinic-info question); the default of True means nothing changes for any turn
+    where booking/reschedule/cancel could plausibly be relevant.
+
+    reschedule_redirect_appointment_id / cancel_redirect_appointment_id: set by
+    app.services.orchestrator.agents.appointment_agent once it has already
+    deterministically resolved, in code, exactly which of the patient's real
+    appointments a cancel/reschedule request refers to. When set, book_appointment
+    is transparently redirected to reschedule_appointment for that appointment_id,
+    and cancel_appointment always uses that id regardless of what the model passes.
+    This is a deliberate belt-and-suspenders enforcement, not just a prompt
+    instruction: live testing showed the model still calling book_appointment for a
+    reschedule's slot-pick despite an explicit prompt rule against it, creating a
+    stray duplicate appointment instead of moving the existing one — a mutating
+    action like this needs a real guarantee, not just a hope the model follows the
+    rule correctly every time.
+
+    forced_date_window: set by the caller (via
+    app.services.chat_tools.resolve_bare_weekday_window on the patient's raw
+    message) to an (earliest_date, latest_date) ISO-date pair when the message
+    names exactly one bare weekday (e.g. "book a slot on sun"). When set, every
+    get_department_availability call this turn uses this window regardless of
+    what earliest_date/latest_date the model itself passes (or omits) — reported
+    live: the model silently called the tool with no date bounds at all for "sun"
+    and relayed whatever the tool's own "earliest available" fallback happened to
+    return (Friday), instead of a real "nothing open Sunday, earliest is Friday"
+    answer. Same belt-and-suspenders reasoning as reschedule_redirect_appointment_id
+    above — a correctness-critical argument gets a real guarantee, not just a
+    prompt instruction to compute it correctly.
+    """
 
     def _book(slot_id: str, reason: str | None = None) -> str:
+        if reschedule_redirect_appointment_id is not None:
+            return _reschedule_appointment_impl(db, ctx, reschedule_redirect_appointment_id, slot_id)
         return _book_appointment_impl(db, ctx, slot_id, reason)
 
     def _reschedule(appointment_id: str, new_slot_id: str) -> str:
-        return _reschedule_appointment_impl(db, ctx, appointment_id, new_slot_id)
+        target_id = reschedule_redirect_appointment_id or appointment_id
+        return _reschedule_appointment_impl(db, ctx, target_id, new_slot_id)
 
     def _cancel(appointment_id: str) -> str:
-        return _cancel_appointment_impl(db, ctx, appointment_id)
+        target_id = cancel_redirect_appointment_id or appointment_id
+        return _cancel_appointment_impl(db, ctx, target_id)
 
     def _get_my_appointments(status: str = "all", limit: int = 10) -> str:
         return _get_my_appointments_impl(db, ctx, status, limit)
@@ -433,12 +633,14 @@ def build_tools(db: Session, ctx: ClinicContext) -> list[StructuredTool]:
         earliest_date: str | None = None,
         latest_date: str | None = None,
     ) -> str:
+        if forced_date_window is not None:
+            earliest_date, latest_date = forced_date_window
         return _get_department_availability_impl(db, ctx, department_name, note, earliest_date, latest_date)
 
     def _find_doctors_by_name(name_query: str) -> str:
         return _find_doctors_by_name_impl(db, ctx, name_query)
 
-    return [
+    booking_action_tools = [
         StructuredTool.from_function(
             func=_book,
             name="book_appointment",
@@ -461,6 +663,9 @@ def build_tools(db: Session, ctx: ClinicContext) -> list[StructuredTool]:
             description="Cancels one of the patient's existing confirmed appointments.",
             args_schema=_CancelArgs,
         ),
+    ]
+
+    information_tools = [
         StructuredTool.from_function(
             func=_get_my_appointments,
             name="get_my_appointments",
@@ -496,3 +701,5 @@ def build_tools(db: Session, ctx: ClinicContext) -> list[StructuredTool]:
             args_schema=_FindDoctorsByNameArgs,
         ),
     ]
+
+    return information_tools + (booking_action_tools if include_booking_action_tools else [])

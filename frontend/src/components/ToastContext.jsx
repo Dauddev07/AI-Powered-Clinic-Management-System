@@ -27,7 +27,10 @@ export function ToastProvider({ children }) {
   const showToast = useCallback(
     (message, { tone = "success", duration = 4000 } = {}) => {
       const id = ++idCounter;
-      setToasts((prev) => [...prev, { id, message, tone }]);
+      // Prepended, not appended: the viewport is anchored to the top edge (see
+      // Toast.module.css), so the newest toast should render as the first DOM
+      // child to land closest to that edge, pushing older ones down beneath it.
+      setToasts((prev) => [{ id, message, tone }, ...prev]);
       if (duration > 0) {
         const timer = setTimeout(() => dismiss(id), duration);
         timers.current.set(id, timer);

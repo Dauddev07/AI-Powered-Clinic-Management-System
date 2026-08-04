@@ -340,6 +340,60 @@ def test_find_doctors_by_name_returns_every_doctor_sharing_a_matched_word(db, cl
     assert names == {"Dr. Ali Raza", "Dr. Ali Khan"}
 
 
+def test_find_doctors_by_name_exact_full_name_short_circuits_past_unrelated_word_overlap(db, clinic):
+    # Reproduces the reported bug: a patient typing the full, exact name "Dr. Ali
+    # Raza" got stuck disambiguating against Babar Ali/Fatima Raza/Hina Raza — sharing
+    # only a first or last name — instead of resolving directly to the one doctor
+    # whose full name is an exact match.
+    dept = _department(db, clinic, name="Cardiology")
+    _doctor(db, clinic, dept, full_name="Dr. Ali Raza")
+    _doctor(db, clinic, dept, full_name="Dr. Babar Ali")
+    _doctor(db, clinic, dept, full_name="Dr. Fatima Raza")
+    _doctor(db, clinic, dept, full_name="Dr. Hina Raza")
+
+    matches = find_doctors_by_name(db, clinic.id, "Dr. Ali Raza")
+
+    assert len(matches) == 1
+    assert matches[0].full_name == "Dr. Ali Raza"
+
+
+def test_find_doctors_by_name_exact_match_is_order_independent(db, clinic):
+    dept = _department(db, clinic, name="Cardiology")
+    _doctor(db, clinic, dept, full_name="Dr. Ali Raza")
+    _doctor(db, clinic, dept, full_name="Dr. Babar Ali")
+
+    matches = find_doctors_by_name(db, clinic.id, "Raza Ali")
+
+    assert len(matches) == 1
+    assert matches[0].full_name == "Dr. Ali Raza"
+
+
+def test_find_doctors_by_name_exact_match_works_when_name_is_embedded_in_a_full_sentence(db, clinic):
+    # The name rarely arrives as a bare query in practice — it's typically embedded in
+    # a full sentence like "I'd like to book with Dr. Ali Raza". The extra words
+    # ("book", "with", ...) must not break the exact-match subset check.
+    dept = _department(db, clinic, name="Cardiology")
+    _doctor(db, clinic, dept, full_name="Dr. Ali Raza")
+    _doctor(db, clinic, dept, full_name="Dr. Babar Ali")
+    _doctor(db, clinic, dept, full_name="Dr. Fatima Raza")
+
+    matches = find_doctors_by_name(db, clinic.id, "I'd like to book with Dr. Ali Raza")
+
+    assert len(matches) == 1
+    assert matches[0].full_name == "Dr. Ali Raza"
+
+
+def test_find_doctors_by_name_partial_name_alone_still_falls_back_to_broad_overlap(db, clinic):
+    dept = _department(db, clinic, name="Cardiology")
+    _doctor(db, clinic, dept, full_name="Dr. Ali Raza")
+    _doctor(db, clinic, dept, full_name="Dr. Babar Ali")
+
+    matches = find_doctors_by_name(db, clinic.id, "Ali")
+
+    names = {m.full_name for m in matches}
+    assert names == {"Dr. Ali Raza", "Dr. Babar Ali"}
+
+
 def test_find_doctors_by_name_no_match_returns_empty(db, clinic):
     dept = _department(db, clinic, name="Cardiology")
     _doctor(db, clinic, dept, full_name="Dr. Jane Example")

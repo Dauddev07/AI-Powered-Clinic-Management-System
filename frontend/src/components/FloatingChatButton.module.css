@@ -1,11 +1,11 @@
 .wrapper {
   position: fixed;
-  right: 1.5rem;
+  left: 1.5rem;
   bottom: 1.5rem;
   z-index: 70;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 0.7rem;
 }
 
@@ -165,15 +165,15 @@
 .tooltip::after {
   content: "";
   position: absolute;
-  right: 22px;
+  left: 22px;
   bottom: -6px;
   width: 12px;
   height: 12px;
   background: inherit;
-  border-right: 1px solid color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
+  border-left: 1px solid color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
   border-bottom: 1px solid color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
-  transform: rotate(45deg);
-  border-radius: 0 0 3px 0;
+  transform: rotate(-45deg);
+  border-radius: 0 0 0 3px;
 }
 
 .tooltipVisible {
@@ -205,7 +205,7 @@
 
 @media (max-width: 480px) {
   .wrapper {
-    right: 1rem;
+    left: 1rem;
     bottom: 1rem;
   }
 
@@ -221,7 +221,7 @@
   }
 }
 
-@media (max-width: 340px) {
+@media (max-width: 300px) {
   /* At the smallest supported width the bubble would crowd the screen edge —
      drop it rather than let it clip or overflow off-screen. The button (and its
      accessible label) remains the entry point either way. */
