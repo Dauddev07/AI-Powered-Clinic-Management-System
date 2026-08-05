@@ -66,5 +66,12 @@ class Settings(BaseSettings):
     # else immediately, so this interval doesn't need to be as tight as it sounds.
     APPOINTMENT_AUTO_COMPLETE_INTERVAL_MINUTES: int = 10
 
+    # How often the background job checks for due appointment reminders (60m/30m/5m/
+    # starting-now — see app/services/appointment_reminders.py). Unlike the two
+    # intervals above, these reminders are meant to fire at close to an exact offset
+    # from the appointment's start time, not "eventually" — a 1-minute tick keeps the
+    # worst-case lateness under a minute.
+    APPOINTMENT_REMINDER_INTERVAL_MINUTES: int = 1
+
 
 settings = Settings()

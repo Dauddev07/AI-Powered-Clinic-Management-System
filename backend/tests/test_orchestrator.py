@@ -134,6 +134,14 @@ def test_router_classifies_symptom_messages(message):
     assert _heuristic_classify(message) == SYMPTOM_GENERAL
 
 
+def test_router_classifies_diziness_typo_as_symptom():
+    # Reported live: "I am feeling diziness" (missing the second "z") matched no
+    # symptom keyword at all, so it fell through to GENERAL_INFO's plain freehand
+    # LLM reply — which has no PATH 1/2/3 triage logic — instead of symptom_agent's
+    # flow, which always asks 1-2 clarifying questions before naming a department.
+    assert _heuristic_classify("I am feeling diziness") == SYMPTOM_GENERAL
+
+
 @pytest.mark.parametrize(
     "message", ["I want to book an appointment", "please cancel my appointment", "can I reschedule my visit"]
 )
@@ -144,6 +152,30 @@ def test_router_classifies_booking_action_messages(message):
 @pytest.mark.parametrize("message", ["what are your clinic hours?", "hi", "thanks a lot"])
 def test_router_classifies_plain_info_and_smalltalk_messages(message):
     assert _heuristic_classify(message) == GENERAL_INFO
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "isn't neurologist a better idea?",
+        "what do you think based upon my symptoms i have told you",
+        "which department should i go with",
+        # Reported live: "i think i can goto neorologist,what do u suggest?" — the
+        # informal "u" instead of "you" fell through the regex entirely (only "you"
+        # was covered), so this stayed in APPOINTMENT via marker continuity and
+        # showed Neurology's availability directly, with no symptom-grounded
+        # reasoning at all.
+        "what do u suggest?",
+        "what do u think?",
+    ],
+)
+def test_router_rule0_5_recommendation_request_overrides_marker_continuity(message):
+    # Reported live: after a DOCTOR_OPTIONS_MARKER card was shown, a recommendation
+    # question fell to Rule 1 (marker continuity) and went to appointment_agent —
+    # which has no symptom awareness at all — instead of symptom_agent's real
+    # symptom-to-department reasoning. Rule 0.5 must win even with a card active.
+    history = [_row("assistant", DOCTOR_OPTIONS_MARKER + '{"doctors": []}')]
+    assert _heuristic_classify(message, history) == SYMPTOM_GENERAL
 
 
 def test_router_rule1_unambiguous_reply_to_slot_pick_card_routes_to_appointment():
@@ -289,7 +321,7 @@ def test_router_rule6_has_a_word_count_ceiling_not_unlimited():
 
 
 def test_symptom_agent_prompt_includes_triage_and_department_context():
-    prompt = symptom_agent._build_system_prompt("English", ["Cardiology", "ENT"], "", include_path2=True)
+    prompt = symptom_agent._build_system_prompt("English", ["Cardiology", "ENT"], include_path2=True)
     assert "SYMPTOM TRIAGE RULE" in prompt
     assert "PATH 1" in prompt
     assert "PATH 2 — AMBIGUOUS" in prompt
@@ -298,33 +330,30 @@ def test_symptom_agent_prompt_includes_triage_and_department_context():
 
 
 def test_symptom_agent_prompt_omits_path2_when_told_to():
-    prompt = symptom_agent._build_system_prompt("English", ["Cardiology"], "", include_path2=False)
+    prompt = symptom_agent._build_system_prompt("English", ["Cardiology"], include_path2=False)
     assert "PATH 2 — AMBIGUOUS" not in prompt
     assert "PATH 1 — CONFIRMED EMERGENCY" in prompt
     assert "PATH 3 — ROUTINE SYMPTOM" in prompt
 
 
 def test_symptom_agent_prompt_includes_find_doctors_by_name_rule_only():
-    prompt = symptom_agent._build_system_prompt("English", [], "", include_path2=True)
+    prompt = symptom_agent._build_system_prompt("English", [], include_path2=True)
     assert "NEVER treat a patient-typed doctor name as a confirmed match" in prompt
     # Appointment-action-only rules must NOT leak into symptom_agent's prompt.
     assert "get_my_appointments returns structured data" not in prompt
     assert "Only call book_appointment once the patient has clearly picked" not in prompt
 
 
-def test_symptom_agent_prompt_defaults_patient_memory_to_none_placeholder():
-    prompt = symptom_agent._build_system_prompt("English", [], "", include_path2=True)
-    assert "PATIENT MEMORY" in prompt
-    assert "(none)" in prompt
-
-
-def test_symptom_agent_prompt_includes_patient_memory_text_when_given():
-    prompt = symptom_agent._build_system_prompt("English", [], "Patient has a penicillin allergy.", include_path2=True)
-    assert "Patient has a penicillin allergy." in prompt
+def test_symptom_agent_prompt_omits_patient_memory_section_entirely():
+    # PATIENT MEMORY was removed from the prompt entirely (not just left empty) —
+    # cross-session memory no longer exists, so the section only confused the model
+    # into misfiring on unrelated messages (see app.services.chat's module docstring).
+    prompt = symptom_agent._build_system_prompt("English", [], include_path2=True)
+    assert "PATIENT MEMORY" not in prompt
 
 
 def test_symptom_agent_prompt_handles_no_active_departments():
-    prompt = symptom_agent._build_system_prompt("English", [], "", include_path2=True)
+    prompt = symptom_agent._build_system_prompt("English", [], include_path2=True)
     assert "Active departments at this clinic: (none configured)." in prompt
 
 
@@ -591,6 +620,152 @@ def test_run_symptom_agent_does_not_falsely_hint_dentistry_for_ear_and_neck_pain
     assert payload["department_name"] == "ENT"
 
 
+def test_run_symptom_agent_answers_a_recommendation_request_deterministically_without_the_llm(
+    monkeypatch, db, ctx, clinic, patient
+):
+    # Reported live: "isn't neurologist a better idea?" / "what do you think based on
+    # my symptoms" got either a blind department switch (via appointment_agent, no
+    # reasoning) or a free-text reply that HALLUCINATED a symptom ("ear pain") never
+    # actually mentioned. A recommendation request must be answered entirely from the
+    # real symptom-to-department mapping over what was actually said, never handed to
+    # the LLM to freehand a reason.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    gen_med = Department(clinic_id=clinic.id, name="General Medicine")
+    db.add(gen_med)
+    db.flush()
+    gen_med_doctor = Doctor(
+        clinic_id=clinic.id,
+        department_id=gen_med.id,
+        external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Ali Raza",
+        is_active=True,
+    )
+    db.add(gen_med_doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=gen_med_doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for a recommendation request")
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row("user", "I am having a bit of fever and body aches"),
+        _row("assistant", "How long have you had the fever and body aches?"),
+        _row("user", "from past 2 years, severity is mild"),
+    ]
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "but i feel like going to neurologist isnt that a better idea?", "en", history
+    )
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "General Medicine"
+    assert "fever" in payload["note"].lower()
+
+
+def test_run_symptom_agent_recommendation_request_names_low_mood_and_skin_departments_not_a_guessed_one(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: a patient described sadness (2 days) and mild itchy skin, was
+    # shown a combined Dermatology/Psychiatry card, then asked to book with
+    # Neurology instead ("i think i can goto neorologist,what do u suggest?") — a
+    # department their own symptoms never pointed to at all. The informal "what do
+    # u suggest" (not "you") is what let this fall through to a plain department
+    # lookup instead of this deterministic short-circuit — see the message_classifier
+    # fix alongside this test. "sad"/"sadness" are also now in the low-mood keyword
+    # set (previously only "anxiety"/"depression"/"mental"/"stress" were covered).
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    for name in ("Dermatology", "Psychiatry", "Neurology"):
+        dept = Department(clinic_id=clinic.id, name=name)
+        db.add(dept)
+        db.flush()
+        doctor = Doctor(
+            clinic_id=clinic.id,
+            department_id=dept.id,
+            external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+            full_name=f"Dr. {name}",
+            is_active=True,
+        )
+        db.add(doctor)
+        db.flush()
+        db.add(Slot(
+            clinic_id=clinic.id, doctor_id=doctor.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for a recommendation request")
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row("user", "i am feeling very sad today also i have some skin related issues as well"),
+        _row("assistant", "How long have you been feeling sad? Can you describe the skin issue?"),
+        _row("user", "no thoughts of harming myself, sadness is from 2 days. skin is itchy, not very severe"),
+    ]
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "i think i can goto neorologist,what do u suggest?", "en", history
+    )
+
+    assert "Neurology" not in result
+    assert "Dermatology" in result
+    assert "Psychiatry" in result
+
+
+def test_run_symptom_agent_recommendation_request_falls_through_when_nothing_hinted_yet(monkeypatch, db, ctx):
+    # No real symptom has been described yet this session — nothing to base a
+    # recommendation on, so this must fall through to the normal triage flow
+    # (which will ask what's wrong) rather than returning an empty/broken reply.
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "What symptoms are you having?")
+
+    result = symptom_agent.run_symptom_agent(db, ctx, "what do you recommend?", "en", [])
+
+    assert result == "What symptoms are you having?"
+
+
+def test_run_symptom_agent_first_message_combining_symptoms_and_recommendation_still_gets_normal_triage(
+    monkeypatch, db, ctx
+):
+    # Reported live: "I am having a bit of fever and body aches, what do you
+    # recommend?" — symptom description AND the recommendation phrase in the SAME,
+    # very first message — short-circuited straight to a department card, skipping
+    # the normal PATH 2 screening questions (severity/duration) that must always come
+    # first for a symptom nobody has triaged yet. Since this is the FIRST mention of
+    # the symptom (nothing in prior history), this must still go through the normal
+    # LLM triage flow, not the deterministic recommendation short-circuit.
+    monkeypatch.setattr(
+        symptom_agent.llm,
+        "run_tool_calling_agent",
+        lambda *a, **k: "How long have you had the fever and body aches, and how severe are they?",
+    )
+
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "I am having a bit of fever and body aches what do you recommend ?", "en", []
+    )
+
+    assert result == "How long have you had the fever and body aches, and how severe are they?"
+
+
 def test_run_symptom_agent_does_not_hint_a_department_with_no_matching_symptom_words(monkeypatch, db, ctx):
     card = json.dumps(
         {
@@ -748,7 +923,7 @@ def test_run_symptom_agent_does_not_refetch_when_note_only_names_the_already_cov
 
 
 def test_appointment_agent_prompt_includes_appointment_action_rules_only():
-    prompt = appointment_agent._build_system_prompt("English", "", None)
+    prompt = appointment_agent._build_system_prompt("English", None)
     assert "get_my_appointments returns structured data" in prompt
     assert "Only call book_appointment once the patient has clearly picked" in prompt
     # Symptom-triage and find_doctors_by_name-specific content must NOT leak in.
@@ -758,13 +933,13 @@ def test_appointment_agent_prompt_includes_appointment_action_rules_only():
 
 def test_appointment_agent_prompt_includes_previously_shown_options_when_given():
     payload = {"doctors": [{"doctor_name": "Dr. Ahmed Khan", "department_name": "Cardiology"}]}
-    prompt = appointment_agent._build_system_prompt("English", "", payload)
+    prompt = appointment_agent._build_system_prompt("English", payload)
     assert "PREVIOUSLY SHOWN OPTIONS" in prompt
     assert "Dr. Ahmed Khan" in prompt
 
 
 def test_appointment_agent_prompt_omits_previously_shown_options_when_none():
-    prompt = appointment_agent._build_system_prompt("English", "", None)
+    prompt = appointment_agent._build_system_prompt("English", None)
     assert "PREVIOUSLY SHOWN OPTIONS" not in prompt
 
 
@@ -1186,6 +1361,110 @@ def test_run_appointment_agent_reasks_when_reply_to_pending_disambiguation_match
     assert len(payload["candidates"]) == 2
 
 
+def test_run_appointment_agent_warns_when_named_department_contradicts_session_symptoms(
+    monkeypatch, db, ctx, clinic, patient
+):
+    # Reported live: patient described fever + body aches (routed correctly to
+    # General Medicine), then said "isn't neurologist a better idea" / directly asked
+    # to book with a department their own symptoms don't support — appointment_agent
+    # blindly showed that department's availability with zero reasoning. This
+    # confirms the deterministic mismatch check fires BEFORE the LLM ever runs.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    gen_med = Department(clinic_id=clinic.id, name="General Medicine")
+    db.add(gen_med)
+    neuro = Department(clinic_id=clinic.id, name="Neurology")
+    db.add(neuro)
+    db.flush()
+    gen_med_doctor = Doctor(
+        clinic_id=clinic.id,
+        department_id=gen_med.id,
+        external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Ali Raza",
+        is_active=True,
+    )
+    db.add(gen_med_doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=gen_med_doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called when the named department contradicts symptoms")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    card = json.dumps(
+        {
+            "note": "Patient reports mild fever and body aches.",
+            "department_name": "General Medicine",
+            "doctors": [{"doctor_id": "d1", "doctor_name": "Dr. Ali Raza", "specialization": None, "slots": []}],
+        }
+    )
+    history = [
+        _row("user", "I am having a bit of fever and body aches"),
+        _row("assistant", "How long have you had the fever and body aches?"),
+        _row("user", "from past 2 years"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + card),
+    ]
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "book appointment in Neurology", "en", history
+    )
+
+    assert "General Medicine" in result
+    assert "Neurology" in result
+    assert result != DOCTOR_OPTIONS_MARKER + card
+
+
+def test_run_appointment_agent_proceeds_after_the_mismatch_warning_was_already_given(
+    monkeypatch, db, ctx, clinic, patient
+):
+    # A patient who repeats the same request after already seeing the mismatch
+    # warning is making an informed choice — must proceed normally the second time,
+    # not refuse forever.
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+
+    gen_med = Department(clinic_id=clinic.id, name="General Medicine")
+    db.add(gen_med)
+    neuro = Department(clinic_id=clinic.id, name="Neurology")
+    db.add(neuro)
+    db.flush()
+    db.add(Doctor(
+        clinic_id=clinic.id,
+        department_id=neuro.id,
+        external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Sana Qureshi",
+        is_active=True,
+    ))
+    db.flush()
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", lambda *a, **k: "reply")
+
+    history = [
+        _row("user", "I am having a bit of fever and body aches"),
+        _row(
+            "assistant",
+            "Based on the fever/body aches you described, General Medicine might be a better fit than Neurology. "
+            "Would you like me to show General Medicine availability instead, or would you still like to see "
+            "Neurology's availability?",
+        ),
+    ]
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "book appointment in Neurology", "en", history
+    )
+
+    assert result == "reply"
+
+
 def test_run_appointment_agent_only_binds_its_five_tools(monkeypatch, db, ctx):
     captured = {}
 
@@ -1209,25 +1488,6 @@ def test_run_appointment_agent_only_binds_its_five_tools(monkeypatch, db, ctx):
 # =====================================================================================
 # general_info_agent
 # =====================================================================================
-
-
-def test_run_general_info_agent_answers_personal_recall_deterministically_from_memory(monkeypatch, db, ctx):
-    # Reported bug: patient_memory was correctly populated and passed into the
-    # prompt, yet the LLM still said "I don't have any details" for a direct recall
-    # question. Answered deterministically in code instead of trusting the model.
-    def _fail_if_called(*args, **kwargs):
-        raise AssertionError("the LLM must not be called for a personal-recall question with real memory")
-
-    monkeypatch.setattr(general_info_agent.llm, "run_plain_reply", _fail_if_called)
-    monkeypatch.setattr(
-        general_info_agent, "retrieve", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not retrieve"))
-    )
-
-    result = general_info_agent.run_general_info_agent(
-        db, ctx, "what are the things i told u", "en", [], patient_memory="Asked about Cardiology availability."
-    )
-
-    assert result == "Here's what I have from our earlier conversations: Asked about Cardiology availability."
 
 
 def test_run_general_info_agent_answers_department_list_request_deterministically(monkeypatch, db, ctx, department):
@@ -1258,7 +1518,11 @@ def test_run_general_info_agent_department_list_request_says_so_when_none_config
     assert result == "There are no departments configured at this clinic right now."
 
 
-def test_run_general_info_agent_falls_through_to_the_llm_when_memory_is_empty(monkeypatch, db, ctx):
+def test_run_general_info_agent_answers_personal_recall_question_via_the_llm(monkeypatch, db, ctx):
+    # Cross-session memory was removed entirely (see app.services.chat's module
+    # docstring) — a personal-recall question like "what are the things i told u"
+    # now falls straight through to the normal retrieval+LLM path, same as any
+    # other message, instead of a deterministic memory short-circuit.
     from app.rag.retrieval import RetrievalResult
 
     monkeypatch.setattr(
@@ -1276,9 +1540,7 @@ def test_run_general_info_agent_falls_through_to_the_llm_when_memory_is_empty(mo
 
     monkeypatch.setattr(general_info_agent.llm, "run_plain_reply", fake_run_plain_reply)
 
-    result = general_info_agent.run_general_info_agent(
-        db, ctx, "what are the things i told u", "en", [], patient_memory=""
-    )
+    result = general_info_agent.run_general_info_agent(db, ctx, "what are the things i told u", "en", [])
 
     assert captured.get("called") is True
     assert result == "I don't have anything stored."
@@ -1312,7 +1574,10 @@ def test_run_general_info_agent_uses_system_prompt_unchanged(monkeypatch, db, ct
     assert "DEPARTMENT VS SPECIALIZATION" in captured["system_prompt"]
 
 
-def test_run_general_info_agent_defaults_patient_memory_to_none_placeholder(monkeypatch, db, ctx):
+def test_run_general_info_agent_omits_patient_memory_section_entirely(monkeypatch, db, ctx):
+    # PATIENT MEMORY was removed from the prompt entirely — see
+    # app.services.chat's module docstring for why leaving it in with an
+    # always-empty value was actively harmful, not just wasted tokens.
     from app.rag.retrieval import RetrievalResult
 
     monkeypatch.setattr(
@@ -1331,8 +1596,7 @@ def test_run_general_info_agent_defaults_patient_memory_to_none_placeholder(monk
 
     general_info_agent.run_general_info_agent(db, ctx, "hi", "en", [])
 
-    assert "PATIENT MEMORY" in captured["system_prompt"]
-    assert "(none)" in captured["system_prompt"]
+    assert "PATIENT MEMORY" not in captured["system_prompt"]
 
 
 def test_run_general_info_agent_rewrite_rescues_a_query_that_fails_on_its_own(monkeypatch, db, ctx):

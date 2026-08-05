@@ -2,7 +2,6 @@ import pytest
 
 from app.services.red_flag import (
     RED_FLAG_MESSAGE_EN,
-    RED_FLAG_MESSAGE_UR,
     detect_red_flag,
     red_flag_message,
 )
@@ -594,6 +593,10 @@ def test_unrelated_phrasing_does_not_false_fire(message):
         "excruciating pain in one of my balls that started suddenly",
         # Unconsciousness — no "unconscious"/"unresponsive"/"passed out" keyword.
         "he just collapsed and wont wake up no matter what we do",
+        # Suicidal ideation — no "suicid"/"kill myself"/"want to die"/"hurt myself"
+        # keyword at all.
+        "I feel like ending it all",
+        "I have been having thoughts of not wanting to be alive",
     ],
 )
 def test_semantic_similarity_catches_paraphrases_with_no_shared_regex_vocabulary(message):
@@ -626,9 +629,53 @@ def test_semantic_similarity_catches_paraphrases_with_no_shared_regex_vocabulary
         # result (see its docstring). Kept here so it can't silently regress if
         # anaphylaxis-style wording is ever added back to the exemplar bank.
         "What allergy did I mention earlier?",
+        # Regression: ordinary multi-limb pain (nothing one-sided, nothing about
+        # weakness/numbness/facial drooping) scored just over threshold against the
+        # original, looser stroke exemplar wording — see that exemplar's own comment
+        # in red_flag.py for the calibration details.
+        "i am having pain in my leg and in my hands as well",
+        "i am having pain in my leg and also my hands",
+        "my hands and legs hurt",
+        # Regression: a routine PATH-2 screening follow-up with no body part named at
+        # all scored just over threshold against the original, looser testicular-pain
+        # exemplar wording — see that exemplar's own comment in red_flag.py for the
+        # calibration details.
+        "its been from past 10 days\nand the pain is mild and moderate",
+        "i am having pain in my hand and also have some skin related issues",
+        # Regression: simply naming/booking the Psychiatry department (no self-harm
+        # content at all) scored just over threshold against the original, looser
+        # suicidal-ideation exemplar wording — see that exemplar's own comment in
+        # red_flag.py for the calibration details.
+        "Psychiatry in this dept",
+        "I want to book an appointment in Psychiatry",
+        "book me with psychiatry department",
+        "I need a psychiatrist appointment",
+        "can I see a psychiatrist",
+        "show me psychiatry availability",
     ],
 )
 def test_semantic_similarity_does_not_false_fire_on_path2_or_benign_messages(message):
+    assert not detect_red_flag(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # Regression for the MARGIN LAYER itself (see _SEMANTIC_MARGIN's docstring
+        # in red_flag.py): each of these is a hedged/mild variant of a real danger
+        # sign — the same "short + vague drifts toward every exemplar bank" shape
+        # that caused three separate real false positives before the margin layer
+        # was added. These previously scored just under the OLD absolute-only
+        # threshold's safety margin and are kept here so a future exemplar-only
+        # tweak (without the margin layer's help) can't silently regress them.
+        "i have slight numbness in my hand and it feels a bit weak",
+        "ive had mild numbness in one hand for a few days, its bearable",
+        "my hand feels weak and numb but the pain is mild",
+        "i feel a little weak and numb on my left side but its manageable",
+        "i occasionally slur a word or two when im tired, its not a big deal",
+    ],
+)
+def test_semantic_margin_suppresses_hedged_variants_of_danger_sign_wording(message):
     assert not detect_red_flag(message)
 
 
@@ -637,16 +684,14 @@ def test_empty_and_blank_messages_do_not_fire():
     assert not detect_red_flag("   ")
 
 
-# --- red_flag_message language variants ---------------------------------------------
+# --- red_flag_message ----------------------------------------------------------------
 
 
-def test_red_flag_message_returns_correct_language_variant():
-    assert red_flag_message("en") == RED_FLAG_MESSAGE_EN
-    assert red_flag_message("ur") == RED_FLAG_MESSAGE_UR
-
-
-def test_red_flag_message_defaults_to_english_for_unknown_language():
-    assert red_flag_message("fr") == RED_FLAG_MESSAGE_EN
+def test_red_flag_message_is_always_english():
+    # Urdu removed per product decision — a red-flagged reply must never be
+    # translated at request time (risk of a life-safety message being softened), and
+    # a second hardcoded-Urdu variant wasn't being kept in sync with the English one.
+    assert red_flag_message() == RED_FLAG_MESSAGE_EN
 
 
 def test_red_flag_message_includes_first_aid_guidance_immediately():
@@ -655,4 +700,11 @@ def test_red_flag_message_includes_first_aid_guidance_immediately():
     # a red-flagged turn, so there is no other point in the flow where it can appear).
     assert "While you're on your way" in RED_FLAG_MESSAGE_EN
     assert "bleeding" in RED_FLAG_MESSAGE_EN
-    assert "راستے میں" in RED_FLAG_MESSAGE_UR
+
+
+def test_red_flag_message_names_the_clinic_local_emergency_number():
+    # Reported live: the message previously said "your local emergency number" with
+    # no actual number, and separately the LLM's own PATH 1 replies were inventing an
+    # arbitrary one (e.g. "999") since nothing told it which to use. Must name 1122
+    # explicitly now.
+    assert "1122" in RED_FLAG_MESSAGE_EN

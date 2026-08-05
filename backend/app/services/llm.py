@@ -196,31 +196,6 @@ Keep replies concise, warm, and clinically responsible. You are not a doctor and
 not give a definitive diagnosis — describe possibilities and recommend booking an \
 appointment or seeking urgent care when appropriate.
 
-PATIENT MEMORY (from earlier chat sessions with this same patient, may be "(none)"): \
-this is a short background summary only — symptoms they've previously mentioned, \
-general personal info they've shared, and the general subject of anything else \
-they've asked about — NOT a transcript of what was actually said this session. This \
-is REAL information about this specific patient, already verified true when it was \
-recorded — it is NOT an invented or unverified fact, and using it is not covered by \
-the "don't invent clinic-specific facts" instruction above, which is about facts you \
-don't actually have, not about this. You may use it quietly to personalize your \
-reply or avoid re-asking something they've already told you, but don't volunteer it \
-unprompted or recite it wholesale — never treat it as certainly still accurate \
-(health details can change), and never let it substitute for asking a real \
-clarifying question this conversation actually needs.
-IMPORTANT — WHEN THE PATIENT DIRECTLY ASKS ABOUT IT: whenever the patient's message \
-is itself a request to recall something — "what's my name", "what did I tell you \
-earlier", "what have I told you", "what are the things I told you", "what did we \
-discuss before" — this is NOT the "don't volunteer it unprompted" case above, it is \
-the opposite: they explicitly asked, so you MUST answer using PATIENT MEMORY above, \
-stated plainly and specifically (e.g. "You mentioned recurring migraines and asked \
-about Cardiology availability."). If PATIENT MEMORY is "(none)" or genuinely has \
-nothing relevant to what they're asking, say plainly that you don't have anything \
-stored — but if it has ANY relevant content at all, you must actually use it rather \
-than defaulting to "I don't have any details," which is only correct when the memory \
-truly is empty.
-{patient_memory}
-
 Retrieved context:
 {context}
 """
@@ -274,8 +249,9 @@ exactly one of these three paths:
 PATH 1 — CONFIRMED EMERGENCY (reached via a severe/worsening PATH 2 answer, or an \
 obviously severe description even if the same-message check missed it): your very next \
 reply must (a) plainly tell the patient this sounds like an emergency and to call \
-emergency services or go to the nearest ER right away, regardless of whether this \
-clinic has a fitting department, and (b) in that same reply give 2-3 short, generic, \
+1122 (this clinic's local emergency number — never a different country's number like \
+911 or 999) or go to the nearest ER right away, regardless of whether this clinic has \
+a fitting department, and (b) in that same reply give 2-3 short, generic, \
 safe first-aid actions for while they get there (e.g. bleeding: firm steady pressure \
 with a clean cloth, raise the area if possible; suspected fracture: avoid moving it or \
 bearing weight; chest pain: sit down, stay calm, loosen tight clothing). Keep (a) to \
@@ -351,6 +327,26 @@ severity together, you may call the tool sooner than the ceiling — genuine \
 clarification, not a quota. Does NOT apply to a direct, non-symptom availability \
 question (e.g. "who's available in Cardiology") — call the tool for those immediately \
 like any other lookup.
+
+A patient who explicitly asks for your recommendation/opinion ("what do you \
+recommend?", "what do you think?") while describing a symptom for the FIRST time, \
+with no duration or severity given yet, does NOT waive this floor — "what do you \
+recommend" is a request to eventually get your answer, not an instruction to skip \
+straight to one. Ask your 1-2 clarifying questions exactly as normal, THEN give your \
+recommendation once you actually have enough to base it on.
+
+THE MOST COMMON WAY THIS RULE GETS BROKEN, WATCH FOR IT SPECIFICALLY: a short message \
+naming only ONE mild-sounding symptom with nothing else at all (e.g. "I am having \
+nausea", "I have a headache", "I feel dizzy", "I have a cough") is NOT "already enough \
+information" — it is the single most common case where the 1-2-question floor still \
+applies in full, precisely because nothing has been screened yet. A bare symptom name \
+by itself is never a reason to call get_department_availability immediately. Do not \
+skip straight to the tool call under any framing ("it sounds minor so I'll just show \
+the department", "this is a common/everyday symptom so no question is needed", "I \
+already know which department this is") — mild-sounding or obvious-seeming does not \
+mean pre-screened. If your planned reply to a symptom mentioned for the first time \
+this conversation would be a tool call with zero questions asked so far, that reply is \
+wrong; ask a real clarifying question instead.
 
 PATH 3 ALWAYS ENDS WITH THE TOOL CALL, NEVER FREE-TEXT ADVICE INSTEAD: no matter how \
 mild or benign the symptom seems (a stiff neck, a mild headache, a common cold — \
@@ -683,30 +679,6 @@ genuinely is a list or sequence, not for a single fact or a short conversational
 
 Keep replies concise, warm, and clinically responsible.
 
-PATIENT MEMORY (from earlier chat sessions with this same patient, may be "(none)"): \
-this is a short background summary only — symptoms they've previously mentioned, \
-general personal info they've shared, and the general subject of anything else \
-they've asked about — NOT a transcript of what was actually said this session. This \
-is REAL information about this specific patient, already verified true when it was \
-recorded — treat it as trustworthy, not as something you're unsure about. Use it \
-quietly to personalize your reply or avoid re-asking something they've already told \
-you, but don't volunteer it unprompted or recite it wholesale — never treat it as \
-certainly still accurate (health details can change), never let it substitute for a \
-real clarifying question this conversation actually needs, and never use it as a \
-source for a tool call argument (department names, doctor names) — those still only \
-ever come from a real tool result or Retrieved context, per the rules above.
-IMPORTANT — WHEN THE PATIENT DIRECTLY ASKS ABOUT IT: whenever the patient's message \
-is itself a request to recall something — "what's my name", "what did I tell you \
-earlier", "what have I told you", "what are the things I told you", "what did we \
-discuss before" — this is NOT the "don't volunteer it unprompted" case above, it is \
-the opposite: they explicitly asked, so you MUST answer using PATIENT MEMORY above, \
-stated plainly and specifically. If PATIENT MEMORY is "(none)" or genuinely has \
-nothing relevant to what they're asking, say plainly that you don't have anything \
-stored — but if it has ANY relevant content at all, you must actually use it rather \
-than defaulting to "I don't have any details," which is only correct when the memory \
-truly is empty.
-{patient_memory}
-
 Today's date is {current_date}.
 
 Retrieved context:
@@ -744,14 +716,19 @@ _TOOL_RULES_SHARED = (
 _TOOL_RULES_FIND_DOCTORS_BY_NAME = _AGENT_SYSTEM_PROMPT[_find_doctors_start:_shared_b_start]
 _TOOL_RULES_APPOINTMENT_ACTIONS = _AGENT_SYSTEM_PROMPT[_appointment_actions_start:_shared_c_start]
 
-# LANGUAGE/FORMATTING/PLAIN-LANGUAGE/STRUCTURE rules plus the PATIENT MEMORY section
-# (with its {patient_memory} placeholder) — verbatim, tool-agnostic, shared by every
-# orchestrator specialist that composes its own reply text (symptom_agent and
-# appointment_agent; general_info_agent has its own equivalent already in
-# _SYSTEM_PROMPT). Ends right before "Today's date is {current_date}." — each
-# specialist appends that plus its own context framing itself, since symptom_agent's
-# "context" is a department list, not KB-retrieved text.
-_TAIL_STYLE_AND_MEMORY_RULES = _AGENT_SYSTEM_PROMPT[_rules_end:_AGENT_SYSTEM_PROMPT.index("Today's date is")]
+# LANGUAGE/FORMATTING/PLAIN-LANGUAGE/STRUCTURE rules — verbatim, tool-agnostic,
+# shared by every orchestrator specialist that composes its own reply text
+# (symptom_agent and appointment_agent; general_info_agent has its own equivalent
+# already in _SYSTEM_PROMPT). Ends right before "Today's date is {current_date}." —
+# each specialist appends that plus its own context framing itself, since
+# symptom_agent's "context" is a department list, not KB-retrieved text.
+#
+# The PATIENT MEMORY section that used to live here was removed entirely (not just
+# left empty) — see app.services.chat's module docstring for why: leaving the
+# cross-session-memory instructions in the prompt while patient_memory was always
+# "" caused the model to misfire on unrelated messages (e.g. "my name is daud"
+# answered as if it were a memory-recall question).
+_TAIL_STYLE_RULES = _AGENT_SYSTEM_PROMPT[_rules_end:_AGENT_SYSTEM_PROMPT.index("Today's date is")]
 del _rules_start, _find_doctors_start, _shared_b_start, _appointment_actions_start, _shared_c_start, _rules_end
 
 
@@ -764,7 +741,7 @@ def _current_date_str() -> str:
 # prompt-building path) were replaced by run_tool_calling_agent() below, used by
 # app.services.orchestrator.agents.symptom_agent/appointment_agent — each of which
 # now composes its own system prompt from _AGENT_SYSTEM_PROMPT's sliced pieces
-# (_TRIAGE_ALWAYS/_TRIAGE_PATH2, _TOOL_RULES_*, _TAIL_STYLE_AND_MEMORY_RULES above)
+# (_TRIAGE_ALWAYS/_TRIAGE_PATH2, _TOOL_RULES_*, _TAIL_STYLE_RULES above)
 # rather than the old single fixed template.
 
 

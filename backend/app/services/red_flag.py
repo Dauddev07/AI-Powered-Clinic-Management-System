@@ -267,7 +267,19 @@ _RED_FLAG_RE = re.compile("|".join(_RED_FLAG_PATTERNS), re.IGNORECASE)
 # clean (<0.4) against the same benign-cut/bite messages.
 _EXEMPLARS: tuple[str, ...] = (
     "signs of a stroke like face drooping or slurred speech",
-    "sudden weakness or numbness on one side of the body",
+    # Reported live: "i am having pain in my leg and in my hands as well" — ordinary
+    # multi-limb PAIN, nothing stroke-related at all — scored 0.5012 against the
+    # original, looser wording of this exemplar ("sudden weakness or numbness on one
+    # side of the body"), just barely over threshold, purely off shared limb
+    # vocabulary. That score sat almost exactly on top of a genuine true positive
+    # already in this bank ("she went over the balcony railing", 0.5003), so no single
+    # threshold could separate the two — the exemplar itself needed to be more
+    # specific. Tying it explicitly to "one side" + a named body part combination
+    # (facial drooping alongside limb weakness — the actual FAST stroke pattern, not
+    # just "numbness" in isolation) drops the false positive to ~0.41 while every
+    # existing true-positive paraphrase in tests/test_red_flag.py still scores well
+    # above 0.5 against it.
+    "sudden facial drooping with weakness or numbness down one side of the body",
     "swallowed poison or overdosed on pills",
     "accidentally drank a toxic chemical or cleaning product",
     "electrocuted by electricity or a live wire",
@@ -276,10 +288,31 @@ _EXEMPLARS: tuple[str, ...] = (
     "gunshot wound",
     "stabbed with a knife",
     "fell from a height like a roof, ladder, or balcony",
-    "sudden severe testicular pain",
+    # Reported live: a routine PATH-2 screening follow-up — "its been from past 10
+    # days and the pain is mild and moderate" — scored 0.5073 against the original,
+    # looser wording of this exemplar ("sudden severe testicular pain"), just over
+    # threshold, off nothing more than shared generic pain/severity vocabulary (the
+    # message never even names a body part). That false positive sat ABOVE a genuine
+    # true positive already in this bank ("she went over the balcony railing",
+    # 0.5003), so raising the threshold would have broken real coverage before fixing
+    # this. Anchoring the exemplar to the concrete clinical picture (swelling +
+    # "urological emergency", not just "severe pain") drops the false positive to
+    # ~0.47 while the true-positive paraphrase ("excruciating pain in one of my
+    # balls that started suddenly") still scores ~0.70 against it.
+    "sudden excruciating testicular pain with swelling, a urological emergency",
     "unconscious and not responding",
     "collapsed and will not wake up",
-    "suicidal thoughts or wanting to end one's life",
+    # Reported live: "Psychiatry in this dept" (a patient simply naming the
+    # department to book, right after being told "Psychiatry" wasn't recognized as
+    # typed) scored 0.5071 against the original, looser wording of this exemplar
+    # ("suicidal thoughts or wanting to end one's life") — purely off shared
+    # mental-health-adjacent vocabulary, nothing about self-harm at all. Anchoring
+    # the exemplar to an explicit first-person feeling ("feeling suicidal", not
+    # just topically "suicidal thoughts") drops ordinary Psychiatry-booking
+    # messages to <=0.47 while real suicidal-ideation paraphrases with no shared
+    # regex vocabulary ("I feel like ending it all", "thoughts of not wanting to
+    # be alive") still score >=0.65 against it.
+    "feeling suicidal and thinking about ending my life",
     "thinking about killing myself or self harm",
     "amputated or severed limb",
     "hit by a car or involved in a vehicle collision",
@@ -294,8 +327,65 @@ _EXEMPLARS: tuple[str, ...] = (
 # assuming 0.5 still holds — it was derived from data, not chosen a priori.
 _SEMANTIC_SIMILARITY_THRESHOLD = 0.5
 
+# MARGIN LAYER — added after three separate real false positives (short, vague, or
+# topically-adjacent messages each individually scoring just over
+# _SEMANTIC_SIMILARITY_THRESHOLD against one specific _EXEMPLARS entry: "the pain is
+# mild and moderate" vs. testicular pain, "my hands and legs hurt" vs. stroke,
+# "Psychiatry in this dept" vs. suicidal ideation) required three separate rounds of
+# hand-tuning individual exemplar wording. Rewording each exemplar after the fact
+# works but doesn't generalize — it only fixes the one reported phrasing, not the
+# underlying shape of the problem: an absolute similarity-to-emergency-exemplars
+# threshold alone can't tell "this message is actually about an emergency" apart from
+# "this message is short/vague/topically-adjacent and therefore drifts a bit toward
+# EVERY exemplar bank, including the emergency one."
+#
+# The structural fix is RELATIVE, not absolute: also embed a bank of ordinary/benign
+# clinic messages (_BENIGN_EXEMPLARS below — routine booking, mild/hedged symptom
+# descriptions, small talk, personal info) and only fire when a message is closer to
+# the emergency bank than to the benign bank by a real margin, not just past a fixed
+# floor. A benign message that happens to drift toward one emergency exemplar
+# (embeddings are noisy for short text) almost always drifts AT LEAST as far toward
+# the benign bank too — the margin cancels that shared noise out. A genuine emergency
+# paraphrase does not have this problem: it's close to the emergency bank and FAR from
+# the benign one, so its margin stays wide even though its absolute similarity might
+# be similar to a false positive's.
+#
+# Calibrated against the full existing true-positive/negative test suite (see the
+# calibration test class in tests/test_red_flag.py): every semantic-only true positive
+# has margin >= 0.136 (the tightest: the testicular-pain paraphrase against a "mild
+# ache" benign exemplar); every negative/PATH-2/false-positive message in the test
+# suite — including all three historical false positives above — has margin <= 0.012.
+# 0.08 sits in the middle of that gap with real headroom on both sides. Like the
+# absolute threshold, this is NOT a universal constant: if either exemplar bank
+# changes, re-run the calibration.
+_SEMANTIC_MARGIN = 0.08
+
+# Representative ordinary/benign clinic messages — deliberately drawn from the SAME
+# shapes that have caused real false positives (vague/hedged symptom descriptions,
+# plain department-booking phrasing, personal info, small talk) so the margin layer
+# above actually cancels the noise those shapes produce, rather than being a generic
+# unrelated negative set that happens not to help.
+_BENIGN_EXEMPLARS: tuple[str, ...] = (
+    "I want to book an appointment in a department",
+    "can I see a doctor for a routine checkup",
+    "show me available appointment slots",
+    "can you recommend a department for my symptoms",
+    "I'd like to reschedule my appointment",
+    "my symptoms are mild and manageable",
+    "the pain is not severe, just a little uncomfortable",
+    "it's been going on for a few days, nothing too serious",
+    "I have a minor ache that comes and goes",
+    "hi, my name is",
+    "what is my name and what have I told you before",
+    "what are your clinic hours",
+    "thanks, that's helpful",
+)
+
 _exemplar_vectors = np.array(embed_texts(list(_EXEMPLARS)))
 _exemplar_vectors = _exemplar_vectors / np.linalg.norm(_exemplar_vectors, axis=1, keepdims=True)
+
+_benign_vectors = np.array(embed_texts(list(_BENIGN_EXEMPLARS)))
+_benign_vectors = _benign_vectors / np.linalg.norm(_benign_vectors, axis=1, keepdims=True)
 
 
 def _semantic_red_flag(message: str) -> bool:
@@ -306,28 +396,22 @@ def _semantic_red_flag(message: str) -> bool:
     if norm == 0:
         return False
     vector = vector / norm
-    similarity = float(np.max(_exemplar_vectors @ vector))
-    return similarity >= _SEMANTIC_SIMILARITY_THRESHOLD
+    emergency_similarity = float(np.max(_exemplar_vectors @ vector))
+    benign_similarity = float(np.max(_benign_vectors @ vector))
+    return (
+        emergency_similarity >= _SEMANTIC_SIMILARITY_THRESHOLD
+        and emergency_similarity - benign_similarity >= _SEMANTIC_MARGIN
+    )
 
 
 RED_FLAG_MESSAGE_EN = (
-    "This may be a medical emergency. Please call your local emergency number or go to "
+    "This may be a medical emergency. Please call 1122 or go to "
     "the nearest emergency room right away. This assistant cannot handle emergencies.\n\n"
     "While you're on your way:\n"
     "- Stay as calm and still as possible, and avoid moving any injured area more than necessary.\n"
     "- Do not eat, drink, or take any medication unless a medical professional tells you to.\n"
     "- If there is visible bleeding, apply firm, steady pressure with a clean cloth until help arrives.\n"
     "- If possible, don't go alone — have someone accompany you or call an ambulance rather than driving yourself."
-)
-
-RED_FLAG_MESSAGE_UR = (
-    "یہ ایک طبی ایمرجنسی ہو سکتی ہے۔ براہ کرم فوری طور پر ایمرجنسی سروس کو کال کریں یا "
-    "قریب ترین ایمرجنسی روم جائیں۔ یہ اسسٹنٹ ایمرجنسی صورتحال میں مدد نہیں کر سکتا۔\n\n"
-    "راستے میں یہ کریں:\n"
-    "- جتنا ممکن ہو پرسکون اور ساکت رہیں، اور زخمی حصے کو غیر ضروری حرکت سے بچائیں۔\n"
-    "- جب تک کوئی طبی ماہر نہ کہے، کچھ کھائیں پئیں یا کوئی دوا نہ لیں۔\n"
-    "- اگر خون بہہ رہا ہو تو صاف کپڑے سے مسلسل، مضبوط دباؤ ڈالیں جب تک مدد نہ پہنچے۔\n"
-    "- اکیلے جانے کے بجائے کسی کو ساتھ لے جائیں یا خود گاڑی چلانے کے بجائے ایمبولینس کو کال کریں۔"
 )
 
 
@@ -339,5 +423,9 @@ def detect_red_flag(message: str) -> bool:
     return bool(_RED_FLAG_RE.search(message)) or _semantic_red_flag(message)
 
 
-def red_flag_message(language: str) -> str:
-    return RED_FLAG_MESSAGE_UR if language == "ur" else RED_FLAG_MESSAGE_EN
+def red_flag_message() -> str:
+    """Always English — Urdu removed per product decision; a red-flagged reply must
+    never be translated at request time (an LLM asked to translate a life-safety
+    message risks softening it), and a second hardcoded-Urdu variant isn't maintained
+    alongside the English one."""
+    return RED_FLAG_MESSAGE_EN

@@ -10,7 +10,6 @@ from app.services.message_classifier import (
     _heuristic_classify,
     classify_message_intent,
     is_department_list_request,
-    is_personal_recall_message,
     is_symptom_message,
     needs_booking_action_tools,
     needs_path2_screening,
@@ -188,7 +187,7 @@ def test_apostrophe_optional_personal_recall_phrasing_still_recognized(message):
         "what all have we discussed up till now",
     ],
 )
-def test_is_personal_recall_message_true_for_recall_phrasings(message):
+def test_personal_recall_phrasing_classified_as_personal_recall(message):
     # Reported live: "what have i described to u?" fell through the recall
     # regex entirely (only told/said/mention/share were covered, not
     # "describe(d)") and was answered as if memory were empty, even though the
@@ -197,7 +196,7 @@ def test_is_personal_recall_message_true_for_recall_phrasings(message):
     # "what info did i tell u" (a filler word breaking the old fixed "what did i"
     # phrase) — the regex was rebuilt as a flexible pattern instead of adding
     # another one-off phrase each time a new variant gets reported.
-    assert is_personal_recall_message(message) is True
+    assert _heuristic_classify(message) == PERSONAL_RECALL
 
 
 @pytest.mark.parametrize(
@@ -207,17 +206,17 @@ def test_is_personal_recall_message_true_for_recall_phrasings(message):
         "what medicine did i take yesterday",
     ],
 )
-def test_is_personal_recall_message_false_for_prospective_or_unrelated_did_i_phrasing(message):
+def test_prospective_or_unrelated_did_i_phrasing_not_classified_as_personal_recall(message):
     # The flexible "what ... did/have ... i/we ... <recall verb>" pattern must not
     # over-match: "what should I tell" has no did/have auxiliary at all (safe), and
     # "what did I take" uses "did I" but "take" isn't a recall verb, so it must stay
     # a real clinical question, not personal recall.
-    assert is_personal_recall_message(message) is False
+    assert _heuristic_classify(message) != PERSONAL_RECALL
 
 
 @pytest.mark.parametrize("message", ["what are your clinic hours?", "I have a headache", "hi"])
-def test_is_personal_recall_message_false_for_non_recall_messages(message):
-    assert is_personal_recall_message(message) is False
+def test_non_recall_messages_not_classified_as_personal_recall(message):
+    assert _heuristic_classify(message) != PERSONAL_RECALL
 
 
 def test_personal_recall_checked_before_the_question_mark_shortcut():
@@ -367,6 +366,10 @@ def test_bare_reply_after_a_user_turn_not_assistant_still_behaves_as_small_talk(
         "I've had a headache for two days",
         "persistent cough and chills",
         "I feel dizzy and nauseous",
+        # Reported live: this common typo (missing the second "z") matched no
+        # keyword at all and fell through to GENERAL_INFO instead of the symptom
+        # triage flow.
+        "I am feeling diziness",
         "there's a rash on my arm",
         "i have brain tumor",
         "i think i have cancer",

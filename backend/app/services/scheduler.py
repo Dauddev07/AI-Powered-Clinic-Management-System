@@ -29,6 +29,7 @@ from app.core.config import settings
 from app.core.db import SessionLocal
 from app.models.audit_log import AuditLog
 from app.models.clinic import Clinic
+from app.services.appointment_reminders import send_due_reminders_for_clinic
 from app.services.appointments import auto_complete_past_appointments
 from app.services.slots import regenerate_slots_for_clinic
 
@@ -130,6 +131,33 @@ def run_appointment_auto_complete_tick() -> None:
         db.close()
 
 
+def run_appointment_reminder_tick() -> None:
+    """Loops every active clinic and sends any appointment reminder (60m/30m/5m/
+    starting-now) that's now due — see app.services.appointment_reminders for the
+    exactly-once-per-window logic. Runs on a tight 1-minute interval (unlike the
+    other two ticks above) since these reminders are meant to land close to an
+    exact offset from the appointment's start time.
+    """
+    db = SessionLocal()
+    try:
+        clinics = db.execute(select(Clinic).where(Clinic.is_active.is_(True))).scalars().all()
+        for clinic in clinics:
+            try:
+                created = send_due_reminders_for_clinic(db, clinic.id)
+                db.commit()
+                if created:
+                    logger.info(
+                        "scheduled_appointment_reminders clinic=%s sent=%d",
+                        clinic.id,
+                        len(created),
+                    )
+            except Exception:
+                db.rollback()
+                logger.exception("scheduled_appointment_reminders failed for clinic=%s", clinic.id)
+    finally:
+        db.close()
+
+
 def start_scheduler() -> BackgroundScheduler:
     global _scheduler
     if _scheduler is not None:
@@ -155,6 +183,18 @@ def start_scheduler() -> BackgroundScheduler:
         # Same reasoning as the slot-regeneration job: a delayed tick still runs once
         # rather than being skipped, so a sleeping/restarted process catches up instead
         # of silently leaving stale 'confirmed' appointments until the next tick.
+        misfire_grace_time=None,
+    )
+    scheduler.add_job(
+        run_appointment_reminder_tick,
+        trigger=IntervalTrigger(minutes=settings.APPOINTMENT_REMINDER_INTERVAL_MINUTES),
+        id="appointment_reminder_tick",
+        replace_existing=True,
+        # Same reasoning as the other two jobs: a delayed tick still runs once rather
+        # than being skipped, so a sleeping/restarted process sends any reminder that
+        # came due while it was down instead of silently losing it forever (each
+        # reminder type is idempotent — see send_due_reminders_for_clinic — so a late
+        # catch-up run is safe, never a duplicate).
         misfire_grace_time=None,
     )
     scheduler.start()

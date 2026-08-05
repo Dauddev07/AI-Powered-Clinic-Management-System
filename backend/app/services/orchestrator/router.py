@@ -37,6 +37,7 @@ from app.services.message_classifier import (
 from app.services.message_classifier import (
     _preceding_assistant_turn_looks_like_a_question,
     is_department_list_request,
+    is_department_recommendation_request,
     is_symptom_message,
     needs_booking_action_tools,
 )
@@ -119,6 +120,18 @@ def _heuristic_classify(message: str, history=None) -> str | None:
     last = history[-1] if history else None
     last_role = getattr(last, "role", None) if last else None
     last_content = (getattr(last, "content", "") or "") if last else ""
+
+    # Rule 0.5 — the patient is asking for a department RECOMMENDATION ("what do you
+    # think", "isn't X a better idea"), checked before even Rule 1's marker
+    # continuity. Reported live: after a DOCTOR_OPTIONS_MARKER card was shown, this
+    # kind of message fell to Rule 1 and went straight to appointment_agent, which
+    # has no symptom awareness at all — it just showed availability for whatever
+    # department got named next, then hallucinated a "reason" for a follow-up
+    # question instead of reasoning from the patient's REAL described symptoms. A
+    # recommendation request must always reach symptom_agent's deterministic
+    # symptom-to-department check, regardless of what card was shown last turn.
+    if is_department_recommendation_request(message):
+        return SYMPTOM_GENERAL
 
     # Rule 1 — unambiguous: the preceding turn was a slot-pick card or an
     # appointment-agent disambiguation question. Either can only ever mean

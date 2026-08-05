@@ -4,15 +4,14 @@ Memory is stored against the patient account from the very first message (not fr
 first booking, not after a threshold) — every turn, including the very first one in a
 brand-new session, is written to conversation_memory before this function returns.
 
-session_id IS a memory boundary for the full verbatim transcript: a continuing session
-(one that already has at least one message) replays its OWN messages only, most-recent-
-first, capped at HISTORY_MESSAGE_LIMIT — never another session's. Starting a genuinely
-new session instead gets an empty transcript PLUS a short cross-session digest (see
-app.services.memory_summary.refresh_patient_summary_for_new_session) — symptoms the
-patient has previously described and general personal info they've volunteered, not the
-old conversation itself. This keeps a "New Chat" feeling like a real fresh start while
-still letting the assistant recall the kind of thing a receiving clinician would want to
-know without replaying everything that was ever said.
+session_id IS a hard memory boundary: a continuing session (one that already has at
+least one message) replays its OWN messages only, most-recent-first, capped at
+HISTORY_MESSAGE_LIMIT — never another session's. Starting a genuinely new session gets
+a completely empty transcript and no cross-session digest of any kind — "New Chat"
+means a real fresh start with zero memory of anything said in a previous session, both
+for a smaller/cheaper prompt and because a patient reasonably expects a new chat to not
+carry old context forward. app.services.memory_summary still exists (its table/reset
+path is used by delete_session below) but is no longer read from or written to here.
 """
 import uuid
 from dataclasses import dataclass
@@ -31,11 +30,7 @@ from app.services.chat_markers import (
 )
 from app.services.diagnosis_guard import enforce_no_diagnosis
 from app.services.language import detect_language
-from app.services.memory_summary import (
-    get_patient_summary,
-    refresh_patient_summary_for_new_session,
-    reset_patient_summary,
-)
+from app.services.memory_summary import reset_patient_summary
 from app.services.orchestrator.agents.appointment_agent import run_appointment_agent
 from app.services.orchestrator.agents.general_info_agent import run_general_info_agent
 from app.services.orchestrator.agents.symptom_agent import run_symptom_agent
@@ -70,12 +65,10 @@ SYMPTOM_AGENT_HISTORY_LIMIT = 16
 # recent, so 10 is ample without paying to replay a much longer transcript.
 APPOINTMENT_AGENT_HISTORY_LIMIT = 10
 
-# general_info_agent: KB question-answering doesn't depend on conversation history at
-# all (query_rewrite only rescues a raw retrieval miss, and direct personal-recall
-# questions are now answered deterministically from patient_memory — see
-# message_classifier.is_personal_recall_message — not by scanning history), so this
-# only needs enough for query_rewrite's own immediate-context rescue and general
-# conversational continuity.
+# general_info_agent: KB question-answering doesn't depend on conversation history
+# much (query_rewrite only rescues a raw retrieval miss), so this only needs enough
+# for query_rewrite's own immediate-context rescue and general conversational
+# continuity.
 GENERAL_INFO_AGENT_HISTORY_LIMIT = 8
 
 
@@ -182,27 +175,35 @@ def handle_chat_message(
     # message immediately. A prompt instruction alone is not a guarantee, so this is
     # a plain server-side regex gate, not something the LLM is asked to decide.
     if detect_red_flag(message):
-        reply = red_flag_message(language)
+        reply = red_flag_message()
         _save_message(db, ctx, session_id, "user", message)
         _save_message(db, ctx, session_id, "assistant", reply, red_flag=True)
         db.commit()
         return ChatTurnResult(session_id=session_id, reply=reply, red_flag=True)
 
     # Loaded before the current turn is saved, so the prompt's history never
-    # double-includes the message being answered right now. A brand new session (no
-    # rows yet) starts with an empty transcript plus a freshly re-summarized
-    # cross-session memory digest — see module docstring and
-    # app.services.memory_summary. A continuing session gets its own full (capped)
-    # transcript, plus the ALREADY-computed digest (a cheap read, no re-summarization
-    # — there's nothing new to fold in until a later session starts) so a fact from an
-    # earlier session (e.g. the patient's name) stays answerable for the whole
-    # session, not just its first turn.
+    # double-includes the message being answered right now.
+    #
+    # Reported live: patient memory is scoped to THIS session/chat only, by
+    # design — a brand new chat must start completely fresh, with no digest of
+    # anything said in a previous session. This also cuts prompt token size:
+    # no cross-session summary text, and no per-new-session summarization LLM
+    # call (see app.services.memory_summary, still present but no longer
+    # invoked here). A continuing session's own real transcript is still loaded
+    # in full below (unchanged) — only the cross-session digest is gone.
+    #
+    # The cross-session PATIENT MEMORY prompt section itself (and the patient_memory
+    # parameter threaded through every agent) was removed entirely, not just left
+    # empty — reported live: leaving the LLM prompt's detailed "how to talk about
+    # stored memory" instructions in place while always feeding them an empty value
+    # caused the model to misfire on unrelated messages (e.g. replying "I don't have
+    # any previous information stored about you" to a patient simply saying "my name
+    # is daud"), since the instructions primed it to reason about "stored
+    # information" even when nothing in the actual message asked about it.
     if _session_has_messages(db, ctx, session_id):
         history = _load_recent_history(db, ctx, session_id)
-        patient_memory = get_patient_summary(db, ctx.clinic_id, ctx.user_id)
     else:
         history = []
-        patient_memory = refresh_patient_summary_for_new_session(db, ctx.clinic_id, ctx.user_id)
 
     # The orchestrator's intent layer replaces classify_message_intent() + the old
     # single agent entirely: exactly one specialist handles this turn, decided by
@@ -213,17 +214,15 @@ def handle_chat_message(
     # prompt's CONVERSATIONAL EXCEPTION + retrieval, same as before).
     intent = classify_agent_intent(message, history)
     if intent == SYMPTOM_GENERAL:
-        reply = run_symptom_agent(
-            db, ctx, message, language, _trim_history(history, SYMPTOM_AGENT_HISTORY_LIMIT), patient_memory
-        )
+        reply = run_symptom_agent(db, ctx, message, language, _trim_history(history, SYMPTOM_AGENT_HISTORY_LIMIT))
     elif intent == APPOINTMENT:
         reply = run_appointment_agent(
-            db, ctx, message, language, _trim_history(history, APPOINTMENT_AGENT_HISTORY_LIMIT), patient_memory
+            db, ctx, message, language, _trim_history(history, APPOINTMENT_AGENT_HISTORY_LIMIT)
         )
     else:
         assert intent == GENERAL_INFO
         reply = run_general_info_agent(
-            db, ctx, message, language, _trim_history(history, GENERAL_INFO_AGENT_HISTORY_LIMIT), patient_memory
+            db, ctx, message, language, _trim_history(history, GENERAL_INFO_AGENT_HISTORY_LIMIT)
         )
 
     if not _is_marker_reply(reply):

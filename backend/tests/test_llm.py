@@ -431,6 +431,16 @@ def test_agent_prompt_requires_first_aid_guidance_on_confirmed_emergency():
     assert "while you're on your way" in prompt
 
 
+def test_agent_prompt_names_the_clinic_local_emergency_number():
+    # Reported live: the model's own PATH 1 replies were inventing an arbitrary
+    # emergency number (e.g. "999") since nothing told it which one to use — pinned
+    # explicitly to 1122 now, with an explicit warning against defaulting to another
+    # country's number.
+    prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
+    assert "call 1122" in prompt
+    assert "911" in prompt and "999" in prompt
+
+
 def test_agent_prompt_requires_severity_screening_for_ambiguous_symptoms():
     # PATH 2: chest pain/tightness/head pain must be screened with a direct
     # severity question ("severe, bearable, or mild?") before any department
@@ -477,8 +487,33 @@ def test_agent_prompt_includes_broken_bone_in_ambiguous_symptom_screening():
     # about severity/deformity/numbness first instead of asserting a diagnosis.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
     assert "a broken bone or suspected fracture" in prompt
+
+
+def test_agent_prompt_recommendation_phrasing_does_not_waive_the_screening_floor():
+    # Reported live: "I am having a bit of fever and body aches, what do you
+    # recommend?" — a FIRST message combining a symptom with an explicit
+    # recommendation request — skipped straight to a department card with zero
+    # clarifying questions, violating PATH 3's own "never zero" rule. The model
+    # appears to read "what do you recommend" as an instruction to answer
+    # immediately; this prompt line says explicitly that it isn't.
+    prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
+    assert "does NOT waive this floor" in prompt
+    assert "what do you recommend" in prompt.lower()
     assert "visible deformity, bone through skin" in prompt
     assert 'asserting "this is a fracture" isn\'t' in prompt
+
+
+def test_agent_prompt_forbids_zero_questions_for_a_bare_mild_symptom_message():
+    # Reported live: "I am having nausea.." (a single mild-sounding symptom, no
+    # duration/severity/anything else) skipped straight to a department card with
+    # zero clarifying questions on the very first reply — same "never zero"
+    # violation as the fever/recommendation case above, but without a
+    # recommendation phrase to blame; the model just treated a short, common
+    # symptom as needing no screening at all.
+    prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
+    assert "MOST COMMON WAY THIS RULE GETS BROKEN" in prompt
+    assert "I am having nausea" in prompt
+    assert "mild-sounding or obvious-seeming does not" in prompt
 
 
 def test_agent_prompt_requires_one_to_two_questions_for_routine_symptoms():
@@ -608,24 +643,22 @@ def test_agent_prompt_forbids_writing_out_appointment_id_like_slot_id():
     assert "never write an appointment_id out in your reply text" in prompt
 
 
-def test_agent_prompt_requires_actually_answering_a_direct_memory_recall_question():
-    # Reported bug: patient_memory was correctly populated ("Asked about Cardiology
-    # availability...") and passed into the prompt, yet a direct "what are the
-    # things I told you" in a new session still got "I don't have any details" — the
-    # model treated the "don't volunteer it unprompted" guidance as covering direct
-    # questions too. Must be unambiguous that a direct recall question requires
-    # actually using PATIENT MEMORY, not defaulting to "nothing stored".
+def test_agent_prompt_omits_patient_memory_section_entirely():
+    # PATIENT MEMORY (and the whole cross-session memory concept) was removed
+    # entirely, not just left empty — reported live: leaving the prompt's detailed
+    # "how to talk about stored memory" instructions in place while patient_memory
+    # was always "" caused the model to misfire on unrelated messages (e.g. "my
+    # name is daud" answered as if it were a memory-recall question). See
+    # app.services.chat's module docstring.
     prompt = llm._AGENT_SYSTEM_PROMPT
-    assert "IMPORTANT — WHEN THE PATIENT DIRECTLY ASKS ABOUT IT" in prompt
-    assert "what are the things I told you" in prompt
-    assert "you must actually use it rather than defaulting to" in prompt
+    assert "PATIENT MEMORY" not in prompt
+    assert "IMPORTANT — WHEN THE PATIENT DIRECTLY ASKS ABOUT IT" not in prompt
 
 
-def test_plain_system_prompt_requires_actually_answering_a_direct_memory_recall_question():
+def test_plain_system_prompt_omits_patient_memory_section_entirely():
     prompt = llm._SYSTEM_PROMPT
-    assert "IMPORTANT — WHEN THE PATIENT DIRECTLY ASKS ABOUT IT" in prompt
-    assert "what are the things I told you" in prompt
-    assert "you must actually use it rather than defaulting to" in prompt
+    assert "PATIENT MEMORY" not in prompt
+    assert "IMPORTANT — WHEN THE PATIENT DIRECTLY ASKS ABOUT IT" not in prompt
 
 
 def test_agent_prompt_forbids_booking_fresh_when_picking_a_slot_resolves_a_reschedule():
@@ -994,15 +1027,7 @@ def test_excluding_path2_meaningfully_shrinks_the_triage_section():
 
 # --- cross-session patient memory digest --------------------------------------------
 #
-# Patient-memory wiring through an actual agent call (defaulting to "(none)", or
-# carrying real digest text through) is now tested per-agent in
-# tests/test_orchestrator.py, since _build_messages()/_build_agent_messages() (which
-# built the old fixed templates) no longer exist.
-
-
-def test_agent_prompt_forbids_using_patient_memory_as_a_tool_argument_source():
-    # The digest is background context only — department/doctor names must still only
-    # ever come from a real tool result or Retrieved context, never from memory text
-    # that could be stale or imprecise.
-    prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "never use it as a source for a tool call argument" in prompt
+# The cross-session patient-memory concept (digest, PATIENT MEMORY prompt section,
+# patient_memory parameter) was removed entirely — see
+# test_agent_prompt_omits_patient_memory_section_entirely above and
+# app.services.chat's module docstring for why.

@@ -53,14 +53,14 @@ def _patch_intent(monkeypatch, intent):
 def _patch_general_info_reply(monkeypatch, reply):
     monkeypatch.setattr(
         "app.services.chat.run_general_info_agent",
-        lambda db, ctx, message, language, history, patient_memory="": reply,
+        lambda db, ctx, message, language, history: reply,
     )
 
 
 def _patch_symptom_reply(monkeypatch, reply):
     monkeypatch.setattr(
         "app.services.chat.run_symptom_agent",
-        lambda db, ctx, message, language, history, patient_memory="": reply,
+        lambda db, ctx, message, language, history: reply,
     )
 
 
@@ -92,7 +92,7 @@ def test_appointment_intent_routes_to_appointment_agent(db, ctx, monkeypatch):
         )
     monkeypatch.setattr(
         "app.services.chat.run_appointment_agent",
-        lambda db, ctx, message, language, history, patient_memory="": "Booked.",
+        lambda db, ctx, message, language, history: "Booked.",
     )
 
     result = handle_chat_message(db, ctx, "book me with Dr. Ahmed at 4pm", None)
@@ -123,14 +123,13 @@ def test_new_session_does_not_replay_a_prior_sessions_full_transcript(db, ctx, m
     # docstring) — a genuinely new session must never see another session's
     # messages in `history`, only its own (empty, since it's brand new).
     _patch_intent(monkeypatch, GENERAL_INFO)
-    monkeypatch.setattr("app.services.chat.refresh_patient_summary_for_new_session", lambda db, cid, uid: "")
     _patch_general_info_reply(monkeypatch, "ack")
 
     first = handle_chat_message(db, ctx, "My name is Ali and I have a headache.", None)
 
     seen = {}
 
-    def capture_reply(db, ctx, message, language, history, patient_memory=""):
+    def capture_reply(db, ctx, message, language, history):
         seen["history"] = history
         return "second reply"
 
@@ -144,14 +143,13 @@ def test_new_session_does_not_replay_a_prior_sessions_full_transcript(db, ctx, m
 
 def test_continuing_session_replays_its_own_full_transcript(db, ctx, monkeypatch):
     _patch_intent(monkeypatch, GENERAL_INFO)
-    monkeypatch.setattr("app.services.chat.refresh_patient_summary_for_new_session", lambda db, cid, uid: "")
     _patch_general_info_reply(monkeypatch, "ack")
 
     first = handle_chat_message(db, ctx, "My name is Ali and I have a headache.", None)
 
     seen = {}
 
-    def capture_reply(db, ctx, message, language, history, patient_memory=""):
+    def capture_reply(db, ctx, message, language, history):
         seen["history"] = history
         return "second reply"
 
@@ -164,43 +162,33 @@ def test_continuing_session_replays_its_own_full_transcript(db, ctx, monkeypatch
     assert "ack" in history_contents
 
 
-def test_new_session_refreshes_memory_digest_and_continuing_session_reuses_it_without_rerefreshing(
-    db, ctx, monkeypatch
-):
+def test_new_chat_never_carries_a_cross_session_memory_digest(db, ctx, monkeypatch):
+    # Reported live: memory must be scoped to the current chat/session only — a
+    # brand new chat starts completely fresh, with no digest of anything said in a
+    # PREVIOUS session (also keeps prompts smaller/cheaper: no digest text, and no
+    # per-new-session summarization LLM call at all anymore). The patient_memory
+    # concept and prompt section were later removed entirely (not just left
+    # empty) — see this module's docstring — since leaving the LLM prompt's
+    # memory instructions in place with an always-empty value caused the model to
+    # misfire on unrelated messages.
     _patch_intent(monkeypatch, GENERAL_INFO)
 
-    refresh_calls = []
+    seen = {"call_count": 0}
 
-    def fake_refresh(db, clinic_id, user_id):
-        refresh_calls.append((clinic_id, user_id))
-        return "Patient previously mentioned recurring headaches."
-
-    monkeypatch.setattr("app.services.chat.refresh_patient_summary_for_new_session", fake_refresh)
-    monkeypatch.setattr(
-        "app.services.chat.get_patient_summary",
-        lambda db, clinic_id, user_id: "Patient previously mentioned recurring headaches.",
-    )
-
-    seen = {}
-
-    def capture_reply(db, ctx, message, language, history, patient_memory=""):
-        seen["patient_memory"] = patient_memory
+    def capture_reply(db, ctx, message, language, history):
+        seen["call_count"] += 1
         return "reply"
 
     monkeypatch.setattr("app.services.chat.run_general_info_agent", capture_reply)
 
-    first = handle_chat_message(db, ctx, "hi", None)
-    assert len(refresh_calls) == 1
-    assert refresh_calls[0] == (ctx.clinic_id, ctx.user_id)
-    assert seen["patient_memory"] == "Patient previously mentioned recurring headaches."
-
-    # A second message in the SAME (now continuing) session must not call the
-    # expensive re-summarization again, but still gets the already-computed digest —
-    # a fact from an earlier session (e.g. the patient's name) must stay answerable
-    # for the whole session, not just its first turn.
+    first = handle_chat_message(db, ctx, "My name is Ali and I have a headache.", None)
+    handle_chat_message(db, ctx, "hi", None)
     handle_chat_message(db, ctx, "still there?", first.session_id)
-    assert len(refresh_calls) == 1
-    assert seen["patient_memory"] == "Patient previously mentioned recurring headaches."
+
+    # No TypeError from an unexpected patient_memory argument across a fresh
+    # session, a second new session, and a continuing session — the call is
+    # made with exactly (db, ctx, message, language, history), nothing more.
+    assert seen["call_count"] == 3
 
 
 # --- Part C: per-agent history limits -------------------------------------------------
@@ -239,7 +227,7 @@ def test_router_sees_the_full_history_window_but_symptom_agent_gets_a_trimmed_sl
 
 
 def _patch_symptom_reply_capturing(monkeypatch, seen):
-    def capture_reply(db, ctx, message, language, history, patient_memory=""):
+    def capture_reply(db, ctx, message, language, history):
         seen["agent_history_len"] = len(history)
         seen["agent_history"] = history
         return "reply"
@@ -254,7 +242,7 @@ def test_appointment_agent_gets_its_own_smaller_history_slice(db, ctx, monkeypat
 
     seen = {}
 
-    def capture_reply(db, ctx, message, language, history, patient_memory=""):
+    def capture_reply(db, ctx, message, language, history):
         seen["agent_history_len"] = len(history)
         return "reply"
 
@@ -272,7 +260,7 @@ def test_general_info_agent_gets_its_own_smaller_history_slice(db, ctx, monkeypa
 
     seen = {}
 
-    def capture_reply(db, ctx, message, language, history, patient_memory=""):
+    def capture_reply(db, ctx, message, language, history):
         seen["agent_history_len"] = len(history)
         return "reply"
 
@@ -289,7 +277,7 @@ def test_history_shorter_than_the_agent_limit_is_passed_through_unchanged(db, ct
 
     seen = {}
 
-    def capture_reply(db, ctx, message, language, history, patient_memory=""):
+    def capture_reply(db, ctx, message, language, history):
         seen["agent_history_len"] = len(history)
         return "reply"
 
@@ -350,7 +338,7 @@ def test_urdu_message_takes_urdu_path(db, ctx, monkeypatch):
 
     seen = {}
 
-    def fake_reply(db, ctx, message, language, history, patient_memory=""):
+    def fake_reply(db, ctx, message, language, history):
         seen["language"] = language
         return FALLBACK_MESSAGE_UR
 
@@ -376,7 +364,7 @@ def test_language_passed_through_to_the_agent(db, ctx, monkeypatch):
 
     seen = {}
 
-    def fake_reply(db, ctx, message, language, history, patient_memory=""):
+    def fake_reply(db, ctx, message, language, history):
         seen["language"] = language
         return "جواب"
 
@@ -509,7 +497,7 @@ def test_cross_clinic_and_cross_patient_history_does_not_leak(db, monkeypatch):
 
     seen_history = {}
 
-    def capture_reply(db, ctx, message, language, history, patient_memory=""):
+    def capture_reply(db, ctx, message, language, history):
         seen_history["history"] = history
         return "reply"
 
@@ -542,9 +530,8 @@ def test_deleted_session_content_is_excluded_from_a_later_new_sessions_memory_di
 
     seen = {}
 
-    def capture_kwargs(db, ctx, message, language, history, patient_memory=""):
+    def capture_kwargs(db, ctx, message, language, history):
         seen["history"] = history
-        seen["patient_memory"] = patient_memory
         return "later reply"
 
     monkeypatch.setattr("app.services.chat.run_general_info_agent", capture_kwargs)
@@ -552,8 +539,6 @@ def test_deleted_session_content_is_excluded_from_a_later_new_sessions_memory_di
     handle_chat_message(db, ctx, "What allergy did I mention earlier?", None)
 
     assert seen["history"] == []
-    history_contents_never_seen = "My secret condition is a rare allergy to shellfish."
-    assert history_contents_never_seen not in (seen["patient_memory"] or "")
 
 
 def test_delete_session_wipes_the_already_computed_memory_digest_not_just_the_transcript(db, ctx):

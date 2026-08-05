@@ -11,9 +11,9 @@ Tools bound: get_department_availability, find_doctors_by_name only.
 
 System prompt = the triage rules (_TRIAGE_ALWAYS + conditional _TRIAGE_PATH2, reused
 verbatim from app.services.llm/message_classifier.needs_path2_screening) + the
-TOOL USE RULES governing these two tools specifically + the shared style/patient-
-memory rules — all sliced verbatim from the original single-pipeline
-_AGENT_SYSTEM_PROMPT, never retyped. The original prompt's STRICT GROUNDING RULE and
+TOOL USE RULES governing these two tools specifically + the shared style rules —
+all sliced verbatim from the original single-pipeline _AGENT_SYSTEM_PROMPT, never
+retyped. The original prompt's STRICT GROUNDING RULE and
 "`note` ALSO doubles as..." paragraphs are deliberately NOT included here: both are
 about grounding an answer in KB-retrieved "Retrieved context," which this agent no
 longer has (see the no-KB-retrieval note above) — a real, deliberate capability
@@ -42,7 +42,8 @@ from app.services.chat_tools import (
 )
 from app.services.department_availability import list_active_department_names
 from app.services.diagnosis_guard import violates_no_diagnosis_rule
-from app.services.message_classifier import needs_path2_screening
+from app.services.message_classifier import is_department_recommendation_request, needs_path2_screening
+from app.services.orchestrator.symptom_hints import departments_hinted_by_patient_symptom_words
 
 _SYMPTOM_AGENT_TOOL_NAMES = {"get_department_availability", "find_doctors_by_name"}
 
@@ -52,18 +53,13 @@ _INTRO = (
 )
 
 
-def _build_system_prompt(
-    language_name: str, department_names: list[str], patient_memory: str, include_path2: bool
-) -> str:
+def _build_system_prompt(language_name: str, department_names: list[str], include_path2: bool) -> str:
     context_line = (
         f"Active departments at this clinic: {', '.join(department_names)}."
         if department_names
         else "Active departments at this clinic: (none configured)."
     )
-    tail = llm._TAIL_STYLE_AND_MEMORY_RULES.format(
-        language_name=language_name,
-        patient_memory=patient_memory.strip() if patient_memory and patient_memory.strip() else "(none)",
-    )
+    tail = llm._TAIL_STYLE_RULES.format(language_name=language_name)
     return (
         f"{_INTRO}\n\n"
         f"{llm._triage_section(include_path2)}\n"
@@ -101,103 +97,10 @@ def _departments_named_in_note_but_not_covered(
     return missing
 
 
-# Reported live (2nd instance of the same underlying gap): a patient describing ear
-# pain AND itchy skin, then confirming "chest pain mild, itchy skin from past 1 day",
-# got a reply that routed to Cardiology and never mentioned Dermatology at all — not
-# even in its own `note` this time, so _departments_named_in_note_but_not_covered
-# above (which only scans the note's own text) has nothing to find. The model simply
-# dropped the second complaint entirely rather than reasoning about it and failing to
-# call the tool. This is the deeper backstop: map the symptom vocabulary actually
-# used by the PATIENT (this message + their own earlier turns, never the assistant's)
-# to common hospital-department-name substrings, and if a real active department at
-# this clinic matches a symptom category that's still uncovered, fetch it too — same
-# "don't trust the model's tool-calling completeness" principle, one level earlier
-# than the note-scan above (before the model ever reasons about it, not just after).
-_SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...] = (
-    (frozenset({"skin", "itchy", "itching", "rash", "allergic", "allergy", "eczema", "hives"}), ("derma",), "skin symptoms"),
-    (frozenset({"ear", "earache", "hearing"}), ("ent", "otolaryn", "ear"), "ear pain"),
-    (frozenset({"eye", "eyes", "vision"}), ("ophthal", "eye"), "eye symptoms"),
-    (frozenset({"tooth", "teeth", "toothache", "dental"}), ("dent",), "tooth pain"),
-    (
-        frozenset({"bone", "fracture", "fractured", "sprain", "sprained", "joint", "dislocated", "dislocation"}),
-        ("ortho",),
-        "bone/joint injury",
-    ),
-    (frozenset({"chest", "heart", "palpitations", "cardiac"}), ("cardio",), "chest pain"),
-    (
-        frozenset({"stomach", "abdominal", "abdomen", "digestive", "diarrhea", "diarrhoea", "vomit", "vomiting"}),
-        ("gastro", "internal medicine", "general medicine"),
-        "stomach symptoms",
-    ),
-    (frozenset({"anxiety", "depression", "mental", "stress"}), ("psych",), "mental health symptoms"),
-    (
-        frozenset({"cough", "breathless", "wheeze", "wheezing", "lung", "respiratory"}),
-        ("pulmon", "respiratory"),
-        "respiratory symptoms",
-    ),
-    # Reported live: "fasting blood sugar 200+" plus "excessive thirst and frequent
-    # urination" is the textbook symptom triad for diabetes — the model named the
-    # actual condition in free text instead of calling the tool, which is exactly
-    # what _reply_forced_to_a_department_when_the_model_diagnosed_instead_of_routing
-    # below exists to catch, but it still needs a department hint to route to.
-    (
-        frozenset({
-            "sugar", "diabetes", "diabetic", "thirst", "thirsty", "urination", "urinate",
-            "urinating",
-        }),
-        ("endocrin", "internal medicine", "general medicine"),
-        "blood sugar symptoms",
-    ),
-    # Reported live: "i have brain tumor" — a self-diagnosis claim naming a
-    # suspected condition rather than raw symptoms — needs a department hint too,
-    # same as the diabetes-triad case above.
-    (frozenset({"brain", "tumor", "tumour", "cancer", "seizure", "seizures"}), ("neuro", "oncol"), "neurological symptoms"),
-)
-
-
-def _departments_hinted_by_patient_symptom_words(
-    message: str, history: list[ConversationMemory], department_names: list[str], already_covered: set[str]
-) -> dict[str, str]:
-    """Returns {department_name: symptom_label} for every real, active,
-    not-yet-covered department a symptom category the PATIENT mentioned points to —
-    the label (e.g. "chest pain", "ear pain") lets callers compose a note that
-    names the SPECIFIC symptom driving this department, rather than a generic
-    "this could also be evaluated by X" with no reasoning attached to it at all.
-    Reported live: "head pain and chest pain" routed correctly to both General
-    Medicine and Cardiology, but Cardiology's note read as boilerplate ("this could
-    also be evaluated by Cardiology") with no mention of chest pain specifically,
-    while General Medicine's model-composed note did name the symptom — an
-    inconsistent, half-explained reply. First matching category wins if a
-    department's name happens to match more than one hint substring (rare)."""
-    patient_texts = [message] + [
-        getattr(row, "content", "") or "" for row in history if getattr(row, "role", None) == "user"
-    ]
-    words = set(re.findall(r"[a-z0-9]+", " ".join(patient_texts).lower()))
-    hinted_substrings: dict[str, str] = {}
-    for keywords, hints, label in _SYMPTOM_DEPARTMENT_HINTS:
-        if words & keywords:
-            for hint in hints:
-                hinted_substrings.setdefault(hint, label)
-    if not hinted_substrings:
-        return {}
-    # Reported live: "ear and neck pain" + "difficulty swallowing" (an ENT case,
-    # nothing dental) also pulled in Dentistry — the "ear" keyword's hint substring
-    # "ent" is a plain `in` substring check, and "ent" happens to occur inside
-    # "dentistry" (d-ENT-istry) too. Every one of these hints is a department-name
-    # PREFIX by design (e.g. "cardio" leads "Cardiology", "otolaryn" leads
-    # "Otolaryngology") — anchoring the match to the start of a word, rather than
-    # letting it match anywhere inside one, keeps "ent" matching "ENT" itself
-    # without also matching mid-word inside unrelated names like "Dentistry".
-    missing: dict[str, str] = {}
-    for name in department_names:
-        if name in already_covered:
-            continue
-        lowered_name = name.lower()
-        for hint, label in hinted_substrings.items():
-            if re.search(rf"\b{re.escape(hint)}", lowered_name):
-                missing[name] = label
-                break
-    return missing
+# Symptom-vocabulary -> department-name hint table moved to
+# app.services.orchestrator.symptom_hints (see that module's own docstring) —
+# appointment_agent needs the exact same mapping now, to check a directly-named
+# department against what the patient's own symptoms actually support.
 
 
 def run_symptom_agent(
@@ -206,12 +109,41 @@ def run_symptom_agent(
     message: str,
     language: str,
     history: list[ConversationMemory],
-    patient_memory: str = "",
 ) -> str:
-    include_path2 = needs_path2_screening(message, history)
     department_names = list_active_department_names(db, ctx.clinic_id)
+
+    # Reported live: "isn't neurologist a better idea?" / "what do you think based on
+    # my symptoms" got either a blind department switch with no reasoning, or a
+    # free-text reply that HALLUCINATED a symptom never actually mentioned. A
+    # recommendation request is answered ENTIRELY from the real symptom-to-department
+    # mapping over what the patient has actually said — never handed to the LLM to
+    # freehand a reason, same "never trust the model to compose grounded clinical
+    # reasoning" principle as every other deterministic card in this system.
+    #
+    # Reported live (2nd instance): "I have fever and body aches, what do you
+    # recommend?" — symptom description and the recommendation phrase in the SAME
+    # message — short-circuited straight to a department, skipping the normal PATH 2
+    # screening questions (severity/duration) that should always come first for a
+    # symptom nobody has triaged yet. Scanning only PRIOR history (message="") fixes
+    # this: a symptom mentioned for the first time in THIS message still goes through
+    # the normal triage flow below; only a recommendation asked about symptoms
+    # already established in earlier turns is answered deterministically here.
+    if is_department_recommendation_request(message):
+        hinted = departments_hinted_by_patient_symptom_words("", history, department_names, set())
+        if hinted:
+            results = [
+                _get_department_availability_impl(
+                    db, ctx, name, note=f"Based on the {label} you described, {name} would be a good fit."
+                )
+                for name, label in hinted.items()
+            ]
+            return results[0] if len(results) == 1 else combine_department_availability_results(results)
+        # No real symptom described yet this session to base a recommendation on —
+        # fall through to the normal triage flow below, which will ask what's wrong.
+
+    include_path2 = needs_path2_screening(message, history)
     language_name = llm._LANGUAGE_NAMES.get(language, "English")
-    system_prompt = _build_system_prompt(language_name, department_names, patient_memory, include_path2)
+    system_prompt = _build_system_prompt(language_name, department_names, include_path2)
 
     forced_date_window = resolve_bare_weekday_window(message)
     tools = [
@@ -239,7 +171,7 @@ def run_symptom_agent(
     if not reply.startswith((DOCTOR_OPTIONS_MARKER, DEPARTMENT_LIST_MARKER, NO_SLOTS_MARKER)) and violates_no_diagnosis_rule(
         reply
     ):
-        hinted = _departments_hinted_by_patient_symptom_words(message, history, department_names, set())
+        hinted = departments_hinted_by_patient_symptom_words(message, history, department_names, set())
         if hinted:
             results = [
                 _get_department_availability_impl(
@@ -269,7 +201,7 @@ def run_symptom_agent(
         # Medicine's note named the symptom (model-composed) but Cardiology's
         # generic fallback note didn't, reading as an inconsistent, half-explained
         # reply between the two cards.
-        for name, label in _departments_hinted_by_patient_symptom_words(
+        for name, label in departments_hinted_by_patient_symptom_words(
             message, history, department_names, already_covered
         ).items():
             if name not in missing:

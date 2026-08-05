@@ -120,3 +120,64 @@ def test_tick_creates_auto_completed_notification_for_the_patient(db, clinic, us
     assert len(notifications) == 1
     assert notifications[0].related_appointment_id == appointment.id
     assert notifications[0].read_at is None
+
+
+def _upcoming_appointment(db, clinic, *, starts_in):
+    dept = Department(clinic_id=clinic.id, name="Cardiology")
+    db.add(dept)
+    db.flush()
+
+    doctor = Doctor(
+        clinic_id=clinic.id, department_id=dept.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:6]}",
+        full_name="Dr. Jane Example", is_active=True,
+    )
+    db.add(doctor)
+    db.flush()
+
+    patient = User(
+        clinic_id=clinic.id, role="patient", email=f"{uuid.uuid4().hex}@example.com",
+        hashed_password="x", full_name="Pat Ient",
+    )
+    db.add(patient)
+    db.flush()
+
+    start = datetime.now(timezone.utc) + starts_in
+    slot = Slot(clinic_id=clinic.id, doctor_id=doctor.id, start_utc=start, end_utc=start + timedelta(minutes=30))
+    db.add(slot)
+    db.flush()
+
+    appointment = Appointment(clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id, status="confirmed")
+    db.add(appointment)
+    db.flush()
+    return appointment
+
+
+def test_reminder_tick_sends_the_due_reminder_for_the_patient(db, clinic, use_test_session_for_scheduler):
+    from app.models.notification import Notification
+
+    appointment = _upcoming_appointment(db, clinic, starts_in=timedelta(minutes=4))
+
+    scheduler_module.run_appointment_reminder_tick()
+
+    types = sorted(
+        n.type
+        for n in db.execute(
+            select(Notification).where(
+                Notification.clinic_id == clinic.id, Notification.user_id == appointment.patient_id
+            )
+        ).scalars().all()
+    )
+    assert types == ["appointment_reminder_30m", "appointment_reminder_5m", "appointment_reminder_60m"]
+
+
+def test_reminder_tick_skips_inactive_clinics(db, clinic, use_test_session_for_scheduler):
+    from app.models.notification import Notification
+
+    clinic.is_active = False
+    db.flush()
+    _upcoming_appointment(db, clinic, starts_in=timedelta(minutes=4))
+
+    scheduler_module.run_appointment_reminder_tick()
+
+    notifications = db.execute(select(Notification).where(Notification.clinic_id == clinic.id)).scalars().all()
+    assert notifications == []

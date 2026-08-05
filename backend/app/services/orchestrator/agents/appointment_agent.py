@@ -68,8 +68,9 @@ from app.models.conversation_memory import ConversationMemory
 from app.services import llm
 from app.services.chat_markers import DEPARTMENT_LIST_MARKER, DOCTOR_DISAMBIGUATION_MARKER, DOCTOR_OPTIONS_MARKER
 from app.services.chat_tools import build_tools, list_upcoming_appointments, resolve_bare_weekday_window
-from app.services.department_availability import find_doctors_by_name
+from app.services.department_availability import find_doctors_by_name, list_active_department_names
 from app.services.message_classifier import _preceding_assistant_turn_looks_like_a_question
+from app.services.orchestrator.symptom_hints import departments_hinted_by_patient_symptom_words
 
 _APPOINTMENT_AGENT_TOOL_NAMES = {
     "book_appointment",
@@ -159,6 +160,48 @@ def _most_recent_action_intent(history: list[ConversationMemory]) -> str | None:
         if action is not None:
             return action
     return None
+
+
+# Reported live: patient described fever + body aches (correctly routed to General
+# Medicine), then said "book appointment in Neurology" style requests naming a
+# DIFFERENT department their own symptoms don't support — appointment_agent has no
+# symptom awareness at all and just showed that department's availability directly,
+# no reasoning attached. This is the deterministic mismatch check: a directly-named
+# department gets cross-checked against the real symptom-to-department mapping over
+# what the patient has actually described THIS session (see
+# app.services.orchestrator.symptom_hints), and if they clearly point elsewhere, the
+# patient is told so BEFORE any slots are shown — never silently complying with a
+# request that contradicts their own stated symptoms.
+_MISMATCH_WARNING_MARKER = "might be a better fit than"
+
+
+def _departments_named_directly_in_message(message: str, department_names: list[str]) -> list[str]:
+    lowered = message.lower()
+    return [name for name in department_names if re.search(rf"\b{re.escape(name.lower())}\b", lowered)]
+
+
+def _already_warned_about_department_mismatch(history: list[ConversationMemory], named_department: str) -> bool:
+    """True if this exact mismatch warning was already given for this department
+    earlier in the session — a patient who repeats the same request after seeing it
+    once is making an informed choice to proceed anyway, not missing the warning."""
+    marker_dept = named_department.lower()
+    for row in history:
+        if getattr(row, "role", None) != "assistant":
+            continue
+        content = (getattr(row, "content", "") or "").lower()
+        if _MISMATCH_WARNING_MARKER in content and marker_dept in content:
+            return True
+    return False
+
+
+def _department_mismatch_reply(named_department: str, hinted: dict[str, str]) -> str:
+    labels = ", ".join(sorted(set(hinted.values())))
+    hinted_names = ", ".join(hinted.keys())
+    return (
+        f"Based on the {labels} you described, {hinted_names} {_MISMATCH_WARNING_MARKER} {named_department}. "
+        f"Would you like me to show {hinted_names} availability instead, or would you still like to see "
+        f"{named_department}'s availability?"
+    )
 
 
 def _most_recent_availability_marker(history: list[ConversationMemory]) -> dict | None:
@@ -275,7 +318,6 @@ def _match_candidate(message: str, candidates: list[dict]) -> dict | None:
 
 def _build_system_prompt(
     language_name: str,
-    patient_memory: str,
     shown_options_payload: dict | None,
     resolved_match=None,
     doctor_already_shown: bool = False,
@@ -344,10 +386,7 @@ def _build_system_prompt(
         if shown_options_payload
         else ""
     )
-    tail = llm._TAIL_STYLE_AND_MEMORY_RULES.format(
-        language_name=language_name,
-        patient_memory=patient_memory.strip() if patient_memory and patient_memory.strip() else "(none)",
-    )
+    tail = llm._TAIL_STYLE_RULES.format(language_name=language_name)
     return (
         f"{_INTRO}\n\n"
         f"TOOL USE RULES:\n{llm._TOOL_RULES_SHARED}{llm._TOOL_RULES_APPOINTMENT_ACTIONS}\n"
@@ -365,7 +404,6 @@ def run_appointment_agent(
     message: str,
     language: str,
     history: list[ConversationMemory],
-    patient_memory: str = "",
 ) -> str:
     # Appointment-ambiguity handoff: resolved BEFORE the doctor-name handoff below,
     # so a reply naming a doctor to answer "which appointment?" (e.g. "the one with
@@ -414,6 +452,27 @@ def run_appointment_agent(
                 resolved_appointment = active[0]
                 resolved_appointment_action = action
 
+    # Symptom-vs-department mismatch check: only for a fresh booking-department
+    # reference, never for a cancel/reschedule action already resolved above (that's
+    # about an EXISTING appointment, not choosing a new department). If the patient
+    # directly names a real department, and their own earlier symptoms in THIS
+    # session point somewhere else entirely, they're told before any slots are shown
+    # — but only once per department (see _already_warned_about_department_mismatch)
+    # so repeating the same request after seeing the warning proceeds normally,
+    # respecting their informed choice rather than refusing forever.
+    if resolved_appointment is None:
+        department_names = list_active_department_names(db, ctx.clinic_id)
+        named_departments = _departments_named_directly_in_message(message, department_names)
+        if named_departments:
+            hinted = departments_hinted_by_patient_symptom_words("", history, department_names, set())
+            for named in named_departments:
+                if (
+                    hinted
+                    and named not in hinted
+                    and not _already_warned_about_department_mismatch(history, named)
+                ):
+                    return _department_mismatch_reply(named, hinted)
+
     # Handoff step 1: deterministic ambiguity check against the real doctor table.
     # A message with no doctor-name reference at all (e.g. "cancel my appointment")
     # simply returns zero matches here and falls through normally below. Skipped
@@ -457,7 +516,6 @@ def run_appointment_agent(
     language_name = llm._LANGUAGE_NAMES.get(language, "English")
     system_prompt = _build_system_prompt(
         language_name,
-        patient_memory,
         marker_payload,
         resolved_match,
         doctor_already_shown,

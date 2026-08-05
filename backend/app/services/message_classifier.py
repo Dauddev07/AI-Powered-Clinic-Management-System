@@ -119,7 +119,12 @@ _SYMPTOM_KEYWORDS = frozenset({
     "pain", "ache", "aches", "aching", "fever", "cough", "symptom", "symptoms",
     "headache", "cold", "flu", "medicine", "medication", "prescription", "treatment",
     "diagnosis", "sick", "ill", "illness", "hurt", "hurts", "injury", "injured",
-    "dizzy", "dizziness", "nausea", "vomit", "vomiting", "rash", "allergy", "allergic",
+    # "diziness" (missing the second "z") reported live: this typo matched no
+    # keyword at all, so the message fell through to GENERAL_INFO/the plain
+    # freehand-LLM agent instead of symptom_agent's PATH 1/2/3 triage flow, which
+    # asks 1-2 clarifying questions before ever naming a department — the plain
+    # agent has no such guarantee at all and just answered with generic advice.
+    "dizzy", "dizziness", "diziness", "nausea", "vomit", "vomiting", "rash", "allergy", "allergic",
     # Fractures/sprains/soft-tissue trauma — the gap that let "my hand got broken"
     # slip through undetected entirely.
     "broken", "break", "fracture", "fractured", "sprain", "sprained", "twisted",
@@ -160,7 +165,7 @@ _KNOWLEDGE_KEYWORDS = _LOGISTICS_KEYWORDS | _SYMPTOM_KEYWORDS
 # while a false negative would drop real screening guidance for a symptom that
 # needed it.
 _PATH2_SYMPTOM_KEYWORDS = frozenset({
-    "chest", "dizziness", "dizzy", "lightheaded", "lightheadedness", "faint",
+    "chest", "dizziness", "diziness", "dizzy", "lightheaded", "lightheadedness", "faint",
     "fainting", "fainted", "vomiting", "diarrhea", "diarrhoea", "sprain", "sprained",
     "fracture", "fractured", "burn", "burned", "burning", "palpitations", "bite",
     "bitten", "pregnant", "pregnancy",
@@ -218,18 +223,6 @@ def needs_path2_screening(message: str, history=None) -> bool:
     return False
 
 
-def is_personal_recall_message(message: str) -> bool:
-    """True when the message is the patient directly asking the assistant to recall
-    something they themselves said earlier (e.g. "what's my name", "what are the
-    things I told you"). Used by app.services.orchestrator.agents.general_info_agent
-    to answer such a question deterministically from PATIENT MEMORY in code, rather
-    than trusting the model to reliably surface it from a long system prompt — live
-    testing showed even the primary model would still say "I don't have any details"
-    despite the memory being correctly present in the prompt with explicit
-    instructions to use it, a reliability gap this sidesteps entirely."""
-    return bool(_PERSONAL_RECALL_RE.search(message.strip()))
-
-
 # Reported live: "what are the available depts" / "show me available depts" wasn't
 # recognized at all — it contains "available", one of _BOOKING_ACTION_KEYWORDS below,
 # so the router sent it to appointment_agent (which has no tool that can list every
@@ -268,6 +261,38 @@ def is_department_list_request(message: str) -> bool:
     has, not asking about one specific named department/doctor. See the module-level
     comment above _DEPARTMENT_LIST_RE for why plural is required."""
     return bool(_DEPARTMENT_LIST_RE.search(message.strip()))
+
+
+# Reported live: a patient described fever + body aches (routed correctly to
+# General Medicine), then asked "isn't neurologist a better idea?" and "what do you
+# think based on my symptoms" — these got shown Neurology's availability directly (no
+# reasoning at all) and then a free-text reply that HALLUCINATED a symptom ("ear
+# pain") never actually mentioned, since nothing recognized these as the patient
+# asking for a grounded recommendation rather than a plain booking action. Detects
+# that shape of message so app.services.orchestrator.router can route it to
+# symptom_agent's deterministic recommendation short-circuit (real symptom-to-
+# department mapping, never model-invented reasoning) regardless of what card was
+# shown last turn.
+_RECOMMENDATION_RE = re.compile(
+    r"("
+    r"what do (?:you|u) (?:think|recommend|suggest)"
+    r"|what would (?:you|u) (?:think|recommend|suggest)"
+    r"|(?:your|ur) recommendation"
+    r"|which (?:department|dept|doctor|specialist|one) (?:is|would be|should i)"
+    r"|what (?:department|dept) should i"
+    r"|(?:isn'?t|is|wouldn'?t|would)\b.{0,25}\bbetter\b"
+    r"|based on my symptoms"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def is_department_recommendation_request(message: str) -> bool:
+    """True when the patient is asking for a recommendation/opinion on which
+    department fits their (already-described) symptoms — e.g. "what do you think",
+    "isn't X a better idea", "which department should I see" — as opposed to a plain
+    booking action ("book me with Dr. X") or an initial symptom description."""
+    return bool(_RECOMMENDATION_RE.search(message.strip()))
 
 
 def is_symptom_message(message: str) -> bool:

@@ -12,6 +12,12 @@ const TYPE_DESTINATION = {
   appointment_rescheduled: "/patient/appointments",
   appointment_cancelled: "/patient/appointments/history",
   appointment_auto_completed: "/patient/appointments/history",
+  // Reminders point at the still-upcoming list — the appointment they're about
+  // hasn't happened yet by definition.
+  appointment_reminder_60m: "/patient/appointments",
+  appointment_reminder_30m: "/patient/appointments",
+  appointment_reminder_5m: "/patient/appointments",
+  appointment_starting: "/patient/appointments",
 };
 
 // Per-type icon + color family — lets a patient tell what happened at a glance
@@ -36,6 +42,25 @@ const TYPE_META = {
   appointment_auto_completed: {
     tone: "success",
     icon: <path d="M7 3v3M17 3v3M4 9h16M5 6h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1ZM8 14l3 3 5-5" />,
+  },
+  // The 3 countdown reminders share one clock icon/tone — only the message text
+  // (1 hour / 30 minutes / 5 minutes) differs; "starting now" gets its own,
+  // higher-urgency tone since the appointment is happening at this instant.
+  appointment_reminder_60m: {
+    tone: "info",
+    icon: <path d="M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,
+  },
+  appointment_reminder_30m: {
+    tone: "info",
+    icon: <path d="M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,
+  },
+  appointment_reminder_5m: {
+    tone: "warning",
+    icon: <path d="M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,
+  },
+  appointment_starting: {
+    tone: "success",
+    icon: <path d="M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,
   },
 };
 
