@@ -1,3 +1,4 @@
+import { useLayoutEffect } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthContext";
 import RequireAuth from "./auth/RequireAuth";
@@ -26,6 +27,19 @@ import ChatPage from "./pages/patient/ChatPage";
 
 export default function App() {
   const location = useLocation();
+
+  // Every navigation must land at the top of the new page, not wherever the
+  // previous page happened to be scrolled to — React Router (unlike a classic
+  // full-page load) never resets scroll position on its own. Skipped when the
+  // URL carries a hash (e.g. a footer link to "/#pricing") so Landing's own
+  // hash-scroll effect below can still land on that anchor instead of being
+  // immediately overridden back to the top. useLayoutEffect (not useEffect) so
+  // this runs before the browser paints the new page, avoiding a visible flash
+  // of the old scroll position first.
+  useLayoutEffect(() => {
+    if (location.hash) return;
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [location.key, location.hash]);
 
   return (
     <ToastProvider>

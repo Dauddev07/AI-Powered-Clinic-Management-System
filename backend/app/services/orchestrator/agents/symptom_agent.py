@@ -113,22 +113,28 @@ def _departments_named_in_note_but_not_covered(
 # this clinic matches a symptom category that's still uncovered, fetch it too — same
 # "don't trust the model's tool-calling completeness" principle, one level earlier
 # than the note-scan above (before the model ever reasons about it, not just after).
-_SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...]], ...] = (
-    (frozenset({"skin", "itchy", "itching", "rash", "allergic", "allergy", "eczema", "hives"}), ("derma",)),
-    (frozenset({"ear", "earache", "hearing"}), ("ent", "otolaryn", "ear")),
-    (frozenset({"eye", "eyes", "vision"}), ("ophthal", "eye")),
-    (frozenset({"tooth", "teeth", "toothache", "dental"}), ("dent",)),
+_SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...] = (
+    (frozenset({"skin", "itchy", "itching", "rash", "allergic", "allergy", "eczema", "hives"}), ("derma",), "skin symptoms"),
+    (frozenset({"ear", "earache", "hearing"}), ("ent", "otolaryn", "ear"), "ear pain"),
+    (frozenset({"eye", "eyes", "vision"}), ("ophthal", "eye"), "eye symptoms"),
+    (frozenset({"tooth", "teeth", "toothache", "dental"}), ("dent",), "tooth pain"),
     (
         frozenset({"bone", "fracture", "fractured", "sprain", "sprained", "joint", "dislocated", "dislocation"}),
         ("ortho",),
+        "bone/joint injury",
     ),
-    (frozenset({"chest", "heart", "palpitations", "cardiac"}), ("cardio",)),
+    (frozenset({"chest", "heart", "palpitations", "cardiac"}), ("cardio",), "chest pain"),
     (
         frozenset({"stomach", "abdominal", "abdomen", "digestive", "diarrhea", "diarrhoea", "vomit", "vomiting"}),
         ("gastro", "internal medicine", "general medicine"),
+        "stomach symptoms",
     ),
-    (frozenset({"anxiety", "depression", "mental", "stress"}), ("psych",)),
-    (frozenset({"cough", "breathless", "wheeze", "wheezing", "lung", "respiratory"}), ("pulmon", "respiratory")),
+    (frozenset({"anxiety", "depression", "mental", "stress"}), ("psych",), "mental health symptoms"),
+    (
+        frozenset({"cough", "breathless", "wheeze", "wheezing", "lung", "respiratory"}),
+        ("pulmon", "respiratory"),
+        "respiratory symptoms",
+    ),
     # Reported live: "fasting blood sugar 200+" plus "excessive thirst and frequent
     # urination" is the textbook symptom triad for diabetes — the model named the
     # actual condition in free text instead of calling the tool, which is exactly
@@ -140,29 +146,57 @@ _SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...]], ...] = 
             "urinating",
         }),
         ("endocrin", "internal medicine", "general medicine"),
+        "blood sugar symptoms",
     ),
+    # Reported live: "i have brain tumor" — a self-diagnosis claim naming a
+    # suspected condition rather than raw symptoms — needs a department hint too,
+    # same as the diabetes-triad case above.
+    (frozenset({"brain", "tumor", "tumour", "cancer", "seizure", "seizures"}), ("neuro", "oncol"), "neurological symptoms"),
 )
 
 
 def _departments_hinted_by_patient_symptom_words(
     message: str, history: list[ConversationMemory], department_names: list[str], already_covered: set[str]
-) -> list[str]:
+) -> dict[str, str]:
+    """Returns {department_name: symptom_label} for every real, active,
+    not-yet-covered department a symptom category the PATIENT mentioned points to —
+    the label (e.g. "chest pain", "ear pain") lets callers compose a note that
+    names the SPECIFIC symptom driving this department, rather than a generic
+    "this could also be evaluated by X" with no reasoning attached to it at all.
+    Reported live: "head pain and chest pain" routed correctly to both General
+    Medicine and Cardiology, but Cardiology's note read as boilerplate ("this could
+    also be evaluated by Cardiology") with no mention of chest pain specifically,
+    while General Medicine's model-composed note did name the symptom — an
+    inconsistent, half-explained reply. First matching category wins if a
+    department's name happens to match more than one hint substring (rare)."""
     patient_texts = [message] + [
         getattr(row, "content", "") or "" for row in history if getattr(row, "role", None) == "user"
     ]
     words = set(re.findall(r"[a-z0-9]+", " ".join(patient_texts).lower()))
-    hinted_substrings = set()
-    for keywords, hints in _SYMPTOM_DEPARTMENT_HINTS:
+    hinted_substrings: dict[str, str] = {}
+    for keywords, hints, label in _SYMPTOM_DEPARTMENT_HINTS:
         if words & keywords:
-            hinted_substrings.update(hints)
+            for hint in hints:
+                hinted_substrings.setdefault(hint, label)
     if not hinted_substrings:
-        return []
-    missing = []
+        return {}
+    # Reported live: "ear and neck pain" + "difficulty swallowing" (an ENT case,
+    # nothing dental) also pulled in Dentistry — the "ear" keyword's hint substring
+    # "ent" is a plain `in` substring check, and "ent" happens to occur inside
+    # "dentistry" (d-ENT-istry) too. Every one of these hints is a department-name
+    # PREFIX by design (e.g. "cardio" leads "Cardiology", "otolaryn" leads
+    # "Otolaryngology") — anchoring the match to the start of a word, rather than
+    # letting it match anywhere inside one, keeps "ent" matching "ENT" itself
+    # without also matching mid-word inside unrelated names like "Dentistry".
+    missing: dict[str, str] = {}
     for name in department_names:
         if name in already_covered:
             continue
-        if any(hint in name.lower() for hint in hinted_substrings):
-            missing.append(name)
+        lowered_name = name.lower()
+        for hint, label in hinted_substrings.items():
+            if re.search(rf"\b{re.escape(hint)}", lowered_name):
+                missing[name] = label
+                break
     return missing
 
 
@@ -207,8 +241,12 @@ def run_symptom_agent(
     ):
         hinted = _departments_hinted_by_patient_symptom_words(message, history, department_names, set())
         if hinted:
-            generic_note = "Based on the symptoms described, this should be evaluated by a doctor — here's who's available."
-            results = [_get_department_availability_impl(db, ctx, name, note=generic_note) for name in hinted]
+            results = [
+                _get_department_availability_impl(
+                    db, ctx, name, note=f"Based on the {label} described, this should be evaluated by a doctor."
+                )
+                for name, label in hinted.items()
+            ]
             reply = results[0] if len(results) == 1 else combine_department_availability_results(results)
 
     if reply.startswith(DOCTOR_OPTIONS_MARKER):
@@ -224,10 +262,19 @@ def run_symptom_agent(
         # shown when routing was inferred from symptoms, never left blank).
         extra_notes = {name: original_note for name in missing}
         already_covered = {covered_department, *missing}
-        for name in _departments_hinted_by_patient_symptom_words(message, history, department_names, already_covered):
+        # Names the SPECIFIC symptom driving this extra department (e.g. "the
+        # chest pain could also be evaluated by Cardiology") instead of a
+        # boilerplate "this could also be evaluated by X" with no reasoning
+        # attached — reported live: in a head pain + chest pain case, General
+        # Medicine's note named the symptom (model-composed) but Cardiology's
+        # generic fallback note didn't, reading as an inconsistent, half-explained
+        # reply between the two cards.
+        for name, label in _departments_hinted_by_patient_symptom_words(
+            message, history, department_names, already_covered
+        ).items():
             if name not in missing:
                 missing.append(name)
-                extra_notes[name] = f"Based on the symptoms described, this could also be evaluated by {name}."
+                extra_notes[name] = f"Based on the {label} described, this could also be evaluated by {name}."
         if missing:
             extra_results = [
                 _get_department_availability_impl(db, ctx, name, note=extra_notes[name]) for name in missing

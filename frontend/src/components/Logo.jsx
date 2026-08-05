@@ -8,9 +8,20 @@ import styles from "./Logo.module.css";
 // an ellipsis — for narrow-but-tall placements (e.g. Register's fixed-width
 // intro sidebar) where there's plenty of vertical room and truncating "Clinic"
 // down to "Cli…" reads worse than just wrapping it.
-export default function Logo({ size = "md", wrap = false }) {
+//
+// `compact` drops the wordmark entirely below a narrow width, leaving just the
+// glyph — for AppHeader specifically, where the brand shares a single row with
+// the home/bell/avatar icon group on the authenticated header, and a fixed
+// ellipsis-truncated "Quick Che…" reads as broken rather than just tight on
+// space. Landing/Login/Register don't compete for that row, so they keep the
+// full wordmark at every width.
+export default function Logo({ size = "md", wrap = false, compact = false }) {
   return (
-    <span className={`${styles.logo} ${size === "lg" ? styles.lg : ""} ${wrap ? styles.wrap : ""}`}>
+    <span
+      className={`${styles.logo} ${size === "lg" ? styles.lg : ""} ${wrap ? styles.wrap : ""} ${
+        compact ? styles.compact : ""
+      }`}
+    >
       <svg
         className={styles.glyph}
         viewBox="0 0 24 24"

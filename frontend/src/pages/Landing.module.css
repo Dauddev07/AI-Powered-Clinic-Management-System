@@ -203,6 +203,29 @@
   flex: none;
 }
 
+@media (max-width: 480px) {
+  .emergencyBanner {
+    /* Centered text wrapping to two lines pulled the icon (align-items:
+       center against the whole block) down between the lines rather than
+       sitting beside the first one, and the tight horizontal padding let the
+       text crowd the viewport edges — reported as looking cramped/broken on
+       small screens. Left-aligning the whole row keeps the icon pinned to
+       the text's cap height regardless of how many lines it wraps to, and a
+       slightly smaller/tighter caption size gives the two-line wrap more
+       breathing room. */
+    justify-content: flex-start;
+    align-items: flex-start;
+    gap: 0.4rem;
+    padding: 0.55rem 1rem;
+    text-align: left;
+    font-size: calc(var(--font-size-caption) * 0.94);
+  }
+
+  .emergencyBanner svg {
+    margin-top: 0.15em;
+  }
+}
+
 .actions {
   display: flex;
   gap: 0.75rem;

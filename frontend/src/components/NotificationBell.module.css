@@ -166,6 +166,16 @@
   border: 1px solid var(--app-info-border);
   font-size: var(--font-size-caption);
   font-weight: 700;
+  /* Reported live: on a narrow panel, .panelHeading's flex-shrink squeezed
+     this pill down until "2 new" wrapped onto two lines — turning the pill
+     into a small circle — and its own min-content width then overflowed
+     past .panelHeading's shrunk box, visually overlapping "Mark all read" in
+     the sibling .headerActions next to it. Fixed width (never shrinks, never
+     wraps) so the pill always stays a clean single-line badge; see the
+     .panelHeader wrap rule below for what happens when there's genuinely no
+     room left for it beside "Mark all read" and the close button. */
+  white-space: nowrap;
+  flex: none;
 }
 
 .headerActions {
@@ -173,6 +183,26 @@
   align-items: center;
   gap: 0.75rem;
   flex: none;
+}
+
+/* Below this width (matches .panel's own breakpoint into a full-viewport-width
+   fixed panel), "Notifications", the unread-count pill, "Mark all read", and
+   the close button no longer all fit on one line without crowding — wraps
+   into two clean rows instead of letting anything overlap. */
+@media (max-width: 480px) {
+  .panelHeader {
+    flex-wrap: wrap;
+    row-gap: 0.4rem;
+  }
+
+  .panelHeading {
+    flex: 1 1 100%;
+  }
+
+  .headerActions {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
 }
 
 .markAllBtn {

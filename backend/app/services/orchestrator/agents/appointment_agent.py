@@ -141,6 +141,26 @@ def _detect_action_intent(message: str) -> str | None:
     return None
 
 
+_ACTION_INTENT_LOOKBACK_TURNS = 6
+
+
+def _most_recent_action_intent(history: list[ConversationMemory]) -> str | None:
+    """Recovers a cancel/reschedule action stated a turn or two ago, for when the
+    patient's very next message just repeats a doctor name without restating the
+    action verb (e.g. "I mean Dr. X" sent again after the assistant already acted
+    on their first request, expecting that same context to still apply). Bounded
+    lookback over user turns only, so this can't reach back into an unrelated,
+    much older part of the conversation."""
+    user_messages = [
+        getattr(row, "content", "") or "" for row in history if getattr(row, "role", None) == "user"
+    ][-_ACTION_INTENT_LOOKBACK_TURNS:]
+    for content in reversed(user_messages):
+        action = _detect_action_intent(content)
+        if action is not None:
+            return action
+    return None
+
+
 def _most_recent_availability_marker(history: list[ConversationMemory]) -> dict | None:
     """Recovers the structured payload of the most recent DOCTOR_OPTIONS_MARKER or
     DEPARTMENT_LIST_MARKER assistant turn in `history` — the same scan
@@ -363,20 +383,33 @@ def run_appointment_agent(
         resolved_appointment_action = pending["action"]
     else:
         action = _detect_action_intent(message)
+        name_matches = find_doctors_by_name(db, ctx.clinic_id, message)
+        if action is None and len(name_matches) == 1:
+            # No cancel/reschedule keyword in THIS message, but it names exactly
+            # one real doctor — check whether that action was requested recently
+            # rather than assuming this is unrelated to appointments at all.
+            action = _most_recent_action_intent(history)
         if action is not None:
             active = list_upcoming_appointments(db, ctx)
-            if len(active) > 1:
-                name_matches = find_doctors_by_name(db, ctx.clinic_id, message)
-                narrowed = (
-                    [a for a in active if a["doctor_name"] == name_matches[0].full_name]
-                    if len(name_matches) == 1
-                    else []
-                )
+            # Reported live: patient cancelled their appointment with Dr. Hashmi,
+            # then repeated "I mean Dr. Mahnoor Hashmi (Orthopedics)." — with only
+            # one appointment left (Dr. Sheikh's), the old `elif len(active) == 1`
+            # branch below picked it BLINDLY, ignoring that the named doctor was
+            # Hashmi, not Sheikh, and silently cancelled the wrong one. Checking
+            # a named doctor against the real active list FIRST — regardless of
+            # how many appointments remain — means a doctor with no current
+            # appointment always gets a clear "you don't have one" reply instead
+            # of ever falling back to any other appointment on the list.
+            if len(name_matches) == 1:
+                narrowed = [a for a in active if a["doctor_name"] == name_matches[0].full_name]
                 if len(narrowed) == 1:
                     resolved_appointment = narrowed[0]
                     resolved_appointment_action = action
                 else:
-                    return _appointment_disambiguation_reply(action, active)
+                    verb = "cancel" if action == "cancel" else "reschedule"
+                    return f"You don't have an upcoming appointment with {name_matches[0].full_name} to {verb}."
+            elif len(active) > 1:
+                return _appointment_disambiguation_reply(action, active)
             elif len(active) == 1:
                 resolved_appointment = active[0]
                 resolved_appointment_action = action

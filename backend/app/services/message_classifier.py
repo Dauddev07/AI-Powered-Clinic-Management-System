@@ -140,6 +140,13 @@ _SYMPTOM_KEYWORDS = frozenset({
     # Common named complaints
     "migraine", "sore", "toothache", "earache", "backache", "stomachache", "nosebleed",
     "lump", "bump", "discharge",
+    # Self-diagnosis claims ("i have a brain tumor", "i think i have cancer") — the
+    # patient naming a suspected condition outright rather than describing raw
+    # symptoms. Reported live: "i have brain tumor" had no keyword hit at all, so it
+    # fell through to GENERAL_INFO/the plain-KB agent instead of the symptom agent's
+    # concise department-card path, producing a long free-text breakdown (doctor
+    # schedule + booking mechanics + reschedule policy) instead of a short redirect.
+    "tumor", "tumour", "cancer", "diabetes", "diabetic",
 })
 
 # Deliberately broad and erring toward false positives (routing more things to

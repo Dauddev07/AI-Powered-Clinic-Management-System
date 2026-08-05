@@ -50,3 +50,17 @@
   text-overflow: clip;
   white-space: normal;
 }
+
+/* Below this width the glyph alone stands in for the brand rather than
+   showing a truncated, ellipsis-cut wordmark ("Quick Che…") next to the
+   header's icon group — the icon is used consistently enough elsewhere
+   (browser tab, etc.) to read as the brand on its own. */
+@media (max-width: 420px) {
+  .compact .wordmark {
+    display: none;
+  }
+
+  .compact .glyph {
+    font-size: 1.7em;
+  }
+}

@@ -122,7 +122,7 @@ export default function AppHeader() {
             there, Landing.jsx) rather than back to their own dashboard,
             which the home icon at the header's other end already covers. */}
         <Link to="/" className={styles.brand}>
-          <Logo />
+          <Logo compact />
         </Link>
       </div>
 

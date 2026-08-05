@@ -368,6 +368,8 @@ def test_bare_reply_after_a_user_turn_not_assistant_still_behaves_as_small_talk(
         "persistent cough and chills",
         "I feel dizzy and nauseous",
         "there's a rash on my arm",
+        "i have brain tumor",
+        "i think i have cancer",
     ],
 )
 def test_symptom_messages_detected(message):

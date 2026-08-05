@@ -452,8 +452,143 @@ def test_run_symptom_agent_fetches_a_department_hinted_by_symptom_words_even_whe
     derma_entry = next(d for d in payload["departments"] if d["department_name"] == "Dermatology")
     assert len(derma_entry["doctors"]) == 1
     # The model's note never named Dermatology at all, so a synthesized reasoning
-    # sentence must be shown instead of no explanation at all.
-    assert derma_entry["note"] == "Based on the symptoms described, this could also be evaluated by Dermatology."
+    # sentence must be shown instead of no explanation at all — and it must name
+    # the specific symptom ("skin symptoms"), not a generic "this could also be
+    # evaluated by X" with no reasoning attached.
+    assert derma_entry["note"] == "Based on the skin symptoms described, this could also be evaluated by Dermatology."
+
+
+def test_run_symptom_agent_names_the_specific_symptom_in_the_hinted_departments_note(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: "pain in my head and in my chest as well" routed to General
+    # Medicine (with a symptom-naming note the model composed itself) plus
+    # Cardiology (hinted via the "chest" keyword) — but Cardiology's synthesized
+    # note read as generic boilerplate ("this could also be evaluated by
+    # Cardiology") with no mention of chest pain, an inconsistent, half-explained
+    # reply next to General Medicine's real reasoning. The synthesized note must
+    # name the specific symptom that drove this department, same as this table's
+    # other categories.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    gen_med_department = Department(clinic_id=clinic.id, name="General Medicine")
+    db.add(gen_med_department)
+    cardio_department = Department(clinic_id=clinic.id, name="Cardiology")
+    db.add(cardio_department)
+    db.flush()
+    gen_med_doctor = Doctor(
+        clinic_id=clinic.id,
+        department_id=gen_med_department.id,
+        external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Ali Raza",
+        is_active=True,
+    )
+    db.add(gen_med_doctor)
+    cardio_doctor = Doctor(
+        clinic_id=clinic.id,
+        department_id=cardio_department.id,
+        external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Ahmed Farooq",
+        is_active=True,
+    )
+    db.add(cardio_doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=cardio_doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    card = json.dumps(
+        {
+            "note": "Based on what you've described, this sounds like something General Medicine should look at.",
+            "department_name": gen_med_department.name,
+            "doctors": [{"doctor_id": "d1", "doctor_name": gen_med_doctor.full_name, "specialization": None, "slots": []}],
+        }
+    )
+    reply_with_marker = DOCTOR_OPTIONS_MARKER + card
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: reply_with_marker)
+
+    history = [
+        _row("user", "i am having pain in my head and in my chest as well"),
+        _row(
+            "assistant",
+            "Is the head pain and chest discomfort severe, bearable, or mild? Also, did the chest feeling come on "
+            "suddenly or worsen over time, and is the head pain constant or does it come and go?",
+        ),
+    ]
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "the pain is mild and bearable and started today morning", "en", history
+    )
+
+    assert result.startswith(DEPARTMENT_LIST_MARKER)
+    payload = json.loads(result[len(DEPARTMENT_LIST_MARKER):])
+    cardio_entry = next(d for d in payload["departments"] if d["department_name"] == "Cardiology")
+    assert cardio_entry["note"] == "Based on the chest pain described, this could also be evaluated by Cardiology."
+
+
+def test_run_symptom_agent_does_not_falsely_hint_dentistry_for_ear_and_neck_pain(monkeypatch, db, ctx, clinic):
+    # Reported live: "pain in my ear and neck" + "difficulty swallowing" correctly
+    # routed to ENT, but a second, unrelated Dentistry card also showed up with no
+    # dental symptom mentioned anywhere. Root cause: the "ear" keyword's hint
+    # substring "ent" was matched with a plain `in` substring check against
+    # department names, and "ent" happens to occur mid-word inside "Dentistry"
+    # (d-ENT-istry). This confirms only ENT is returned, never Dentistry.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    ent_department = Department(clinic_id=clinic.id, name="ENT")
+    db.add(ent_department)
+    dentistry_department = Department(clinic_id=clinic.id, name="Dentistry")
+    db.add(dentistry_department)
+    db.flush()
+    ent_doctor = Doctor(
+        clinic_id=clinic.id,
+        department_id=ent_department.id,
+        external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Iqra Raza",
+        is_active=True,
+    )
+    db.add(ent_doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=ent_doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    card = json.dumps(
+        {
+            "note": "Based on your moderate ear and neck pain with difficulty swallowing, an ENT evaluation is appropriate.",
+            "department_name": "ENT",
+            "doctors": [{"doctor_id": "d1", "doctor_name": ent_doctor.full_name, "specialization": None, "slots": []}],
+        }
+    )
+    reply_with_marker = DOCTOR_OPTIONS_MARKER + card
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: reply_with_marker)
+
+    history = [
+        _row("user", "i am having pain in my ear and neck since 2 days"),
+        _row("assistant", "How would you describe the pain, and do you have any swelling, fever, or difficulty swallowing?"),
+    ]
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "the pain is moderate and bearable and i am having difficulty swallowing", "en", history
+    )
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "ENT"
 
 
 def test_run_symptom_agent_does_not_hint_a_department_with_no_matching_symptom_words(monkeypatch, db, ctx):
@@ -527,6 +662,52 @@ def test_run_symptom_agent_recovers_a_real_department_when_the_model_diagnosed_i
     assert payload["doctors"][0]["doctor_name"] == "Dr. Ali Raza"
     # The diagnostic free text must never reach the patient.
     assert "diabetes" not in result.lower()
+
+
+def test_run_symptom_agent_recovers_neurology_when_the_model_diagnosed_a_brain_tumor(monkeypatch, db, ctx, clinic):
+    # Reported live: "i have brain tumor" got a long free-text breakdown (department
+    # + doctor schedule + booking/reschedule mechanics) from general_info_agent
+    # instead of a concise department card, because the message had no matching
+    # symptom keyword at all and never reached symptom_agent. Now that routing is
+    # fixed (message_classifier._SYMPTOM_KEYWORDS includes "tumor"/"tumour"/
+    # "cancer"), this confirms symptom_agent's own diagnosis-recovery net also has a
+    # real department to fall back to if the model still names the condition in
+    # free text instead of calling the tool.
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+    from datetime import datetime, timedelta, timezone
+
+    neuro = Department(clinic_id=clinic.id, name="Neurology")
+    db.add(neuro)
+    db.flush()
+    doctor = Doctor(
+        clinic_id=clinic.id,
+        department_id=neuro.id,
+        external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Sana Qureshi",
+        is_active=True,
+    )
+    db.add(doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=20),
+        status="open",
+    ))
+    db.flush()
+
+    diagnostic_reply = "This sounds like it could be a brain tumor. You should get it checked soon."
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: diagnostic_reply)
+
+    result = symptom_agent.run_symptom_agent(db, ctx, "i have brain tumor", "en", [])
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "Neurology"
+    assert payload["doctors"][0]["doctor_name"] == "Dr. Sana Qureshi"
+    assert "tumor" not in result.lower()
 
 
 def test_run_symptom_agent_leaves_a_diagnostic_reply_alone_when_no_department_can_be_hinted(monkeypatch, db, ctx):
@@ -910,6 +1091,41 @@ def test_run_appointment_agent_narrows_multiple_active_via_named_doctor_in_same_
     assert result == "reply"
     assert "RESOLVED APPOINTMENT" in captured["system_prompt"]
     assert str(other_appt.id) in captured["system_prompt"]
+
+
+def test_run_appointment_agent_named_doctor_with_no_active_appointment_never_falls_back_to_another_one(
+    monkeypatch, db, ctx, clinic, doctor, other_doctor, patient
+):
+    # Reported live: patient had 2 upcoming appointments (Dr. Ahmed Khan, Dr. Ahmed
+    # Raza), cancelled Dr. Ahmed Khan's via the disambiguation flow, then repeated
+    # "I mean Dr. Ahmed Khan." again (no "cancel" keyword this time, and the last
+    # assistant turn was a plain cancellation-confirmation sentence, not a
+    # DOCTOR_DISAMBIGUATION_MARKER card) — the old `elif len(active) == 1` branch
+    # picked the one appointment left (Dr. Ahmed Raza's) blindly, ignoring that the
+    # named doctor was Khan, and silently cancelled the WRONG one. Only Dr. Ahmed
+    # Raza's appointment exists here (Khan's was already cancelled/never booked);
+    # naming Khan again must get a clear "you don't have one" reply, never resolve
+    # to Raza's appointment, and never even reach the LLM.
+    _future_appointment(db, clinic, patient, other_doctor)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called when the named doctor has no active appointment")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row("user", "cancel my appointment"),
+        _row(
+            "assistant",
+            "You have more than one upcoming appointment — which one would you like to cancel: "
+            "Dr. Ahmed Khan (Cardiology, Thu, Aug 6 at 4:00 PM), Dr. Ahmed Raza (Neurology, Sat, Aug 8 at 8:00 AM)?",
+        ),
+        _row("user", "I mean Dr. Ahmed Khan."),
+        _row("assistant", "Your appointment with Dr. Ahmed Khan in Cardiology on Thu, Aug 6 at 4:00 PM has been cancelled."),
+    ]
+    result = appointment_agent.run_appointment_agent(db, ctx, "I mean Dr. Ahmed Khan.", "en", history)
+
+    assert result == "You don't have an upcoming appointment with Dr. Ahmed Khan to cancel."
 
 
 def test_run_appointment_agent_resolves_a_reply_to_pending_appointment_disambiguation(
