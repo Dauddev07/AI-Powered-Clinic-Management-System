@@ -422,6 +422,21 @@ def test_bite_torsion_and_head_injury_patterns_fire(message):
     assert detect_red_flag(message)
 
 
+@pytest.mark.parametrize(
+    "message",
+    ["severe testicle pain", "sharp scrotal pain", "severe testicular pain"],
+)
+def test_testicular_pain_plain_adjective_noun_noun_order_fires(message):
+    # Regression: the semantic layer used to backstop this category, but was
+    # removed entirely after real false positives (see _EXEMPLARS' docstring in
+    # red_flag.py) — regex is now the ONLY detection for testicular pain, and this
+    # exact word order ("severe testicle pain", mirroring the already-covered
+    # "severe chest pain" construction) was missing from all three original
+    # patterns, none of which matched severity-adjective directly followed by the
+    # testicle word directly followed by "pain".
+    assert detect_red_flag(message)
+
+
 def test_snake_bite_reverse_word_order_fires():
     # "a snake bit me" (subject-verb-object) rather than the passive "bitten by a
     # snake" phrasing the other snake-bite patterns cover.
@@ -589,8 +604,6 @@ def test_unrelated_phrasing_does_not_false_fire(message):
         "someone put a bullet in his stomach",
         # Fall from height — no "fell"/"roof"/"ladder" keyword.
         "she went over the balcony railing from the third floor",
-        # Testicular torsion — no "testicular"/"testicle"/"scrotal" keyword.
-        "excruciating pain in one of my balls that started suddenly",
         # Unconsciousness — no "unconscious"/"unresponsive"/"passed out" keyword.
         "he just collapsed and wont wake up no matter what we do",
         # Suicidal ideation — no "suicid"/"kill myself"/"want to die"/"hurt myself"
@@ -613,8 +626,8 @@ def test_semantic_similarity_catches_paraphrases_with_no_shared_regex_vocabulary
     "message",
     [
         # These deliberately stay negative even with the semantic layer active — see
-        # _EXEMPLARS' docstring for why chest pain/bleeding/burns/choking/fractures
-        # are excluded from the semantic bank specifically.
+        # _EXEMPLARS' docstring for why chest pain/bleeding/burns/choking/fractures/
+        # testicular pain are excluded from the semantic bank specifically.
         "I have severe chest pain",
         "chest pressure and tightness",
         "there is a squeezing pain in my chest",
@@ -623,6 +636,15 @@ def test_semantic_similarity_catches_paraphrases_with_no_shared_regex_vocabulary
         "i got a small burn on my finger",
         "i have a bit of a rash on my arm",
         "my knee has been aching for two days",
+        # Regression: testicular torsion was REMOVED from the semantic exemplar bank
+        # entirely after this scored 0.61 with no severity/suddenness/swelling
+        # stated at all — even the margin layer couldn't separate it from a genuine
+        # emergency paraphrase, same "severity can't be inferred from topic alone"
+        # failure as chest pain/bleeding/burns above. See that exemplar's own
+        # removal comment in red_flag.py for the full calibration details.
+        "i am having pain in my testies",
+        "i have pain in my testicles",
+        "my testicle hurts a bit",
         # Regression: a benign personal-recall question about a previously-mentioned
         # allergy scored 0.6 against an early "allergic reaction" exemplar purely off
         # the shared word "allergy" — anaphylaxis was dropped from _EXEMPLARS as a

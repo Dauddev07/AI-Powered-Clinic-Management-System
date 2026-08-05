@@ -52,6 +52,42 @@ _INTRO = (
     "patients with symptom triage and department routing."
 )
 
+# Mirrors PATH 3's own stated exception in llm.py ("if the patient's own message
+# already gives a body part/area, duration, AND severity together, you may call
+# the tool sooner"). A symptom keyword having already matched is what routed the
+# message here at all (see message_classifier.is_symptom_message), so it stands
+# in for "body part/area" — only duration and severity need checking here.
+_DURATION_HINT_RE = re.compile(
+    r"\b(day|days|week|weeks|month|months|hour|hours|year|years|since)\b", re.IGNORECASE
+)
+_SEVERITY_HINT_RE = re.compile(
+    r"\b(mild|moderate|severe|bearable|unbearable|sharp|dull|intense|excruciating|slight)\b", re.IGNORECASE
+)
+
+
+def _message_already_gives_duration_and_severity(message: str) -> bool:
+    return bool(_DURATION_HINT_RE.search(message) and _SEVERITY_HINT_RE.search(message))
+
+
+# Self-diagnosis claims ("i have brain tumor", "i think i have cancer") are
+# deliberately EXCLUDED from the first-message backstop below — the established,
+# separately-reported fix for this category (see message_classifier._SYMPTOM_KEYWORDS'
+# own comment) was that the model should respond with a CONCISE department redirect,
+# not a longer structured breakdown. Asking "is that mild, moderate, or severe?" in
+# response to "I have a brain tumor" reads as dismissive/deflecting for something a
+# patient is already alarmed about, not genuinely clarifying — this category needs a
+# fast redirect (handled by the LLM itself, backstopped by the diagnosis-recovery net
+# below if it still free-texts the condition instead of calling the tool), not an
+# extra screening question first. Same word list as _SYMPTOM_KEYWORDS' self-diagnosis
+# entries, kept local here since this is a narrower, different purpose (excluding from
+# a screening gate, not routing).
+_SELF_DIAGNOSIS_WORDS = frozenset({"tumor", "tumour", "cancer", "diabetes", "diabetic"})
+
+
+def _is_self_diagnosis_claim(message: str) -> bool:
+    words = set(re.findall(r"[a-z0-9]+", message.lower()))
+    return bool(words & _SELF_DIAGNOSIS_WORDS)
+
 
 def _build_system_prompt(language_name: str, department_names: list[str], include_path2: bool) -> str:
     context_line = (
@@ -142,6 +178,41 @@ def run_symptom_agent(
         # fall through to the normal triage flow below, which will ask what's wrong.
 
     include_path2 = needs_path2_screening(message, history)
+
+    # DETERMINISTIC BACKSTOP for PATH 3's "never zero questions" rule — live testing
+    # showed the model following this instruction most of the time, but not always:
+    # two separate reports ("I am having nausea..", "pain in my jaw" — see
+    # tests/test_orchestrator.py) each skipped straight to a department card with
+    # ZERO clarifying questions on the very first message of a brand new session,
+    # despite an explicit prompt paragraph (llm.py's PATH 3 section) specifically
+    # calling out this exact shape of message as the most common way the rule gets
+    # broken. A prompt instruction alone was not a reliable enough guarantee for
+    # this correctness-critical step, same conclusion reached for every other
+    # deterministic backstop in this file — so the highest-confidence case (a
+    # symptom mentioned for the very first time in a brand new session) is now
+    # enforced in code instead of hoped for. Deliberately narrow in scope: only
+    # fires when history is completely empty (this really is message #1), PATH 2
+    # doesn't already apply (that path already reliably asks first), the patient
+    # hasn't already given duration+severity together (PATH 3's own stated
+    # exception — genuine clarification already present, not a quota), and this
+    # isn't itself a recommendation request (handled separately above). A symptom
+    # raised for the first time LATER in an ongoing conversation is intentionally
+    # NOT covered here — the model's own MULTIPLE DISTINCT SYMPTOMS handling
+    # already has real conversation context to reason from in that case, which a
+    # brand new session has none of.
+    if (
+        not include_path2
+        and not history
+        and not is_department_recommendation_request(message)
+        and not _message_already_gives_duration_and_severity(message)
+        and not _is_self_diagnosis_claim(message)
+    ):
+        return (
+            "Could you tell me how severe this is (mild, moderate, or severe) and how "
+            "long you've had it? Any other symptoms alongside it, like swelling, fever, "
+            "or numbness?"
+        )
+
     language_name = llm._LANGUAGE_NAMES.get(language, "English")
     system_prompt = _build_system_prompt(language_name, department_names, include_path2)
 

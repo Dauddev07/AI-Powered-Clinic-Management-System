@@ -372,7 +372,10 @@ def test_run_symptom_agent_only_binds_its_two_tools(monkeypatch, db, ctx):
     monkeypatch.setattr(llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
     monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
 
-    result = symptom_agent.run_symptom_agent(db, ctx, "I have a cough", "en", [])
+    # Duration + severity already given together (PATH 3's own stated exception)
+    # so this reaches the LLM normally instead of the first-message backstop —
+    # this test is about tool binding, not the backstop itself.
+    result = symptom_agent.run_symptom_agent(db, ctx, "I have had a mild cough for 3 days", "en", [])
 
     assert result == "reply"
     assert captured["tools"] == {"get_department_availability", "find_doctors_by_name"}
@@ -770,6 +773,73 @@ def test_run_symptom_agent_first_message_combining_symptoms_and_recommendation_s
     assert result == "How long have you had the fever and body aches, and how severe are they?"
 
 
+@pytest.mark.parametrize("message", ["I am having pain in my jaw", "I am haiving nausea.."])
+def test_run_symptom_agent_deterministically_asks_before_a_brand_new_first_message_symptom(monkeypatch, db, ctx, message):
+    # Reported live TWICE despite an explicit prompt instruction telling the model
+    # not to do this ("MOST COMMON WAY THIS RULE GETS BROKEN" in llm.py's PATH 3):
+    # a bare, mild-sounding symptom as the very first message of a brand new
+    # session skipped straight to a department card with zero clarifying
+    # questions. The prompt instruction alone wasn't a reliable enough guarantee,
+    # so this is now a deterministic backstop — the LLM must not even be called
+    # for this shape of message.
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for a brand-new first-message symptom")
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    result = symptom_agent.run_symptom_agent(db, ctx, message, "en", [])
+
+    assert "severe" in result.lower()
+    assert "how long" in result.lower()
+
+
+def test_run_symptom_agent_first_message_backstop_skips_when_duration_and_severity_already_given(monkeypatch, db, ctx):
+    # PATH 3's own stated exception: duration + severity already given together
+    # means genuine clarification already happened, so the normal LLM triage flow
+    # runs as usual instead of the deterministic backstop re-asking for the same
+    # info the patient already provided.
+    monkeypatch.setattr(
+        symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Let me check availability for you."
+    )
+
+    result = symptom_agent.run_symptom_agent(db, ctx, "mild jaw pain for the past 2 days", "en", [])
+
+    assert result == "Let me check availability for you."
+
+
+@pytest.mark.parametrize("message", ["i have brain tumor", "i think i have cancer"])
+def test_run_symptom_agent_first_message_backstop_skips_self_diagnosis_claims(monkeypatch, db, ctx, message):
+    # Self-diagnosis claims are deliberately excluded from the backstop — asking
+    # "is that mild, moderate, or severe?" in response to "I have a brain tumor"
+    # reads as dismissive for something a patient is already alarmed about; the
+    # established fix for this category is a fast, concise LLM-composed redirect
+    # instead (see _is_self_diagnosis_claim's own comment in symptom_agent.py).
+    monkeypatch.setattr(
+        symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Let me check availability for you."
+    )
+
+    result = symptom_agent.run_symptom_agent(db, ctx, message, "en", [])
+
+    assert result == "Let me check availability for you."
+
+
+def test_run_symptom_agent_first_message_backstop_does_not_apply_once_history_exists(monkeypatch, db, ctx):
+    # The backstop is deliberately scoped to a genuinely brand-new session
+    # (history == []) — once there's any prior turn, the normal LLM triage flow
+    # (which already has real conversation context to reason from) applies.
+    monkeypatch.setattr(
+        symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Let me check availability for you."
+    )
+
+    history = [
+        _row("user", "I have a headache"),
+        _row("assistant", "How long have you had it, and how severe is it?"),
+    ]
+    result = symptom_agent.run_symptom_agent(db, ctx, "I am also having pain in my jaw", "en", history)
+
+    assert result == "Let me check availability for you."
+
+
 def test_run_symptom_agent_does_not_hint_a_department_with_no_matching_symptom_words(monkeypatch, db, ctx):
     card = json.dumps(
         {
@@ -893,10 +963,15 @@ def test_run_symptom_agent_leaves_a_diagnostic_reply_alone_when_no_department_ca
     # No symptom-word hint matches anything real here — nothing safe to route to,
     # so the diagnostic reply must pass through untouched (chat.py's own
     # enforce_no_diagnosis call still catches it afterward at the normal layer).
+    # Duration + severity already given so this reaches the LLM normally instead
+    # of the first-message backstop — this test is about the diagnosis-recovery
+    # net's pass-through behavior, not the backstop itself.
     diagnostic_reply = "This sounds like it could be a rare condition. You should get it checked."
     monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: diagnostic_reply)
 
-    result = symptom_agent.run_symptom_agent(db, ctx, "I feel strange today", "en", [])
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "I have been feeling strange for the past few days, it's moderate", "en", []
+    )
 
     assert result == diagnostic_reply
 

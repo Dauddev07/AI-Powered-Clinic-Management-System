@@ -199,10 +199,19 @@ _RED_FLAG_PATTERNS = [
     r"\bscorpion sting\b",
     r"\bstung by a scorpion\b",
     # Sudden severe testicular/scrotal pain — a recognized time-critical emergency
-    # (torsion) regardless of how mild the rest of the message sounds.
+    # (torsion) regardless of how mild the rest of the message sounds. The semantic
+    # layer no longer backstops this category at all (see _EXEMPLARS' docstring in
+    # this file for why it was removed), so this regex coverage is now the ONLY
+    # automatic detection for it — every natural word order needs its own pattern,
+    # not just the ones a first pass happened to cover.
     r"\bsudden\b.{0,15}\b(testicular|testicle|scrotal|scrotum)\b.{0,15}\bpain\b",
     r"\b(testicular|testicle|scrotal|scrotum)\b.{0,20}\b(severe|sudden|sharp)\b.{0,10}\bpain\b",
     r"\b(severe|sudden|sharp)\b.{0,10}\bpain\b.{0,20}\b(testicular|testicle|scrotal|scrotum)\b",
+    # The plain adjective-noun-noun order ("severe testicle pain", mirroring the
+    # already-covered "severe chest pain" construction elsewhere in this file) was
+    # missing entirely — none of the three patterns above match "severe" ...
+    # "testicle" ... "pain" in that exact order.
+    r"\b(severe|sudden|sharp)\b.{0,10}\b(testicular|testicle|scrotal|scrotum)\b.{0,10}\bpain\b",
     # Head injury combined with a recognized danger sign — a bump on the head alone
     # is common and not auto-fired (see PATH 2 in llm.py for ambiguous head pain),
     # but a head injury plus vomiting, confusion, or memory loss is a well-known
@@ -242,16 +251,33 @@ _RED_FLAG_RE = re.compile("|".join(_RED_FLAG_PATTERNS), re.IGNORECASE)
 # once. So this list only covers categories that are unambiguous once identified at
 # all (no "mild version" that should route to PATH 2 instead): stroke signs,
 # poisoning, electrocution, drowning, weapon injuries, falls from height, venomous
-# bites, testicular torsion, unconsciousness, suicidal ideation, amputation, vehicle
-# collisions, and eye foreign objects. Chest pain, bleeding, burns, choking, and
-# fractures rely on the regex patterns (and the LLM's own PATH 1/2 judgment) alone,
-# not this semantic layer. Anaphylaxis is ALSO excluded, for a different reason: an
-# exemplar built around "allergic reaction" scored a benign personal-recall question
-# ("what allergy did I mention earlier?") at 0.6 similarity purely off the shared word
-# "allergy" — a plain mention of the word is common and unremarkable (medical history,
-# profile info, small talk), so this category isn't safe to include without a much
-# larger negative-calibration set than is practical here. Anaphylaxis still has solid
-# regex coverage on its own ("anaphylax", throat/face swelling).
+# bites, unconsciousness, suicidal ideation, amputation, vehicle collisions, and eye
+# foreign objects. Chest pain, bleeding, burns, choking, and fractures rely on the
+# regex patterns (and the LLM's own PATH 1/2 judgment) alone, not this semantic layer.
+# Anaphylaxis is ALSO excluded, for a different reason: an exemplar built around
+# "allergic reaction" scored a benign personal-recall question ("what allergy did I
+# mention earlier?") at 0.6 similarity purely off the shared word "allergy" — a plain
+# mention of the word is common and unremarkable (medical history, profile info, small
+# talk), so this category isn't safe to include without a much larger negative-
+# calibration set than is practical here. Anaphylaxis still has solid regex coverage
+# on its own ("anaphylax", throat/face swelling).
+#
+# Testicular torsion was ALSO removed after real false positives, for the SAME reason
+# as chest pain/bleeding/burns above (not a distinct new failure mode): "i am having
+# pain in my testies" (no severity/suddenness/swelling stated at all) scored 0.61
+# against the exemplar — even the margin layer (see _SEMANTIC_MARGIN below) couldn't
+# save it, since the message is genuinely topically on-target, just missing any
+# urgency signal, and three separate reworded candidates (adding "swelling", "within
+# minutes", "unlike ordinary discomfort") all still scored plain mentions at ~0.51-0.52
+# while barely improving true-positive separation. This confirms testicular pain
+# belongs in the same "severity can't be inferred from topic alone" bucket as chest
+# pain/bleeding/burns, not the "unambiguous once identified" bucket this list is
+# for — it should never have been included here in the first place. The regex
+# patterns above (requiring "sudden"/"severe"/"sharp" alongside "testicular"/
+# "testicle"/"scrotal"/"scrotum") still auto-fire correctly for anyone using that
+# vocabulary; a genuine torsion described in neither clinical nor severity language
+# (e.g. "excruciating pain in one of my balls that started suddenly") now relies on
+# the LLM's own PATH 1/2 judgment alone, same as chest pain/bleeding/burns already do.
 #
 # Two exemplars were tried and REMOVED after real false positives: "bitten by a
 # venomous snake or scorpion" scored 0.561 against a plain "i got bitten by a dog"
@@ -288,18 +314,6 @@ _EXEMPLARS: tuple[str, ...] = (
     "gunshot wound",
     "stabbed with a knife",
     "fell from a height like a roof, ladder, or balcony",
-    # Reported live: a routine PATH-2 screening follow-up — "its been from past 10
-    # days and the pain is mild and moderate" — scored 0.5073 against the original,
-    # looser wording of this exemplar ("sudden severe testicular pain"), just over
-    # threshold, off nothing more than shared generic pain/severity vocabulary (the
-    # message never even names a body part). That false positive sat ABOVE a genuine
-    # true positive already in this bank ("she went over the balcony railing",
-    # 0.5003), so raising the threshold would have broken real coverage before fixing
-    # this. Anchoring the exemplar to the concrete clinical picture (swelling +
-    # "urological emergency", not just "severe pain") drops the false positive to
-    # ~0.47 while the true-positive paraphrase ("excruciating pain in one of my
-    # balls that started suddenly") still scores ~0.70 against it.
-    "sudden excruciating testicular pain with swelling, a urological emergency",
     "unconscious and not responding",
     "collapsed and will not wake up",
     # Reported live: "Psychiatry in this dept" (a patient simply naming the
