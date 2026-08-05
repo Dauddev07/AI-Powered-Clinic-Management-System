@@ -494,6 +494,78 @@ def test_run_symptom_agent_fetches_a_department_hinted_by_symptom_words_even_whe
     assert derma_entry["note"] == "Based on the skin symptoms described, this could also be evaluated by Dermatology."
 
 
+def test_run_symptom_agent_fetches_head_and_leg_pain_departments_hinted_by_symptom_words(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: "pain in my teeth, head and legs as well" only ever produced a
+    # single Dentistry card — neither "head"/"headache" nor "leg"/"legs" existed as
+    # a keyword in SYMPTOM_DEPARTMENT_HINTS at all, so this exact keyword-hint
+    # backstop (already proven for skin/dermatology above) had nothing to find for
+    # either one, even though the model's note named neither department either.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    dentistry = Department(clinic_id=clinic.id, name="Dentistry")
+    db.add(dentistry)
+    gen_med = Department(clinic_id=clinic.id, name="General Medicine")
+    db.add(gen_med)
+    ortho = Department(clinic_id=clinic.id, name="Orthopedics")
+    db.add(ortho)
+    db.flush()
+    dentist = Doctor(
+        clinic_id=clinic.id, department_id=dentistry.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Iqra Qureshi", is_active=True,
+    )
+    db.add(dentist)
+    gen_med_doctor = Doctor(
+        clinic_id=clinic.id, department_id=gen_med.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Ali Raza", is_active=True,
+    )
+    db.add(gen_med_doctor)
+    ortho_doctor = Doctor(
+        clinic_id=clinic.id, department_id=ortho.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Junaid Mirza", is_active=True,
+    )
+    db.add(ortho_doctor)
+    db.flush()
+    for doc in (dentist, gen_med_doctor, ortho_doctor):
+        db.add(Slot(
+            clinic_id=clinic.id, doctor_id=doc.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ))
+    db.flush()
+
+    card = json.dumps(
+        {
+            "note": "The mild tooth pain can be evaluated by Dentistry.",
+            "department_name": "Dentistry",
+            "doctors": [{"doctor_id": "d1", "doctor_name": dentist.full_name, "specialization": None, "slots": []}],
+        }
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: DOCTOR_OPTIONS_MARKER + card)
+
+    history = [
+        _row("user", "i am having pain in my teeth,head and legs as well"),
+        _row("assistant", "Is the pain severe, bearable, or mild for each area?"),
+    ]
+    result = symptom_agent.run_symptom_agent(
+        db, ctx,
+        "teeth pain started today morning and is mild\nhead pain is from 2 days and bearable\n"
+        "no there is no such symptoms on legs",
+        "en", history,
+    )
+
+    assert result.startswith(DEPARTMENT_LIST_MARKER)
+    payload = json.loads(result[len(DEPARTMENT_LIST_MARKER):])
+    names = {d["department_name"] for d in payload["departments"]}
+    assert names == {"Dentistry", "General Medicine", "Orthopedics"}
+
+
 def test_run_symptom_agent_names_the_specific_symptom_in_the_hinted_departments_note(
     monkeypatch, db, ctx, clinic
 ):
@@ -1553,6 +1625,57 @@ def test_run_appointment_agent_warns_when_a_professional_title_names_a_mismatche
 
     assert "Cardiology" in result
     assert "ENT" in result
+
+
+def test_run_appointment_agent_does_not_warn_when_a_typo_still_matches_a_real_symptom(
+    monkeypatch, db, ctx, clinic, patient
+):
+    # Reported live: "pain in my teeths and in heart as well" (a typo — extra "s" on
+    # the already-plural "teeth") wasn't recognized by the dental hint keyword set
+    # at all, so Dentistry was missing from `hinted` even though the LLM itself had
+    # already correctly shown a Dentistry card for it earlier in the same session —
+    # asking about dentist availability then wrongly triggered the mismatch warning
+    # ("Cardiology might be a better fit than Dentistry"). See the "teeths" addition
+    # to symptom_hints.py's dental keyword set.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    dentistry = Department(clinic_id=clinic.id, name="Dentistry")
+    db.add(dentistry)
+    db.flush()
+    dentist = Doctor(
+        clinic_id=clinic.id, department_id=dentistry.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Iqra Qureshi", is_active=True,
+    )
+    db.add(dentist)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=dentist.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Here's Dentistry availability."
+    )
+
+    history = [
+        _row("user", "i am having pain in my teeths and in heart as well"),
+        _row("assistant", "Could you tell me how severe this is and how long you've had it?"),
+        _row("user", "its mild and bearable with no other symptoms"),
+        _row("assistant", "How long have you been experiencing the tooth pain and the chest discomfort?"),
+        _row("user", "its from past 2 days"),
+    ]
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "isnt there any dentist available on tue?", "en", history
+    )
+
+    assert result == "Here's Dentistry availability."
 
 
 def test_run_appointment_agent_proceeds_after_the_mismatch_warning_was_already_given(
