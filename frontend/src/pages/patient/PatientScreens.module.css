@@ -175,6 +175,16 @@
   padding: 0;
   max-height: 200px;
   overflow-y: auto;
+  /* Reported live: scrolling up to the top of a long doctor list closed the whole
+     dropdown. Without this, once the list hits its own scroll boundary the browser
+     "chains" any leftover scroll delta to the underlying page — which fires a real
+     page-scroll event that FilterDropdown's close-on-scroll listener (see
+     BookAppointment.jsx) can't distinguish from the page genuinely being scrolled
+     out from under the panel, so it closed the menu even though the patient never
+     actually left the list. This stops the scroll from ever reaching the page in
+     the first place, while leaving the intentional "close if the real page
+     scrolls" behavior intact for every other case. */
+  overscroll-behavior: contain;
 }
 
 .comboboxOption,

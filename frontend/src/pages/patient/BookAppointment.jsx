@@ -60,6 +60,156 @@ const TIME_OF_DAY_FILTERS = [
   { value: "evening", label: "Evening (after 17:00)" },
 ];
 
+// Shared dropdown for every filter field on this page (Department, Doctor, Date,
+// Time of day) — replaces native <select> elements entirely. Reported live: a
+// native <select> with enough options (Department's 12+ entries) triggers the
+// OS/browser's own full-screen picker on mobile (iOS Safari in particular), which
+// centers on the currently-selected option and can render starting above the top
+// of the visible viewport, behind the browser chrome — that rendering is done by
+// the OS, not this page, so no amount of our own CSS can reposition or clamp it.
+// A custom, in-DOM dropdown (portaled to <body>, positioned via measured
+// coordinates) sidesteps the native picker entirely and CAN be kept on-screen: see
+// openMenu below, which flips the panel above the trigger when there isn't enough
+// room below, and clamps its horizontal position so it never runs off either edge.
+function FilterDropdown({ id, label, value, options, onChange, searchable = false, searchPlaceholder }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [panelStyle, setPanelStyle] = useState(null);
+  const triggerRef = useRef(null);
+  const panelRef = useRef(null);
+  const searchInputRef = useRef(null);
+
+  const selectedLabel = options.find((o) => o.value === value)?.label ?? options[0]?.label ?? "";
+
+  const filteredOptions = useMemo(() => {
+    if (!searchable) return options;
+    const q = query.trim().toLowerCase();
+    return q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
+  }, [options, query, searchable]);
+
+  const openMenu = () => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (rect) {
+      // The panel's real height isn't known until it renders (it depends on how
+      // many options/whether the search input is shown), so this estimates a
+      // worst-case height from the same CSS constants the panel itself uses
+      // (comboboxList's 200px max-height + the search input + padding/shadow
+      // margin) purely to decide FLIP DIRECTION — the panel is portaled and
+      // position: fixed either way, so an estimate that's a little off just
+      // means the flip decision is made a little conservatively, never a broken
+      // layout.
+      const estimatedPanelHeight = (searchable ? 260 : 220);
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      const openAbove = spaceBelow < estimatedPanelHeight && spaceAbove > spaceBelow;
+      const left = Math.min(Math.max(8, rect.left), window.innerWidth - rect.width - 8);
+      setPanelStyle({
+        left,
+        width: rect.width,
+        ...(openAbove ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 }),
+      });
+    }
+    setOpen(true);
+    if (searchable) setTimeout(() => searchInputRef.current?.focus(), 0);
+  };
+
+  const closeMenu = () => {
+    setOpen(false);
+    setQuery("");
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (e) => {
+      const inTrigger = triggerRef.current && triggerRef.current.contains(e.target);
+      const inPanel = panelRef.current && panelRef.current.contains(e.target);
+      if (!inTrigger && !inPanel) closeMenu();
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") closeMenu();
+    };
+    // `scroll` doesn't bubble, but a capture-phase listener on window still sees it
+    // for every scrollable descendant, including the option list itself (it has
+    // its own overflow-y: auto) — so scrolling *inside* the list must be ignored
+    // here, or scrolling to reach a lower option would immediately close the panel.
+    const handleScroll = (e) => {
+      if (panelRef.current && panelRef.current.contains(e.target)) return;
+      closeMenu();
+    };
+    const handleResize = () => closeMenu();
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("scroll", handleScroll, true);
+    window.addEventListener("resize", handleResize);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("scroll", handleScroll, true);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [open]);
+
+  return (
+    <div className={styles.filterField}>
+      <label htmlFor={id}>{label}</label>
+      <div className={styles.combobox}>
+        <button
+          type="button"
+          id={id}
+          ref={triggerRef}
+          className={styles.comboboxTrigger}
+          onClick={() => (open ? closeMenu() : openMenu())}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+        >
+          <span className={styles.comboboxTriggerText}>{selectedLabel}</span>
+          <span className={styles.comboboxChevron} aria-hidden="true">
+            ▾
+          </span>
+        </button>
+
+        {open &&
+          panelStyle &&
+          createPortal(
+            <div ref={panelRef} className={styles.comboboxPanel} style={panelStyle}>
+              {searchable && (
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  className={styles.comboboxSearchInput}
+                  placeholder={searchPlaceholder}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  aria-label={searchPlaceholder}
+                />
+              )}
+              <ul className={styles.comboboxList} role="listbox" aria-label={label}>
+                {filteredOptions.map((o) => (
+                  <li
+                    key={o.value}
+                    role="option"
+                    aria-selected={value === o.value}
+                    className={value === o.value ? styles.comboboxOptionSelected : styles.comboboxOption}
+                    onClick={() => {
+                      onChange(o.value);
+                      closeMenu();
+                    }}
+                  >
+                    {o.label}
+                  </li>
+                ))}
+                {searchable && filteredOptions.length === 0 && (
+                  <li className={styles.comboboxEmpty}>No matches for "{query}"</li>
+                )}
+              </ul>
+            </div>,
+            document.body,
+          )}
+      </div>
+    </div>
+  );
+}
+
 export default function BookAppointment() {
   const navigate = useNavigate();
   const revealRef = useReveal();
@@ -74,17 +224,6 @@ export default function BookAppointment() {
   const [message, setMessage] = useState(null);
 
   const [doctorId, setDoctorId] = useState("");
-  const [doctorMenuOpen, setDoctorMenuOpen] = useState(false);
-  const [doctorQuery, setDoctorQuery] = useState("");
-  const [doctorPanelStyle, setDoctorPanelStyle] = useState(null);
-  // The trigger button's own ref (for position measurement + outside-click detection)
-  // and a separate ref for the portaled panel — the panel is rendered into
-  // document.body (see below) rather than as a normal DOM child of the trigger, so a
-  // later sibling card can never visually cover it regardless of that card's own
-  // stacking context (e.g. the "reveal" fade-in animation on each date's card).
-  const doctorTriggerRef = useRef(null);
-  const doctorPanelRef = useRef(null);
-  const doctorSearchInputRef = useRef(null);
   const [dateFilter, setDateFilter] = useState("");
   const [customDate, setCustomDate] = useState("");
   const [timeOfDay, setTimeOfDay] = useState("");
@@ -165,8 +304,7 @@ export default function BookAppointment() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleDepartmentChange = (e) => {
-    const value = e.target.value;
+  const handleDepartmentChange = (value) => {
     setDepartmentId(value);
     setDoctorId("");
     setPage(1);
@@ -176,32 +314,11 @@ export default function BookAppointment() {
 
   const selectDoctor = (value) => {
     setDoctorId(value);
-    setDoctorQuery("");
-    setDoctorMenuOpen(false);
     setPage(1);
     loadSlots({ departmentId, doctorId: value, dateFilter, customDate, timeOfDay, page: 1 });
   };
 
-  const openDoctorMenu = () => {
-    const rect = doctorTriggerRef.current?.getBoundingClientRect();
-    if (rect) {
-      // Panel is portaled to <body> and positioned fixed at these viewport
-      // coordinates, so it's never confined to (or hidden behind) this card's
-      // own stacking context.
-      setDoctorPanelStyle({ top: rect.bottom + 4, left: rect.left, width: rect.width });
-    }
-    setDoctorMenuOpen(true);
-    // Deferred so it runs after the panel (and its input) has actually mounted.
-    setTimeout(() => doctorSearchInputRef.current?.focus(), 0);
-  };
-
-  const closeDoctorMenu = () => {
-    setDoctorMenuOpen(false);
-    setDoctorQuery("");
-  };
-
-  const handleDateFilterChange = (e) => {
-    const value = e.target.value;
+  const handleDateFilterChange = (value) => {
     setDateFilter(value);
     setPage(1);
     loadSlots({ departmentId, doctorId, dateFilter: value, customDate, timeOfDay, page: 1 });
@@ -216,8 +333,7 @@ export default function BookAppointment() {
     loadDoctorOptions(departmentId, dateFilter, value);
   };
 
-  const handleTimeOfDayChange = (e) => {
-    const value = e.target.value;
+  const handleTimeOfDayChange = (value) => {
     setTimeOfDay(value);
     setPage(1);
     loadSlots({ departmentId, doctorId, dateFilter, customDate, timeOfDay: value, page: 1 });
@@ -283,53 +399,17 @@ export default function BookAppointment() {
     }
   }, [doctorOptions, doctorId]);
 
-  // Closes the doctor dropdown on an outside click/tap, Escape, or a scroll/resize
-  // (rather than re-tracking position through those), without changing the applied
-  // filter — only committed by actually picking an option below. The panel is
-  // portaled to <body>, so "outside" means outside both the trigger AND the panel.
-  useEffect(() => {
-    if (!doctorMenuOpen) return;
-    const handlePointerDown = (e) => {
-      const inTrigger = doctorTriggerRef.current && doctorTriggerRef.current.contains(e.target);
-      const inPanel = doctorPanelRef.current && doctorPanelRef.current.contains(e.target);
-      if (!inTrigger && !inPanel) closeDoctorMenu();
-    };
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape") closeDoctorMenu();
-    };
-    // `scroll` doesn't bubble, but a capture-phase listener on window still sees it
-    // for every scrollable descendant, including the doctor list itself (it has its
-    // own overflow-y: auto) — so scrolling *inside* the list must be ignored here,
-    // or every scroll to reach a lower doctor would immediately close the panel.
-    const handleScroll = (e) => {
-      if (doctorPanelRef.current && doctorPanelRef.current.contains(e.target)) return;
-      closeDoctorMenu();
-    };
-    const handleResize = () => closeDoctorMenu();
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("scroll", handleScroll, true);
-    window.addEventListener("resize", handleResize);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("scroll", handleScroll, true);
-      window.removeEventListener("resize", handleResize);
-    };
-  }, [doctorMenuOpen]);
-
-  // The search bar inside the open dropdown narrows this same doctor list by name as
-  // the patient types — it never fetches or filters slots on its own; the actual slot
-  // filter stays entirely on `doctorId`, set only when an option below is picked.
-  const filteredDoctorOptions = useMemo(() => {
-    const query = doctorQuery.trim().toLowerCase();
-    if (!query) return doctorOptions;
-    return doctorOptions.filter((d) => d.name.toLowerCase().includes(query));
-  }, [doctorOptions, doctorQuery]);
-
-  const selectedDoctorLabel = doctorId
-    ? doctorOptions.find((d) => d.id === doctorId)?.name ?? "All doctors"
-    : "All doctors";
+  // FilterDropdown works in {value, label} pairs — these translate each filter's
+  // own data shape into that once per render rather than inside the shared
+  // component, which has no idea what a "department" or "doctor" is.
+  const departmentDropdownOptions = useMemo(
+    () => [{ value: "", label: "All departments" }, ...departments.map((d) => ({ value: d.id, label: d.name }))],
+    [departments],
+  );
+  const doctorDropdownOptions = useMemo(
+    () => [{ value: "", label: "All doctors" }, ...doctorOptions.map((d) => ({ value: d.id, label: d.name }))],
+    [doctorOptions],
+  );
 
   const groupedByDate = useMemo(() => {
     if (!slotData) return [];
@@ -365,106 +445,32 @@ export default function BookAppointment() {
 
       <div className={`${styles.card} reveal`} ref={revealRef}>
         <div className={styles.filterRow}>
-          <div className={styles.filterField}>
-            <label htmlFor="department">Department</label>
-            <select
-              id="department"
-              className={styles.select}
-              value={departmentId}
-              onChange={handleDepartmentChange}
-            >
-              <option value="">All departments</option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <FilterDropdown
+            id="department"
+            label="Department"
+            value={departmentId}
+            options={departmentDropdownOptions}
+            onChange={handleDepartmentChange}
+          />
+
+          <FilterDropdown
+            id="doctor"
+            label="Doctor"
+            value={doctorId}
+            options={doctorDropdownOptions}
+            onChange={selectDoctor}
+            searchable
+            searchPlaceholder="Search doctor by name…"
+          />
 
           <div className={styles.filterField}>
-            <label htmlFor="doctor">Doctor</label>
-            <div className={styles.combobox}>
-              <button
-                type="button"
-                id="doctor"
-                ref={doctorTriggerRef}
-                className={styles.comboboxTrigger}
-                onClick={() => (doctorMenuOpen ? closeDoctorMenu() : openDoctorMenu())}
-                aria-haspopup="listbox"
-                aria-expanded={doctorMenuOpen}
-              >
-                <span className={styles.comboboxTriggerText}>{selectedDoctorLabel}</span>
-                <span className={styles.comboboxChevron} aria-hidden="true">
-                  ▾
-                </span>
-              </button>
-
-              {doctorMenuOpen &&
-                doctorPanelStyle &&
-                createPortal(
-                  <div
-                    ref={doctorPanelRef}
-                    className={styles.comboboxPanel}
-                    style={{
-                      top: doctorPanelStyle.top,
-                      left: doctorPanelStyle.left,
-                      width: doctorPanelStyle.width,
-                    }}
-                  >
-                    <input
-                      ref={doctorSearchInputRef}
-                      type="text"
-                      className={styles.comboboxSearchInput}
-                      placeholder="Search doctor by name…"
-                      value={doctorQuery}
-                      onChange={(e) => setDoctorQuery(e.target.value)}
-                      aria-label="Search doctors"
-                    />
-                    <ul className={styles.comboboxList} role="listbox" aria-label="Doctors">
-                      <li
-                        role="option"
-                        aria-selected={doctorId === ""}
-                        className={doctorId === "" ? styles.comboboxOptionSelected : styles.comboboxOption}
-                        onClick={() => selectDoctor("")}
-                      >
-                        All doctors
-                      </li>
-                      {filteredDoctorOptions.map((d) => (
-                        <li
-                          key={d.id}
-                          role="option"
-                          aria-selected={doctorId === d.id}
-                          className={doctorId === d.id ? styles.comboboxOptionSelected : styles.comboboxOption}
-                          onClick={() => selectDoctor(d.id)}
-                        >
-                          {d.name}
-                        </li>
-                      ))}
-                      {filteredDoctorOptions.length === 0 && (
-                        <li className={styles.comboboxEmpty}>No doctors match "{doctorQuery}"</li>
-                      )}
-                    </ul>
-                  </div>,
-                  document.body,
-                )}
-            </div>
-          </div>
-
-          <div className={styles.filterField}>
-            <label htmlFor="dateFilter">Date</label>
-            <select
+            <FilterDropdown
               id="dateFilter"
-              className={styles.select}
+              label="Date"
               value={dateFilter}
+              options={DATE_FILTERS}
               onChange={handleDateFilterChange}
-            >
-              {DATE_FILTERS.map((f) => (
-                <option key={f.value} value={f.value}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
+            />
             {dateFilter === "custom" && (
               <input
                 type="date"
@@ -475,21 +481,13 @@ export default function BookAppointment() {
             )}
           </div>
 
-          <div className={styles.filterField}>
-            <label htmlFor="timeOfDay">Time of day</label>
-            <select
-              id="timeOfDay"
-              className={styles.select}
-              value={timeOfDay}
-              onChange={handleTimeOfDayChange}
-            >
-              {TIME_OF_DAY_FILTERS.map((f) => (
-                <option key={f.value} value={f.value}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <FilterDropdown
+            id="timeOfDay"
+            label="Time of day"
+            value={timeOfDay}
+            options={TIME_OF_DAY_FILTERS}
+            onChange={handleTimeOfDayChange}
+          />
         </div>
 
         {message && (
