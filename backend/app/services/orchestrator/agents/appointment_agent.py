@@ -175,9 +175,53 @@ def _most_recent_action_intent(history: list[ConversationMemory]) -> str | None:
 _MISMATCH_WARNING_MARKER = "might be a better fit than"
 
 
+# Common professional-title synonyms patients use INSTEAD of a department's own
+# name — reported live: "i think cardiologist can be a best fit for it?" (after
+# describing leg pain + ear pain, nothing cardiac at all) skipped the mismatch
+# check entirely and went straight to a Cardiology availability card, because
+# "cardiologist" was never recognized as referring to the "Cardiology" department
+# at all — the literal string "cardiology" isn't even a substring of
+# "cardiologist" (they diverge before the end: "cardiolog-y" vs "cardiolog-ist"),
+# so the old exact-department-name check found nothing. Each entry is (title
+# phrase, department-name hint prefix) — the hint is checked as a word-START match
+# against the real department name (same technique as
+# app.services.orchestrator.symptom_hints), so it tolerates whatever a specific
+# clinic actually named the department ("Cardiology", "Cardiology Department",
+# etc.) rather than requiring one exact canonical string.
+_DEPARTMENT_TITLE_HINTS: tuple[tuple[str, str], ...] = (
+    ("cardiologist", "cardio"),
+    ("dermatologist", "derma"),
+    ("dentist", "dent"),
+    ("otolaryngologist", "otolaryn"),
+    ("neurologist", "neuro"),
+    ("psychiatrist", "psychiatr"),
+    ("orthopedist", "orthop"),
+    ("orthopedic surgeon", "orthop"),
+    ("pediatrician", "pediatr"),
+    ("paediatrician", "paediatr"),
+    ("gynecologist", "gynec"),
+    ("gynaecologist", "gynaecolog"),
+    ("ophthalmologist", "ophthalmolog"),
+    ("eye doctor", "ophthalmolog"),
+    ("eye specialist", "ophthalmolog"),
+    ("pulmonologist", "pulmonolog"),
+    ("lung specialist", "pulmonolog"),
+    ("general physician", "general medicine"),
+    ("general practitioner", "general medicine"),
+    ("family doctor", "family medicine"),
+)
+
+
 def _departments_named_directly_in_message(message: str, department_names: list[str]) -> list[str]:
     lowered = message.lower()
-    return [name for name in department_names if re.search(rf"\b{re.escape(name.lower())}\b", lowered)]
+    named = {name for name in department_names if re.search(rf"\b{re.escape(name.lower())}\b", lowered)}
+    for title, hint in _DEPARTMENT_TITLE_HINTS:
+        if not re.search(rf"\b{re.escape(title)}\b", lowered):
+            continue
+        for name in department_names:
+            if re.search(rf"\b{re.escape(hint)}", name.lower()):
+                named.add(name)
+    return list(named)
 
 
 def _already_warned_about_department_mismatch(history: list[ConversationMemory], named_department: str) -> bool:

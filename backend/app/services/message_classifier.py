@@ -281,6 +281,9 @@ _RECOMMENDATION_RE = re.compile(
     r"|which (?:department|dept|doctor|specialist|one) (?:is|would be|should i)"
     r"|what (?:department|dept) should i"
     r"|(?:isn'?t|is|wouldn'?t|would)\b.{0,25}\bbetter\b"
+    # Reported live: "i think cardiologist can be a best fit for it?" used "best
+    # fit" rather than "better", which the pattern above didn't cover at all.
+    r"|\b(?:best|good|better) fit\b"
     r"|based on my symptoms"
     r")",
     re.IGNORECASE,

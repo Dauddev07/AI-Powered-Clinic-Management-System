@@ -167,6 +167,10 @@ def test_router_classifies_plain_info_and_smalltalk_messages(message):
         # reasoning at all.
         "what do u suggest?",
         "what do u think?",
+        # Reported live: "i think cardiologist can be a best fit for it?" used
+        # "best fit" rather than "better", which wasn't covered at all.
+        "i think cardiologist can be a best fit for it?",
+        "would this be a good fit?",
     ],
 )
 def test_router_rule0_5_recommendation_request_overrides_marker_continuity(message):
@@ -1422,6 +1426,58 @@ def test_run_appointment_agent_warns_when_named_department_contradicts_session_s
     assert "General Medicine" in result
     assert "Neurology" in result
     assert result != DOCTOR_OPTIONS_MARKER + card
+
+
+def test_run_appointment_agent_warns_when_a_professional_title_names_a_mismatched_department(
+    monkeypatch, db, ctx, clinic, patient
+):
+    # Reported live: "i think cardiologist can be a best fit for it?" (after
+    # describing leg pain + ear pain, nothing cardiac at all) skipped the mismatch
+    # check entirely and went straight to a Cardiology availability card — the
+    # literal string "cardiology" isn't even a substring of "cardiologist", so the
+    # old exact-department-name check found nothing to warn about. See
+    # _DEPARTMENT_TITLE_HINTS in appointment_agent.py.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    ent = Department(clinic_id=clinic.id, name="ENT")
+    db.add(ent)
+    cardiology = Department(clinic_id=clinic.id, name="Cardiology")
+    db.add(cardiology)
+    db.flush()
+    ent_doctor = Doctor(
+        clinic_id=clinic.id, department_id=ent.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Iqra Raza", is_active=True,
+    )
+    db.add(ent_doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=ent_doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called when the named department contradicts symptoms")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row("user", "i am having pain in my leg and in my ear as well"),
+        _row("assistant", "Is the leg pain severe, bearable, or mild? Is the ear pain accompanied by anything else?"),
+        _row("user", "the pain is mild and bearable, there is a little swelling on the leg, no other ear symptoms"),
+    ]
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "i think cardiologist can be a best fit for it?", "en", history
+    )
+
+    assert "Cardiology" in result
+    assert "ENT" in result
 
 
 def test_run_appointment_agent_proceeds_after_the_mismatch_warning_was_already_given(
