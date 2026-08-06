@@ -86,14 +86,14 @@ def _patch_chat_groq(monkeypatch, responses_by_model):
     monkeypatch.setattr(llm, "ChatGroq", _fake_chat_groq)
 
 
-# --- item: Groq-only retry sequence (same model, 6 attempts, 6 different keys) -----
+# --- item: Groq-only retry sequence (same model, 7 attempts, 7 different keys) -----
 
 
-def test_retry_sequence_is_the_same_primary_model_all_six_times():
+def test_retry_sequence_is_the_same_primary_model_all_seven_times():
     # No second model (previously Qwen) in the sequence — every attempt retries on
     # a different API key (see api_key_manager's own round-robin) rather than a
-    # different model, per explicit request. One attempt per configured key (6).
-    assert llm._MODEL_RETRY_SEQUENCE == ("openai/gpt-oss-120b",) * 6
+    # different model, per explicit request. One attempt per configured key (7).
+    assert llm._MODEL_RETRY_SEQUENCE == ("openai/gpt-oss-120b",) * 7
 
 
 # --- token-reduction: reasoning_effort is model-specific, never one-size-fits-all --
@@ -224,10 +224,10 @@ def test_rate_limit_on_first_four_attempts_succeeds_on_the_fifth(monkeypatch):
     assert result == "Served on the fifth attempt."
 
 
-def test_rate_limit_on_first_five_attempts_succeeds_on_the_sixth(monkeypatch):
-    # Confirms the sequence really does go all 6 attempts (6 configured keys) deep
-    # before giving up, not just 5 — a regression here would silently give up early
-    # and show the patient an error when the 6th key would have worked.
+def test_rate_limit_on_first_six_attempts_succeeds_on_the_seventh(monkeypatch):
+    # Confirms the sequence really does go all 7 attempts (7 configured keys) deep
+    # before giving up, not just 6 — a regression here would silently give up early
+    # and show the patient an error when the 7th key would have worked.
     model = llm._MODEL_RETRY_SEQUENCE[0]
     _patch_chat_groq(
         monkeypatch,
@@ -238,17 +238,18 @@ def test_rate_limit_on_first_five_attempts_succeeds_on_the_sixth(monkeypatch):
                 _rate_limit_error(model),
                 _rate_limit_error(model),
                 _rate_limit_error(model),
-                _FakeFinalResponse("Served on the sixth attempt."),
+                _rate_limit_error(model),
+                _FakeFinalResponse("Served on the seventh attempt."),
             ]
         },
     )
 
     result = llm.run_plain_reply("test system prompt", "hi", [])
 
-    assert result == "Served on the sixth attempt."
+    assert result == "Served on the seventh attempt."
 
 
-def test_rate_limit_on_all_six_attempts_returns_the_plain_message_not_an_error(monkeypatch):
+def test_rate_limit_on_all_seven_attempts_returns_the_plain_message_not_an_error(monkeypatch):
     model = llm._MODEL_RETRY_SEQUENCE[0]
     _patch_chat_groq(
         monkeypatch,
@@ -292,7 +293,7 @@ def test_run_tool_calling_agent_rate_limit_on_first_two_attempts_succeeds_on_the
     assert result == "Agent reply from the third attempt."
 
 
-def test_run_tool_calling_agent_returns_plain_message_when_all_six_attempts_are_rate_limited(monkeypatch):
+def test_run_tool_calling_agent_returns_plain_message_when_all_seven_attempts_are_rate_limited(monkeypatch):
     model = llm._MODEL_RETRY_SEQUENCE[0]
     _patch_chat_groq(
         monkeypatch,

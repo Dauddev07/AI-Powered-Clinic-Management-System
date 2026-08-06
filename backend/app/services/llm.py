@@ -38,17 +38,17 @@ def _strip_reasoning(content: str) -> str:
     return _THINK_BLOCK_RE.sub("", content or "").strip()
 
 # Ordered Groq-only retry sequence for a single request: the same primary model,
-# once per configured API key (6 attempts — see app.core.api_keys) — each attempt
+# once per configured API key (7 attempts — see app.core.api_keys) — each attempt
 # only ever triggered by a 429/413 from the one before it (see
 # _invoke_with_fallback). Every ChatGroq call already draws its API key from
 # api_key_manager's own independent round-robin (Key1 -> Key2 -> Key3 -> Key4 ->
-# Key5 -> Key6 -> Key1..., see app.core.api_keys) regardless of model, so 6
+# Key5 -> Key6 -> Key7 -> Key1..., see app.core.api_keys) regardless of model, so 7
 # same-model attempts in a row already means (barring concurrent draws from other
-# requests) 6 different keys — the point of this sequence is purely "retry on a
+# requests) 7 different keys — the point of this sequence is purely "retry on a
 # different key without ever showing the patient an error", not a model swap. A
 # second model (previously Qwen) used to sit at position 2 as a genuinely
 # different capacity pool to fall back to; deliberately dropped per explicit
-# request — a rate limit on gpt-oss-120b is expected to clear across up to 6
+# request — a rate limit on gpt-oss-120b is expected to clear across up to 7
 # different keys, and staying on one model keeps every attempt eligible for
 # Groq's prompt caching (Qwen wasn't). Kept as a simple ordered constant (not
 # hardcoded inline in the retry loop) so the sequence itself is obvious and easy
@@ -57,12 +57,12 @@ def _strip_reasoning(content: str) -> str:
 # Every ChatGroq instance built against this sequence is constructed with
 # max_retries=0. langchain_groq/the underlying groq client defaults to retrying a
 # 429 internally (with backoff) BEFORE raising RateLimitError back to our code —
-# left at its default, each of the 6 attempts above would silently retry a few more
+# left at its default, each of the 7 attempts above would silently retry a few more
 # times on its own, stacking multiple backoff waits per attempt and making a
-# rate-limited request take far longer than the 6 attempts we intend. max_retries=0
+# rate-limited request take far longer than the 7 attempts we intend. max_retries=0
 # hands all retry/backoff control to _invoke_with_fallback so a 429 advances to the
 # next attempt (next key) immediately.
-_MODEL_RETRY_SEQUENCE: tuple[str, ...] = (settings.GROQ_MODEL,) * 6
+_MODEL_RETRY_SEQUENCE: tuple[str, ...] = (settings.GROQ_MODEL,) * 7
 
 # reasoning_effort is model-specific, not one-size-fits-all: gpt-oss models reject
 # "none"/"default" and only accept "low"/"medium"/"high" (verified directly against

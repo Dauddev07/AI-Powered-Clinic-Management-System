@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     LLM_API_KEY: str = ""
     # Optional additional Groq API keys — when set, app.core.api_keys round-robins
-    # every Groq call across whichever of the six are non-empty. Unset (the
+    # every Groq call across whichever of the seven are non-empty. Unset (the
     # default) just means rotation degenerates to always using LLM_API_KEY, same as
     # before these existed.
     LLM_API_KEY_2: str = ""
@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     LLM_API_KEY_4: str = ""
     LLM_API_KEY_5: str = ""
     LLM_API_KEY_6: str = ""
+    LLM_API_KEY_7: str = ""
     LLM_PROVIDER: str = "groq"
     GROQ_MODEL: str = "openai/gpt-oss-120b"
     # Used only for small, narrow helper calls (message intent classification, query
