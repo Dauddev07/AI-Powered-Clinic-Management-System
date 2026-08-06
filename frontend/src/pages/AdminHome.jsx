@@ -8,6 +8,7 @@ import Skeleton from "../components/Skeleton";
 import StarIcon from "../components/StarIcon";
 import WelcomeBanner from "../components/WelcomeBanner";
 import { useReveal, revealDelayClass } from "../hooks/useReveal";
+import { useTheme } from "../theme/ThemeContext";
 import styles from "./AdminHome.module.css";
 
 // Rank-badge tone per position — gold/silver/bronze is the universal "top 3"
@@ -100,9 +101,10 @@ function formatDayLabelNarrow(isoDate) {
 // "M, T, W, Th" instead of "Mon 21") — re-evaluated on resize/orientation
 // change via matchMedia, not just read once on mount.
 // Fixed categorical order (validated for CVD-safety, see the data-viz palette
-// reference) — this app renders a single fixed dark theme (see useChartColors
-// below), so the dark-mode steps are used directly rather than swapping per
-// viewer theme. Assigned by slot order, never cycled/regenerated per render.
+// reference) — kept as one fixed palette across both light/dark themes rather
+// than swapping per theme; each color is saturated enough to stay legible
+// against both a light card and a dark one. Assigned by slot order, never
+// cycled/regenerated per render.
 const PIE_COLORS = [
   "#3987e5", // blue
   "#d95926", // orange
@@ -132,12 +134,15 @@ function useIsNarrowScreen(query) {
   return matches;
 }
 
-// The dark theme here is a single fixed palette (no light/dark toggle — see
-// index.css), so reading these once on mount is safe; recharts renders its
-// axes/bars as SVG presentation attributes, which is a less universally
-// reliable place to drop a raw `var(--x)` string than an inline CSS style,
-// so the actual resolved color values are read here instead of guessing.
+// recharts renders its axes/bars as SVG presentation attributes, which is a
+// less universally reliable place to drop a raw `var(--x)` string than an
+// inline CSS style, so the actual resolved color values are read here instead
+// of guessing. Re-reads whenever `theme` changes (see ThemeContext) — with the
+// light/dark toggle, these values are no longer fixed for the page's lifetime,
+// so a mount-only read would leave the chart showing the PREVIOUS theme's
+// colors (e.g. dark-theme axis text) against the newly switched background.
 function useChartColors() {
+  const { theme } = useTheme();
   const [colors, setColors] = useState({ accent: "#87977f", border: "#2c2d30", subtitle: "#7c7e83" });
 
   useEffect(() => {
@@ -148,7 +153,7 @@ function useChartColors() {
       border: read("--app-border", "#2c2d30"),
       subtitle: read("--app-text-subtitle", "#7c7e83"),
     });
-  }, []);
+  }, [theme]);
 
   return colors;
 }

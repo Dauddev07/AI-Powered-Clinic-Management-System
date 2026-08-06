@@ -93,6 +93,20 @@
   }
 }
 
+/* Groups the theme toggle with the hamburger/nav-links block at the header's
+   far right on the public landing header — mirrors .headerEnd's role for the
+   authenticated view. margin-left: auto (rather than relying solely on
+   .header's own space-between) keeps every child here flush together as one
+   tight group instead of .header's own larger inter-item gap spreading them
+   apart from each other. */
+.publicActions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-left: auto;
+  min-width: 0;
+}
+
 .navToggle {
   display: none;
   flex-direction: column;
@@ -102,7 +116,6 @@
   width: 2.25rem;
   height: 2.25rem;
   padding: 0;
-  margin-left: auto;
   background: none;
   border: 1px solid var(--app-border);
   border-radius: 14px;
@@ -127,7 +140,6 @@
   align-items: center;
   gap: clamp(1rem, 2.5vw, 1.75rem);
   flex-wrap: wrap;
-  margin-left: auto;
 }
 
 .navAnchor {

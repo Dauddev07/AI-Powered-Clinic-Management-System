@@ -146,10 +146,28 @@ def _heuristic_classify(message: str, history=None) -> str | None:
     if is_department_scope_question(message):
         return GENERAL_INFO
 
-    # Rule 1 — unambiguous: the preceding turn was a slot-pick card or an
-    # appointment-agent disambiguation question. Either can only ever mean
-    # "continue the appointment flow" — never inferred from wording.
-    if last_role == "assistant" and last_content.startswith((DOCTOR_OPTIONS_MARKER, DOCTOR_DISAMBIGUATION_MARKER)):
+    # Rule 1 — the preceding turn was a slot-pick card or an appointment-agent
+    # disambiguation question — normally unambiguous, "continue the appointment
+    # flow," EXCEPT when the CURRENT message itself plainly describes a symptom.
+    # Reported live: a Cardiology DOCTOR_OPTIONS card was shown for chest pain,
+    # then "i am also having some skin related issues" — an unprompted, genuinely
+    # NEW symptom, unrelated to any slot-pick — matched this rule and went
+    # straight to appointment_agent, which has no symptom-triage logic at all and
+    # just showed Dermatology availability with ZERO clarifying questions,
+    # skipping symptom_agent's screening backstop entirely (that backstop can't
+    # help if the message never reaches symptom_agent in the first place). The
+    # rule's own old assumption — "a reply to THAT is never itself a fresh
+    # symptom statement in practice" — is exactly what failed here; Rule 1.8
+    # below already exists for this exact case ("current message plainly states
+    # a symptom") but could never fire for a marker-preceded turn, since this
+    # rule always won first. A genuine slot-pick reply ("the 9am one", "Dr.
+    # Farooq please") contains no symptom keyword, so is_symptom_message stays
+    # False for it and this rule still applies normally.
+    if (
+        last_role == "assistant"
+        and last_content.startswith((DOCTOR_OPTIONS_MARKER, DOCTOR_DISAMBIGUATION_MARKER))
+        and not is_symptom_message(message)
+    ):
         return APPOINTMENT
 
     # Rule 1.5 — explicit request for the full department list. Reported live:
@@ -173,8 +191,10 @@ def _heuristic_classify(message: str, history=None) -> str | None:
     # was sent to appointment_agent instead of symptom_agent, skipping screening
     # entirely. A message that itself plainly states a symptom must win regardless
     # of what the immediately preceding turn's phrasing happened to look like.
-    # Checked after Rule 1 (an actual slot-pick card is still unambiguous — a
-    # reply to THAT is never itself a fresh symptom statement in practice).
+    # Rule 1 above now already excludes this case (a marker-preceded turn that
+    # itself plainly describes a symptom no longer matches Rule 1 at all), so in
+    # practice this rule is what actually catches it; kept as its own named rule
+    # since it also covers every OTHER non-marker "preceding turn" shape.
     if is_symptom_message(message):
         return SYMPTOM_GENERAL
 

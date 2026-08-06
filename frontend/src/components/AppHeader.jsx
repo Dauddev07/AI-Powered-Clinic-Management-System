@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import Logo from "./Logo";
 import NotificationBell from "./NotificationBell";
 import SettingsMenu from "./SettingsMenu";
+import ThemeToggle from "./ThemeToggle";
 import styles from "./AppHeader.module.css";
 
 const SECTION_IDS = ["departments-heading", "why-us-heading", "how-it-works-heading", "about-heading"];
@@ -128,6 +129,8 @@ export default function AppHeader() {
 
       {isAuthenticated && (
         <div className={styles.headerEnd}>
+          {/* Right side of the header, before the home button (patient + admin). */}
+          <ThemeToggle />
           {/* Clicking this while already on the dashboard still navigates -
               react-router mints a fresh location.key for a Link to the
               current path, which remounts the routed page (see App.jsx's
@@ -170,7 +173,10 @@ export default function AppHeader() {
       )}
 
       {showPublicNav && (
-        <>
+        <div className={styles.publicActions}>
+          {/* Before everything else on the right side of the landing header. */}
+          <ThemeToggle />
+
           <button
             type="button"
             className={styles.navToggle}
@@ -233,7 +239,16 @@ export default function AppHeader() {
               Register
             </Link>
           </nav>
-        </>
+        </div>
+      )}
+
+      {/* Neither authenticated nor the landing page (e.g. Login/Register) —
+          still a global, app-wide setting, so it stays available here too
+          rather than only existing on two of the app's several screens. */}
+      {!isAuthenticated && !showPublicNav && (
+        <div className={styles.publicActions}>
+          <ThemeToggle />
+        </div>
       )}
     </header>
   );

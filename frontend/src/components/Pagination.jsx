@@ -30,6 +30,21 @@ export default function Pagination({ page, pageSize, total, onPageChange }) {
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(total, page * pageSize);
 
+  // Reported live: clicking a page number (any of the 4 screens this component
+  // is used on — BookAppointment, admin DoctorList/IngestionLogScreen/Feedback)
+  // swapped the list content but left scroll position untouched, so a click
+  // made near the bottom of a long list left the newly-loaded page's own top
+  // (and this pagination control itself) off-screen above the viewport,
+  // reading as broken/unresponsive. Centralized here (not in each of the 4
+  // callers) since this is the one shared control they all funnel through —
+  // fixing it here fixes every one of them at once, and any future page that
+  // adopts Pagination gets this for free too.
+  const goToPage = (newPage) => {
+    onPageChange(newPage);
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+  };
+
   return (
     <nav className={styles.pagination} aria-label="Pagination">
       <span className={styles.rangeText}>
@@ -40,7 +55,7 @@ export default function Pagination({ page, pageSize, total, onPageChange }) {
         <button
           type="button"
           className={styles.navBtn}
-          onClick={() => onPageChange(page - 1)}
+          onClick={() => goToPage(page - 1)}
           disabled={page <= 1}
           aria-label="Previous page"
         >
@@ -54,7 +69,7 @@ export default function Pagination({ page, pageSize, total, onPageChange }) {
                 type="button"
                 key={item}
                 className={item === page ? styles.pageBtnActive : styles.pageBtn}
-                onClick={() => onPageChange(item)}
+                onClick={() => goToPage(item)}
                 aria-current={item === page ? "page" : undefined}
                 aria-label={`Page ${item}`}
               >
@@ -71,7 +86,7 @@ export default function Pagination({ page, pageSize, total, onPageChange }) {
         <button
           type="button"
           className={styles.navBtn}
-          onClick={() => onPageChange(page + 1)}
+          onClick={() => goToPage(page + 1)}
           disabled={page >= totalPages}
           aria-label="Next page"
         >

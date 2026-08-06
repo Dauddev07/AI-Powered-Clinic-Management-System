@@ -17,7 +17,14 @@
   /* var(--app-bg-page) is already the effective color here via .page's
      background — set explicitly (same value, unchanged) so it's a real
      fallback layer if the image below fails to load, not just an accident
-     of inheritance. */
+     of inheritance. This whole background is DARK-THEME ONLY — hero-bg.jpg is
+     a fixed photo authored against a dark backdrop with light, low-contrast
+     linework that has no legible "lightened" version; light theme overrides
+     this entire block below with a gradient instead of trying to recolor the
+     photo (which read as "light mode doesn't actually apply here" — reported
+     live). Dark theme's own text/accent colors need no special-casing at all:
+     they're already what the global --app-* tokens resolve to in dark theme,
+     the exact values this photo was designed against. */
   background-color: var(--app-bg-page);
   background-image: url("../assets/hero-bg.jpg");
   background-size: cover;
@@ -29,6 +36,22 @@
      not just as a default. */
   background-position: 25% 45%;
   background-repeat: no-repeat;
+}
+
+/* Light theme: no photo (see the dark-theme comment above for why), just the
+   same soft accent-tinted radial gradient already used on Login/Register —
+   keeps the hero on-brand and consistent with the rest of the light theme
+   instead of a bare flat fill, without trying to fake-relight a fixed dark
+   photo. Every child element (headline, description, Logo, tagline, the
+   Back-to-Dashboard button) already reads the real --app-* tokens with no
+   overrides needed — they're illegible only against the old dark photo, and
+   read perfectly fine dark-on-light against this gradient. */
+:root[data-theme="light"] .hero {
+  background-image: radial-gradient(
+    130% 130% at 25% 20%,
+    color-mix(in srgb, var(--app-accent) 12%, var(--app-bg-page)) 0%,
+    var(--app-bg-page) 60%
+  );
 }
 
 @media (max-width: 480px) {

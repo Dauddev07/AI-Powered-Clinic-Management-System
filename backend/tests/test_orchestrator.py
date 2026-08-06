@@ -284,6 +284,36 @@ def test_router_rule1_8_new_symptom_after_a_confirmed_booking_still_overrides_co
     assert _heuristic_classify("i am also having skin related issues as well", history) == SYMPTOM_GENERAL
 
 
+def test_router_rule1_new_symptom_right_after_a_doctor_options_card_overrides_marker_continuity():
+    # Reported live: a Cardiology DOCTOR_OPTIONS_MARKER card was shown (doctor
+    # slots displayed, nothing booked yet), then "i am also having some skin
+    # related issues" — an unprompted, genuinely NEW symptom, unrelated to any
+    # slot pick — matched Rule 1's old unconditional "reply to a slot-pick card
+    # is always APPOINTMENT" and went straight to appointment_agent, which has no
+    # symptom-triage logic and just showed Dermatology availability with ZERO
+    # clarifying questions. Distinct from the confirmed-booking test above (there
+    # the preceding marker is BOOKING_MARKER, which Rule 1 was never scoped to
+    # match at all) — here the preceding marker IS exactly what Rule 1 matches,
+    # so this is the case that actually needed Rule 1 itself to change, not just
+    # the keyword list Rule 1.8 depends on.
+    history = [
+        _row("user", "i am having pain in my chest"),
+        _row(
+            "assistant",
+            "Is the chest pain severe, bearable, or mild? Also, did it start suddenly or is it coming "
+            "and going, and are you feeling any sweating, shortness of breath, or nausea?",
+        ),
+        _row("user", "its mild and started today morning with no other symptoms"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + '{"department_name": "Cardiology"}'),
+    ]
+    assert _heuristic_classify("i am also having some skin related issues", history) == SYMPTOM_GENERAL
+
+    # Sanity: a genuine slot-pick/doctor-name reply in the same position must
+    # still go to appointment — confirms this isn't a blanket bypass of Rule 1.
+    assert _heuristic_classify("the 9am one please", history) == APPOINTMENT
+    assert _heuristic_classify("Dr. Farooq please", history) == APPOINTMENT
+
+
 def test_router_rule2_continuity_reply_to_screening_question_routes_back_to_symptom():
     # "very severe" has no symptom keyword of its own — only correct because the
     # conversation is still symptom-side (item 5 continuity).

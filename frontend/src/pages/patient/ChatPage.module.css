@@ -349,18 +349,21 @@
   color: var(--app-text-title);
 }
 
-/* Warning-yellow banner, deliberately noticeable and never dismissible — the
-   brightness is dialed down a notch from the raw --app-warning-* tokens (each
-   blended a bit toward black via color-mix) so it stays legible/prominent without
-   glaring against the rest of this dark theme. Spans the full width of the main
-   column (edge-to-edge, matching .page/.topBar/.messages below); disclaimerInner
-   caps the text itself to a readable line length on wide screens instead of
-   stretching one sentence across the whole viewport. */
+/* Warning-yellow banner, deliberately noticeable and never dismissible — uses
+   the dedicated --app-warning-banner-* tokens (index.css), not the raw
+   --app-warning-* pair directly: dark theme dials both down a notch toward
+   black so it stays legible/prominent without glaring against a dark page;
+   light theme just passes the raw tokens through unchanged, since "too
+   bright against a dark background" isn't something a light page needs
+   correcting for. Spans the full width of the main column (edge-to-edge,
+   matching .page/.topBar/.messages below); disclaimerInner caps the text
+   itself to a readable line length on wide screens instead of stretching one
+   sentence across the whole viewport. */
 .disclaimer {
   flex-shrink: 0;
   position: relative;
   padding: 0.7rem 1.25rem 0.7rem 1.5rem;
-  background: color-mix(in srgb, var(--app-warning-bg) 85%, black);
+  background: var(--app-warning-banner-bg);
   color: var(--app-warning-text);
   border-bottom: 1px solid var(--app-warning-border);
   font-size: var(--font-size-label);
@@ -378,7 +381,7 @@
   top: 0;
   bottom: 0;
   width: 4px;
-  background: color-mix(in srgb, var(--app-warning-text) 85%, black);
+  background: var(--app-warning-banner-text);
 }
 
 .disclaimerInner {
@@ -400,7 +403,7 @@
   justify-content: center;
   border-radius: 50%;
   background: var(--app-warning-border);
-  color: color-mix(in srgb, var(--app-warning-text) 85%, black);
+  color: var(--app-warning-banner-text);
   animation: disclaimer-pulse 2.6s ease-in-out infinite;
 }
 
@@ -420,7 +423,7 @@
 }
 
 .disclaimerText {
-  color: color-mix(in srgb, var(--app-warning-text) 85%, black);
+  color: var(--app-warning-banner-text);
 }
 
 .disclaimerLabel {
@@ -430,7 +433,7 @@
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
   background: var(--app-warning-border);
-  color: color-mix(in srgb, var(--app-warning-text) 85%, black);
+  color: var(--app-warning-banner-text);
   font-weight: 700;
   font-size: var(--font-size-caption);
   letter-spacing: 0.02em;
