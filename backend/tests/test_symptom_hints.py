@@ -149,3 +149,29 @@ def test_swelling_with_a_real_injury_word_still_hints_orthopedics():
         "my hand is swollen and bruised", [], DEPARTMENTS, set()
     )
     assert "Orthopedics" in hinted
+
+
+def test_limb_pain_does_not_add_a_redundant_general_medicine_card_when_orthopedics_already_covers_it():
+    # Reported live: a patient described hand swelling + chest pain. The LLM's own
+    # tool call already (correctly) produced an Orthopedics card for the hand, but
+    # the bare-word fallback independently recomputed "hand" as General Medicine
+    # and added a redundant second card for the same body part — General Medicine
+    # and Orthopedics are two possible outcomes of the SAME limb/joint family, so
+    # Orthopedics already being covered (by anything — the LLM, an earlier turn)
+    # must suppress the generic fallback for that same family.
+    hinted = departments_hinted_by_patient_symptom_words(
+        "its only swelling on hand no other symptoms and chest pain as well",
+        [], DEPARTMENTS, {"Orthopedics"},
+    )
+    assert "General Medicine" not in hinted
+    assert hinted == {"Cardiology": "chest pain"}
+
+
+def test_general_medicine_already_covered_does_not_suppress_a_genuine_orthopedics_addition():
+    # Deliberately one-directional: General Medicine already being covered (e.g.
+    # for an unrelated fever) must NOT suppress a real Orthopedics addition — that's
+    # still a genuinely more specific need, unlike the reverse direction above.
+    hinted = departments_hinted_by_patient_symptom_words(
+        "my leg is swollen after I fell and i have a fever", [], DEPARTMENTS, {"General Medicine"},
+    )
+    assert hinted == {"Orthopedics": "limb/joint injury symptoms"}

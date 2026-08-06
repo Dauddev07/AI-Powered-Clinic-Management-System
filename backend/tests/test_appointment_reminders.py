@@ -22,7 +22,12 @@ def clinic(db):
     return c
 
 
-def _confirmed_appointment(db, clinic, *, starts_in: timedelta):
+def _confirmed_appointment(db, clinic, *, starts_in: timedelta, booked_at: datetime | None = None):
+    """`booked_at` defaults to well in the past (2 hours before "now") so every
+    reminder window has genuine lead time — isolates "has this appointment now
+    crossed threshold X" tests from the separate booked-too-late-for-window-X
+    concern covered by its own dedicated tests below. Pass `booked_at` explicitly
+    to simulate a late/near-term booking."""
     dept = Department(clinic_id=clinic.id, name="Cardiology")
     db.add(dept)
     db.flush()
@@ -47,7 +52,10 @@ def _confirmed_appointment(db, clinic, *, starts_in: timedelta):
     db.add(slot)
     db.flush()
 
-    appointment = Appointment(clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id, status="confirmed")
+    appointment = Appointment(
+        clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id, status="confirmed",
+        created_at=booked_at if booked_at is not None else now - timedelta(hours=2),
+    )
     db.add(appointment)
     db.flush()
     return appointment
@@ -176,3 +184,30 @@ def test_starting_reminder_message_says_starting_now(db, clinic):
         )
     ).scalar_one()
     assert "starting now" in notification.message
+
+
+def test_appointment_booked_5_minutes_before_start_gets_only_the_5m_reminder(db, clinic):
+    # Reported live: booking an appointment at 12:55 for a 1:00pm start fired the
+    # 60m, 30m, AND 5m reminders all at once, right at booking — every window's
+    # threshold was already in the past the instant the appointment existed. A "in
+    # 1 hour"/"in 30 minutes" reminder is nonsensical for an appointment that was
+    # never actually that far out at any point after being booked; only the window
+    # that genuinely had lead time (5m here) should fire.
+    now = datetime.now(timezone.utc)
+    appointment = _confirmed_appointment(db, clinic, starts_in=timedelta(minutes=5), booked_at=now)
+
+    send_due_reminders_for_clinic(db, clinic.id)
+
+    assert _reminder_types(db, clinic, appointment) == ["appointment_reminder_5m"]
+
+
+def test_appointment_booked_at_the_exact_start_time_still_gets_the_starting_reminder(db, clinic):
+    # The "appointment_starting" (0-minute) window is exempt from the lead-time
+    # gate — an appointment starting right now is always a real, meaningful event
+    # to notify about, no matter how late it was booked.
+    now = datetime.now(timezone.utc)
+    appointment = _confirmed_appointment(db, clinic, starts_in=timedelta(minutes=0), booked_at=now)
+
+    send_due_reminders_for_clinic(db, clinic.id)
+
+    assert _reminder_types(db, clinic, appointment) == ["appointment_starting"]

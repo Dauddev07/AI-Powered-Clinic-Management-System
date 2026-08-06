@@ -75,7 +75,7 @@ def send_due_reminders_for_clinic(db: Session, clinic_id: uuid.UUID) -> list[Not
             Notification.type == notif_type,
             Notification.related_appointment_id.isnot(None),
         )
-        due = db.execute(
+        query = (
             select(Appointment)
             .join(Slot, Slot.id == Appointment.slot_id)
             .where(
@@ -84,7 +84,20 @@ def send_due_reminders_for_clinic(db: Session, clinic_id: uuid.UUID) -> list[Not
                 Slot.start_utc <= threshold,
                 Appointment.id.notin_(already_reminded),
             )
-        ).scalars().all()
+        )
+        # Reported live: booking an appointment 5 minutes before its start fired the
+        # 60m, 30m, AND 5m reminders all at once, right at booking — every window's
+        # threshold was already in the past the moment the appointment existed, so
+        # the very first tick treated all three as overdue. A "60 minutes before"
+        # reminder is meaningless for an appointment that was never 60 minutes away
+        # at any point after being booked; only send a window's reminder if there
+        # was actually a real point in time, after booking, when the appointment
+        # was still that far out. The "appointment_starting" (0-minute) window is
+        # exempt — an appointment starting now is always a real, meaningful event
+        # regardless of how late it was booked.
+        if offset_minutes > 0:
+            query = query.where(Slot.start_utc >= Appointment.created_at + timedelta(minutes=offset_minutes))
+        due = db.execute(query).scalars().all()
         for appointment in due:
             slot = db.get(Slot, appointment.slot_id)
             doctor = db.get(Doctor, appointment.doctor_id)

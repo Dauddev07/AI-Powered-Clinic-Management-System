@@ -123,6 +123,10 @@ def test_tick_creates_auto_completed_notification_for_the_patient(db, clinic, us
 
 
 def _upcoming_appointment(db, clinic, *, starts_in):
+    # Booked well in the past (2 hours before "now") so every reminder window has
+    # genuine lead time — see test_appointment_reminders.py's
+    # test_appointment_booked_5_minutes_before_start_gets_only_the_5m_reminder for
+    # the dedicated coverage of a genuinely-late booking instead.
     dept = Department(clinic_id=clinic.id, name="Cardiology")
     db.add(dept)
     db.flush()
@@ -141,12 +145,16 @@ def _upcoming_appointment(db, clinic, *, starts_in):
     db.add(patient)
     db.flush()
 
-    start = datetime.now(timezone.utc) + starts_in
+    now = datetime.now(timezone.utc)
+    start = now + starts_in
     slot = Slot(clinic_id=clinic.id, doctor_id=doctor.id, start_utc=start, end_utc=start + timedelta(minutes=30))
     db.add(slot)
     db.flush()
 
-    appointment = Appointment(clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id, status="confirmed")
+    appointment = Appointment(
+        clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id, status="confirmed",
+        created_at=now - timedelta(hours=2),
+    )
     db.add(appointment)
     db.flush()
     return appointment

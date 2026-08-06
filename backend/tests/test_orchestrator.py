@@ -835,6 +835,62 @@ def test_run_symptom_agent_recommendation_request_names_low_mood_and_skin_depart
     assert "Psychiatry" in result
 
 
+def test_run_symptom_agent_recommendation_request_names_dentistry_for_jaw_pain_not_a_guessed_cardiology(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: "i am having pain in my jaw" got a correct Dentistry card from
+    # the LLM's own first-turn reasoning, but then "i think cardiologist can be
+    # best fit for it?" got a Cardiology card instead — "jaw" was never a keyword
+    # in symptom_hints.py at all, so this recommendation-request shortcut's scan of
+    # prior history came back empty, fell through to the LLM with nothing to push
+    # back with, and the model just went along with the patient's own guess. "jaw"
+    # is now in the dental keyword set, same "missing keyword, not missing
+    # mechanism" shape as the "teeths" typo fix above.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    for name in ("Dentistry", "Cardiology"):
+        dept = Department(clinic_id=clinic.id, name=name)
+        db.add(dept)
+        db.flush()
+        doctor = Doctor(
+            clinic_id=clinic.id,
+            department_id=dept.id,
+            external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+            full_name=f"Dr. {name}",
+            is_active=True,
+        )
+        db.add(doctor)
+        db.flush()
+        db.add(Slot(
+            clinic_id=clinic.id, doctor_id=doctor.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for a recommendation request")
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row("user", "i am having pain in my jaw"),
+        _row("assistant", "Could you tell me how severe this is and how long you've had it?"),
+        _row("user", "its mild and moderate and started today morning"),
+    ]
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "i think cardiologist can be best fit for it?", "en", history
+    )
+
+    assert "Cardiology" not in result
+    assert "Dentistry" in result
+
+
 def test_run_symptom_agent_recommendation_request_falls_through_when_nothing_hinted_yet(monkeypatch, db, ctx):
     # No real symptom has been described yet this session — nothing to base a
     # recommendation on, so this must fall through to the normal triage flow

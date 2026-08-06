@@ -49,7 +49,17 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
     # Dentistry card for it — the appointment_agent mismatch check later saw the
     # patient's own symptoms as NOT supporting Dentistry and wrongly warned them
     # off it when they asked about dentist availability.
-    (frozenset({"tooth", "teeth", "teeths", "toothache", "dental"}), ("dent",), "tooth pain"),
+    # Reported live (2nd report): "jaw" was never a keyword here at all. The LLM's
+    # own first-turn reply correctly said "a dentist can evaluate" mild jaw pain,
+    # but when the patient then suggested "i think cardiologist can be best fit for
+    # it?", that recommendation-request phrasing routes to a deterministic shortcut
+    # that scans PRIOR history for real symptom words and answers from THAT, never
+    # from what the patient guessed — with "jaw" untracked, the scan came back
+    # empty, fell through to the LLM with nothing to push back with, and the model
+    # just went along with the patient's own suggestion (Cardiology) instead of
+    # reinforcing what it had already correctly concluded. Same "missing keyword,
+    # not missing mechanism" shape as the "teeths" typo above.
+    (frozenset({"tooth", "teeth", "teeths", "toothache", "dental", "jaw"}), ("dent",), "tooth pain"),
     (
         frozenset({"bone", "fracture", "fractured", "sprain", "sprained", "joint", "dislocated", "dislocation"}),
         ("ortho",),
@@ -230,8 +240,26 @@ def departments_hinted_by_patient_symptom_words(
         if words & _LIMB_JOINT_INJURY_SIGNAL_WORDS:
             hinted_substrings.setdefault("ortho", "limb/joint injury symptoms")
         else:
-            for hint in ("general medicine", "internal medicine", "family medicine"):
-                hinted_substrings.setdefault(hint, "limb/joint pain")
+            # Reported live: a patient described hand swelling + chest pain; the
+            # LLM's OWN tool call had already (correctly) shown Orthopedics for the
+            # hand, but this bare-word branch independently recomputed "hand" as
+            # General Medicine and added a redundant second card for the same body
+            # part under a different department name — the two branches don't know
+            # about each other, only about department NAMES already covered.
+            # Orthopedics and General Medicine are two possible outcomes for the
+            # SAME limb/joint family (see the if/else above); if Orthopedics is
+            # already covered by anything else (the LLM's own reasoning, an earlier
+            # turn, an injury-signal hint elsewhere in the same message), the
+            # generic fallback for this exact family is redundant and skipped.
+            # Deliberately one-directional: General Medicine already being covered
+            # (e.g. for an unrelated fever) must NOT suppress a genuine Orthopedics
+            # addition above — that's still a real, more specific need.
+            already_covered_by_ortho = any(
+                re.search(r"\bortho", name.lower()) for name in already_covered
+            )
+            if not already_covered_by_ortho:
+                for hint in ("general medicine", "internal medicine", "family medicine"):
+                    hinted_substrings.setdefault(hint, "limb/joint pain")
     if not hinted_substrings:
         return {}
     # Anchored to the START of a word only (not "anywhere inside one") — e.g. the
