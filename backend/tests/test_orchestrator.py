@@ -665,6 +665,64 @@ def test_run_symptom_agent_names_the_specific_symptom_in_the_hinted_departments_
     assert cardio_entry["note"] == "Based on the chest pain described, this could also be evaluated by Cardiology."
 
 
+def test_run_symptom_agent_does_not_add_a_spurious_general_medicine_card_for_head_as_a_location(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: "i am feeling numb" -> "where?" -> "in the head" -> "also
+    # having weakness" got a correct Neurology card from the LLM, PLUS a spurious
+    # extra "Based on the head pain described, this could also be evaluated by
+    # General Medicine" card — but the patient never described a headache at all;
+    # "head" was their answer to WHERE the numbness was located, not a pain
+    # complaint. Confirms the cross-check no longer misreads a bare body-location
+    # word as its own separate "head pain" symptom.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    neuro = Department(clinic_id=clinic.id, name="Neurology")
+    db.add(neuro)
+    db.flush()
+    doctor = Doctor(
+        clinic_id=clinic.id, department_id=neuro.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Fatima Raza", is_active=True,
+    )
+    db.add(doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    card = json.dumps(
+        {
+            "note": "Based on your mild head numbness and weakness, Neurology would be appropriate for follow-up.",
+            "department_name": "Neurology",
+            "doctors": [{"doctor_id": "d1", "doctor_name": doctor.full_name, "specialization": None, "slots": []}],
+        }
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: DOCTOR_OPTIONS_MARKER + card)
+
+    history = [
+        _row("user", "i am feeling numb right now"),
+        _row("assistant", "Could you tell me how severe this is and how long you've had it?"),
+        _row("user", "its mild and started 1 hour ago"),
+        _row("assistant", "Where exactly are you feeling the numbness?"),
+        _row("user", "in the head"),
+        _row("assistant", "Are you also experiencing any headache, vision changes, dizziness, or weakness?"),
+    ]
+    result = symptom_agent.run_symptom_agent(db, ctx, "having weakness", "en", history)
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "Neurology"
+    assert "General Medicine" not in result
+
+
 def test_run_symptom_agent_does_not_falsely_hint_dentistry_for_ear_and_neck_pain(monkeypatch, db, ctx, clinic):
     # Reported live: "pain in my ear and neck" + "difficulty swallowing" correctly
     # routed to ENT, but a second, unrelated Dentistry card also showed up with no
@@ -976,9 +1034,10 @@ def test_run_symptom_agent_first_message_backstop_skips_self_diagnosis_claims(mo
 
 
 def test_run_symptom_agent_first_message_backstop_does_not_apply_once_history_exists(monkeypatch, db, ctx):
-    # The backstop is deliberately scoped to a genuinely brand-new session
-    # (history == []) — once there's any prior turn, the normal LLM triage flow
-    # (which already has real conversation context to reason from) applies.
+    # The backstop is deliberately scoped to no REAL symptom having been described
+    # yet — once a prior turn already described one (a headache here), the normal
+    # LLM triage flow (which already has real conversation context to reason from)
+    # applies, regardless of whether `history` is literally empty.
     monkeypatch.setattr(
         symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Let me check availability for you."
     )
@@ -990,6 +1049,167 @@ def test_run_symptom_agent_first_message_backstop_does_not_apply_once_history_ex
     result = symptom_agent.run_symptom_agent(db, ctx, "I am also having pain in my jaw", "en", history)
 
     assert result == "Let me check availability for you."
+
+
+def test_run_symptom_agent_first_message_backstop_applies_after_pure_small_talk(monkeypatch, db, ctx):
+    # Reported live: "hey, my name is daud" -> greeting reply -> "i am having
+    # nausea" — the backstop used to require `history` to be literally empty, so
+    # this harmless small-talk exchange (no symptom content at all) was enough to
+    # disqualify it from firing on what was genuinely the patient's first-ever
+    # symptom message. "nausea" is PATH-3-eligible (not PATH-2), so the backstop's
+    # own scope covers it once "brand new" correctly ignores preceding small talk.
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for a brand-new first symptom")
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row("user", "hey,my name is daud"),
+        # Deliberately doesn't end in "?" — a greeting reply that DOES (e.g.
+        # "How can I assist you today?") trips a separate, unrelated PATH-2 signal
+        # (_preceding_assistant_turn_looks_like_a_question), which isn't what this
+        # test is about.
+        _row("assistant", "Hello Daud! Nice to meet you."),
+    ]
+    result = symptom_agent.run_symptom_agent(db, ctx, "i am having nausea", "en", history)
+
+    assert "severe" in result.lower()
+    assert "how long" in result.lower()
+
+
+def test_run_symptom_agent_recovers_a_real_department_when_the_model_advice_dumps_instead_of_routing(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: "hey, my name is daud" -> "Hello Daud!... How can I assist
+    # you today?" -> "i am having pain in my joints all along the body". The
+    # greeting reply itself ending in "?" trips needs_path2_screening's
+    # "preceding turn looks like a question" signal, making this PATH-2-eligible
+    # — so the PATH-3 "zero questions" backstop deliberately doesn't apply (it
+    # assumes PATH 2 already reliably asks a real question, exactly what failed
+    # here). The model returned a long red-flag bullet list plus a
+    # permission-seeking "would you like me to help you find a doctor?" tail,
+    # never calling get_department_availability. It named no diagnosis and faked
+    # no JSON, so neither existing recovery trigger caught it — this confirms the
+    # new advice-dump detector does.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    ortho = Department(clinic_id=clinic.id, name="Orthopedics")
+    db.add(ortho)
+    db.flush()
+    doctor = Doctor(
+        clinic_id=clinic.id, department_id=ortho.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Junaid Mirza", is_active=True,
+    )
+    db.add(doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    advice_dump_reply = (
+        "I'm sorry you're experiencing that discomfort. Joint pain throughout the body can have "
+        "many causes, and it's important to have a professional evaluation.\n\n"
+        "If you notice any of the following, please seek medical attention right away:\n\n"
+        "- Sudden, severe swelling or redness in a joint\n"
+        "- Fever, chills, or feeling very unwell\n"
+        "- Inability to move a joint or bear weight\n\n"
+        "Would you like me to help you find a doctor and check available appointment times?"
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: advice_dump_reply)
+
+    history = [
+        _row("user", "hey,my name is daud"),
+        _row("assistant", "Hello Daud! Nice to meet you. How can I assist you today?"),
+    ]
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "i am having pain in my joints all along the body", "en", history
+    )
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "Orthopedics"
+    assert payload["doctors"][0]["doctor_name"] == "Dr. Junaid Mirza"
+    assert "Would you like me to help" not in result
+
+
+def test_run_symptom_agent_recovers_when_the_model_recommends_a_specialist_in_plain_prose(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: "issue in chewing any solid thing" got a reply in plain
+    # PROSE, not a bulleted list ("I recommend scheduling an appointment with a
+    # dentist or an oral-maxillofacial specialist..."), so it slipped past the
+    # bullet-line advice-dump detector too — no diagnosis language, no faked JSON,
+    # no bullets, just a paragraph naming a specialist type without ever calling
+    # get_department_availability. Confirms the new specialist-recommendation
+    # detector catches this prose-form variant.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    dentistry = Department(clinic_id=clinic.id, name="Dentistry")
+    db.add(dentistry)
+    db.flush()
+    doctor = Doctor(
+        clinic_id=clinic.id, department_id=dentistry.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Iqra Qureshi", is_active=True,
+    )
+    db.add(doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    prose_recommendation_reply = (
+        "I'm sorry you're having trouble chewing. That can be caused by a number of issues such as "
+        "dental problems, jaw joint discomfort, or muscle strain. I recommend scheduling an appointment "
+        "with a dentist or an oral-maxillofacial specialist so they can examine you and determine the cause.\n\n"
+        "If you'd like, I can help you find a suitable department and check the next available slots for "
+        "an appointment. Just let me know how you'd like to proceed."
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: prose_recommendation_reply)
+
+    history = [
+        _row("user", "hey,my name is daud"),
+        _row("assistant", "Hello Daud! Nice to meet you. How can I assist you today?"),
+    ]
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "i am having issue in chewing any solid thing", "en", history
+    )
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "Dentistry"
+    assert "I recommend scheduling" not in result
+
+
+def test_router_rule0_5_find_me_a_suitable_dept_routes_to_symptom_general():
+    # Reported live: "find me a suitable dept" (after already describing a real
+    # symptom in the same session) matched none of the recommendation-request
+    # phrasings, fell through the router's other rules, and landed on
+    # general_info_agent — which has no tool bound to query real department
+    # availability at all, only KB retrieval, so it just free-texted a department
+    # name with no real card, no doctors, no slots ever shown.
+    from app.services.orchestrator.router import _heuristic_classify
+
+    history = [
+        _row("user", "i am having issue in chewing any solid thing"),
+        _row("assistant", "I recommend scheduling an appointment with a dentist."),
+    ]
+    assert _heuristic_classify("find me a suitable dept", history) == "symptom_general"
 
 
 def test_run_symptom_agent_does_not_hint_a_department_with_no_matching_symptom_words(monkeypatch, db, ctx):

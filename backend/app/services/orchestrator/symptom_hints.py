@@ -59,9 +59,20 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
     # just went along with the patient's own suggestion (Cardiology) instead of
     # reinforcing what it had already correctly concluded. Same "missing keyword,
     # not missing mechanism" shape as the "teeths" typo above.
-    (frozenset({"tooth", "teeth", "teeths", "toothache", "dental", "jaw"}), ("dent",), "tooth pain"),
+    # Reported live (3rd report): "issue in chewing any solid thing" — "chewing"/
+    # "chew" were never keywords here either, same shape as "jaw" above.
+    (frozenset({"tooth", "teeth", "teeths", "toothache", "dental", "jaw", "chewing", "chew"}), ("dent",), "tooth pain"),
     (
-        frozenset({"bone", "fracture", "fractured", "sprain", "sprained", "joint", "dislocated", "dislocation"}),
+        # "joint"/"joints" kept HERE (unconditional Orthopedics), unlike bare
+        # "leg"/"arm" below — reported live, moving it into the conditional
+        # limb/joint bucket was wrong: "joint pain" is already a specific, named
+        # complaint (unlike generic "leg hurts", which could mean almost
+        # anything), so it doesn't need an injury signal to warrant an
+        # orthopedic look. Also covers the previously-missing plural "joints".
+        frozenset({
+            "bone", "fracture", "fractured", "sprain", "sprained", "dislocated",
+            "dislocation", "joint", "joints",
+        }),
         ("ortho",),
         "bone/joint injury",
     ),
@@ -69,8 +80,10 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
     # table entry here — it needs an if/else, not an OR-only keyword match. See
     # _LIMB_JOINT_WORDS + _LIMB_JOINT_INJURY_SIGNAL_WORDS and the branch in
     # departments_hinted_by_patient_symptom_words below for why and how.
+    # NOTE: bare "head" is deliberately NOT in this entry — see
+    # _GENERIC_PAIN_WORDS and the co-occurrence branch below for why and how.
     (
-        frozenset({"head", "headache", "headaches", "migraine", "migraines"}),
+        frozenset({"headache", "headaches", "migraine", "migraines"}),
         ("general medicine", "internal medicine", "family medicine"),
         "head pain",
     ),
@@ -247,6 +260,18 @@ _LOW_MOOD_PERSISTENCE_WORDS = frozenset({
     "chronically", "persistent", "persistently", "ongoing",
 })
 
+# Reported live: "i am feeling numb... in the head... having weakness" got a
+# spurious General Medicine card for "head pain" — but the patient never
+# described a headache at all; "head" was their answer to "where exactly are you
+# feeling the numbness?", a body LOCATION for a completely different symptom
+# (numbness/weakness, already correctly hinting Neurology on its own), not a pain
+# complaint. Bare "head" alone is too generic a word to safely mean "headache" —
+# same shape as bare "leg"/"arm" needing an injury word before meaning something
+# specific. "head" only hints General Medicine when it co-occurs with an actual
+# pain word; "headache"/"migraine" already inherently mean pain and stay
+# unconditional in the table entry above.
+_GENERIC_PAIN_WORDS = frozenset({"pain", "ache", "aches", "aching", "hurt", "hurts", "hurting", "sore"})
+
 
 def departments_hinted_by_patient_symptom_words(
     message: str, history: list[ConversationMemory], department_names: list[str], already_covered: set[str]
@@ -293,6 +318,9 @@ def departments_hinted_by_patient_symptom_words(
                     hinted_substrings.setdefault(hint, "limb/joint pain")
     if words & _LOW_MOOD_PASSING_WORDS and words & _LOW_MOOD_PERSISTENCE_WORDS:
         hinted_substrings.setdefault("psych", "low mood")
+    if "head" in words and words & _GENERIC_PAIN_WORDS:
+        for hint in ("general medicine", "internal medicine", "family medicine"):
+            hinted_substrings.setdefault(hint, "head pain")
     if not hinted_substrings:
         return {}
     # Anchored to the START of a word only (not "anywhere inside one") — e.g. the

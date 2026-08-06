@@ -30,3 +30,17 @@ class AdminDashboardStatsOut(BaseModel):
 class DailyAppointmentCountOut(BaseModel):
     date: date
     count: int
+
+
+class TopRatedDoctorOut(BaseModel):
+    doctor_id: str
+    doctor_name: str
+    department_name: str
+    # Mean of AppointmentFeedback.rating (1-5), rounded to 1 decimal — only
+    # doctors with at least one rating can appear here at all (see the query in
+    # admin_dashboard.py), so this is never null.
+    average_rating: float
+    rating_count: int
+    # All-time count of this doctor's 'completed' appointments — a real visit
+    # that actually happened, not merely booked.
+    visit_count: int

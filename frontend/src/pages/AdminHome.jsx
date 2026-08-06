@@ -1,13 +1,76 @@
 import { useEffect, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { fetchMyAccount } from "../api/auth";
-import { fetchAdminDashboardStats, fetchAppointmentsTrend } from "../api/adminDashboard";
+import { fetchAdminDashboardStats, fetchAppointmentsTrend, fetchTopRatedDoctors } from "../api/adminDashboard";
 import { ApiError } from "../api/client";
 import EmptyState from "../components/EmptyState";
 import Skeleton from "../components/Skeleton";
+import StarIcon from "../components/StarIcon";
 import WelcomeBanner from "../components/WelcomeBanner";
 import { useReveal, revealDelayClass } from "../hooks/useReveal";
 import styles from "./AdminHome.module.css";
+
+// Rank-badge tone per position — gold/silver/bronze is the universal "top 3"
+// convention, so it reads at a glance without needing the "#1/#2/#3" label to
+// do all the work on its own.
+const RANK_TONES = ["gold", "silver", "bronze"];
+
+function getInitials(fullName) {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0][0] || "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] || "" : "";
+  return (first + last).toUpperCase();
+}
+
+function DoctorStars({ rating, size = 15 }) {
+  const rounded = Math.round(rating);
+  return (
+    <span className={styles.doctorStars} aria-label={`${rating} out of 5 stars`}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <StarIcon
+          key={n}
+          filled={rounded >= n}
+          size={size}
+          className={rounded >= n ? styles.starFilled : styles.starEmpty}
+        />
+      ))}
+    </span>
+  );
+}
+
+function TopRatedDoctorCard({ doctor, rank }) {
+  const tone = RANK_TONES[rank] || "bronze";
+  return (
+    <div className={`${styles.doctorCard} ${styles[`doctorCard_${tone}`]}`}>
+      <span className={`${styles.rankBadge} ${styles[`rankBadge_${tone}`]}`}>#{rank + 1}</span>
+      <div className={styles.doctorCardHeader}>
+        <span className={styles.doctorAvatar} aria-hidden="true">
+          {getInitials(doctor.doctor_name)}
+        </span>
+        <div className={styles.doctorCardHeaderText}>
+          <div className={styles.doctorName}>{doctor.doctor_name}</div>
+          <div className={styles.doctorDepartment}>{doctor.department_name}</div>
+        </div>
+      </div>
+      <div className={styles.doctorRatingRow}>
+        <DoctorStars rating={doctor.average_rating} />
+        <span className={styles.doctorRatingValue}>{doctor.average_rating.toFixed(1)}</span>
+      </div>
+      <div className={styles.doctorStatRow}>
+        <div className={styles.doctorStat}>
+          <span className={styles.doctorStatValue}>{doctor.rating_count}</span>
+          <span className={styles.doctorStatLabel}>{doctor.rating_count === 1 ? "rating" : "ratings"}</span>
+        </div>
+        <div className={styles.doctorStatDivider} aria-hidden="true" />
+        <div className={styles.doctorStat}>
+          <span className={styles.doctorStatValue}>{doctor.visit_count}</span>
+          <span className={styles.doctorStatLabel}>{doctor.visit_count === 1 ? "visit" : "visits"}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 // One/two-letter weekday initials for the X-axis on narrow screens — "Th" (not
@@ -103,6 +166,8 @@ export default function AdminHome() {
   const [error, setError] = useState(null);
   const [trend, setTrend] = useState(null);
   const [trendError, setTrendError] = useState(null);
+  const [topRatedDoctors, setTopRatedDoctors] = useState(null);
+  const [topRatedError, setTopRatedError] = useState(null);
   const revealRef = useReveal();
   const chartColors = useChartColors();
   const isNarrowScreen = useIsNarrowScreen("(max-width: 480px)");
@@ -126,6 +191,14 @@ export default function AdminHome() {
       .then(setTrend)
       .catch((err) =>
         setTrendError(err instanceof ApiError ? err.detail || err.message : "Could not load the appointments trend."),
+      );
+  }, []);
+
+  useEffect(() => {
+    fetchTopRatedDoctors()
+      .then(setTopRatedDoctors)
+      .catch((err) =>
+        setTopRatedError(err instanceof ApiError ? err.detail || err.message : "Could not load top rated doctors."),
       );
   }, []);
 
@@ -249,6 +322,29 @@ export default function AdminHome() {
             </ResponsiveContainer>
           )}
         </div>
+      </div>
+
+      <div className={`${styles.card} reveal ${revealDelayClass(2)}`} ref={revealRef}>
+        <div className={styles.cardTitleRow}>
+          <span className={`${styles.titleIcon} ${styles.titleIcon_warning}`} aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2.5l2.9 6.06 6.6.86-4.85 4.63 1.24 6.6L12 17.6l-5.89 3.05 1.24-6.6-4.85-4.63 6.6-.86L12 2.5Z" />
+            </svg>
+          </span>
+          <h2 className={styles.cardTitle}>Top rated doctors</h2>
+        </div>
+        {topRatedDoctors === null && !topRatedError && <Skeleton rows={3} />}
+        {topRatedError && <p className={styles.errorText}>{topRatedError}</p>}
+        {topRatedDoctors && topRatedDoctors.length === 0 && (
+          <EmptyState icon="star" message="No doctor ratings yet." />
+        )}
+        {topRatedDoctors && topRatedDoctors.length > 0 && (
+          <div className={styles.doctorGrid}>
+            {topRatedDoctors.map((doctor, index) => (
+              <TopRatedDoctorCard key={doctor.doctor_id} doctor={doctor} rank={index} />
+            ))}
+          </div>
+        )}
       </div>
 
       <div className={`${styles.card} reveal ${revealDelayClass(2)}`} ref={revealRef}>

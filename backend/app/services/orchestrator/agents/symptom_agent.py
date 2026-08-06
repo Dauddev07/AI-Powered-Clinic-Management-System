@@ -42,7 +42,11 @@ from app.services.chat_tools import (
 )
 from app.services.department_availability import list_active_department_names
 from app.services.diagnosis_guard import violates_no_diagnosis_rule
-from app.services.message_classifier import is_department_recommendation_request, needs_path2_screening
+from app.services.message_classifier import (
+    is_department_recommendation_request,
+    is_symptom_message,
+    needs_path2_screening,
+)
 from app.services.orchestrator.symptom_hints import departments_hinted_by_patient_symptom_words
 
 _SYMPTOM_AGENT_TOOL_NAMES = {"get_department_availability", "find_doctors_by_name"}
@@ -89,6 +93,27 @@ def _is_self_diagnosis_claim(message: str) -> bool:
     return bool(words & _SELF_DIAGNOSIS_WORDS)
 
 
+def _no_symptom_described_yet(history: list[ConversationMemory]) -> bool:
+    """True when nothing in `history` is itself a symptom-shaped message — i.e. the
+    CURRENT message is effectively the first real symptom description of the
+    session, even if `history` isn't literally empty. Reported live: "hey, my name
+    is daud" -> greeting reply -> "i am having pain in my joints all along the
+    body" — the PATH-3 backstop below used to require history to be completely
+    empty, so this small-talk exchange (itself harmless, no symptom content at
+    all) was enough to disqualify the backstop from firing on what was genuinely
+    the patient's first-ever symptom message. Without the backstop, the LLM was
+    free to skip the required tool call entirely and returned a long free-text
+    disclaimer instead (never calling get_department_availability) — a failure
+    shape that didn't trip the diagnosis-guard or faked-payload recovery nets
+    either, since it named no specific diagnosis and faked no JSON, just gave
+    advice-and-ask text. Small talk preceding a symptom must not count against
+    this backstop the same way an earlier REAL symptom turn correctly does."""
+    return not any(
+        getattr(row, "role", None) == "user" and is_symptom_message(getattr(row, "content", "") or "")
+        for row in history
+    )
+
+
 # Reported live: "pain in my chest and in testies as well" (mild, bearable, 2 days)
 # got a reply that never actually called get_department_availability — the model
 # free-texted a recommendation paragraph, then hand-typed a fragment that MIMICS the
@@ -105,6 +130,47 @@ _FAKED_TOOL_PAYLOAD_RE = re.compile(r'"department_name"\s*:', re.IGNORECASE)
 
 def _looks_like_a_faked_tool_payload(reply: str) -> bool:
     return bool(_FAKED_TOOL_PAYLOAD_RE.search(reply))
+
+
+# Reported live: "i am having pain in my joints all along the body" (a PATH-2-
+# eligible message, so the PATH-3 "zero questions" backstop above deliberately
+# doesn't apply here — that backstop assumes PATH 2 already reliably asks a real
+# question, which is exactly what failed) got a long free-text disclaimer
+# instead of either a real clarifying question or a tool call: a red-flag bullet
+# list plus a permission-seeking "would you like me to help you find a doctor?"
+# tail. It named no diagnosis and faked no JSON, so neither existing recovery
+# trigger caught it either. A REAL single clarifying question in this system is
+# always plain prose ending in "?", never a formatted list — a reply containing
+# 2+ bullet/numbered lines is a reliable, low-false-positive structural signal
+# that the model dumped generic advice instead of doing its actual job, checked
+# independently of the other two triggers.
+_LIST_LINE_RE = re.compile(r"^\s*(?:[-•*]|\d+[.)])\s+", re.MULTILINE)
+
+
+def _looks_like_an_advice_dump_instead_of_routing(reply: str) -> bool:
+    return len(_LIST_LINE_RE.findall(reply)) >= 2
+
+
+# Reported live (2nd instance of the same failure category): "issue in chewing any
+# solid thing" got a reply in plain PROSE, not a bulleted list — "I recommend
+# scheduling an appointment with a dentist or an oral-maxillofacial specialist" —
+# so it slipped past the bullet-line detector above too, plus contained no
+# diagnosis language and no faked JSON. A real clarifying question in this system
+# NEVER names a specific type of doctor/specialist — it only ever asks about the
+# symptom itself (severity, duration, associated signs) — so a non-marker reply
+# that names one is a reliable, low-false-positive signal the model recommended
+# in free text instead of actually calling the tool, regardless of prose shape.
+_SPECIALIST_TITLE_WORDS = frozenset({
+    "dentist", "cardiologist", "dermatologist", "neurologist", "psychiatrist",
+    "orthopedist", "pediatrician", "paediatrician", "gynecologist", "gynaecologist",
+    "ophthalmologist", "pulmonologist", "otolaryngologist", "physician", "specialist",
+    "surgeon", "practitioner",
+})
+_SPECIALIST_TITLE_RE = re.compile(r"\b(?:" + "|".join(_SPECIALIST_TITLE_WORDS) + r")\b", re.IGNORECASE)
+
+
+def _recommends_a_specialist_in_free_text(reply: str) -> bool:
+    return bool(_SPECIALIST_TITLE_RE.search(reply))
 
 
 def _build_system_prompt(language_name: str, department_names: list[str], include_path2: bool) -> str:
@@ -220,7 +286,7 @@ def run_symptom_agent(
     # brand new session has none of.
     if (
         not include_path2
-        and not history
+        and _no_symptom_described_yet(history)
         and not is_department_recommendation_request(message)
         and not _message_already_gives_duration_and_severity(message)
         and not _is_self_diagnosis_claim(message)
@@ -256,9 +322,13 @@ def run_symptom_agent(
     # department from what the patient actually said and call the tool ourselves,
     # so the turn still ends with a real department/doctor option on the table —
     # the diagnostic free text itself is discarded, never shown to the patient.
-    # Also covers the faked-tool-payload case above — same recovery, wider trigger.
+    # Also covers the faked-tool-payload, advice-dump, and specialist-recommendation
+    # cases above — same recovery, wider trigger.
     if not reply.startswith((DOCTOR_OPTIONS_MARKER, DEPARTMENT_LIST_MARKER, NO_SLOTS_MARKER)) and (
-        violates_no_diagnosis_rule(reply) or _looks_like_a_faked_tool_payload(reply)
+        violates_no_diagnosis_rule(reply)
+        or _looks_like_a_faked_tool_payload(reply)
+        or _looks_like_an_advice_dump_instead_of_routing(reply)
+        or _recommends_a_specialist_in_free_text(reply)
     ):
         hinted = departments_hinted_by_patient_symptom_words(message, history, department_names, set())
         if hinted:

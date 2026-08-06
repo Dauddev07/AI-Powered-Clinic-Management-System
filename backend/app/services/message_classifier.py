@@ -285,6 +285,14 @@ _RECOMMENDATION_RE = re.compile(
     # fit" rather than "better", which the pattern above didn't cover at all.
     r"|\b(?:best|good|better) fit\b"
     r"|based on my symptoms"
+    # Reported live: "find me a suitable dept" (after already describing a real
+    # symptom) matched none of the above, so it fell through to the router's
+    # generic fallback and landed on general_info_agent — which has no tool bound
+    # at all to query real department availability, only KB retrieval — so it
+    # just free-texted a department name with no real card, no doctors, no slots.
+    # This phrasing is asking for the SAME grounded recommendation as "what do you
+    # think" above, just worded as a request rather than a question.
+    r"|find (?:me )?(?:a|an|the)?\s*(?:suitable|appropriate|right|good)?\s*(?:department|dept)\b"
     r")",
     re.IGNORECASE,
 )

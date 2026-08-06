@@ -7,3 +7,7 @@ export function fetchAdminDashboardStats() {
 export function fetchAppointmentsTrend() {
   return apiFetch("/admin/dashboard/appointments-trend", { auth: true });
 }
+
+export function fetchTopRatedDoctors() {
+  return apiFetch("/admin/dashboard/top-rated-doctors", { auth: true });
+}

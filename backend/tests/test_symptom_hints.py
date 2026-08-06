@@ -25,6 +25,7 @@ DEPARTMENTS = [
         ("pain in my teeths", "Dentistry"),  # typo regression
         ("my knee and ankle hurt", "General Medicine"),  # bare limb pain, no injury signal
         ("I sprained my joint", "Orthopedics"),
+        ("pain in my joints all along the body", "Orthopedics"),  # bare "joints" (plural), no injury word needed
         ("my shoulder and back hurt", "General Medicine"),
         ("my wrist and elbow are sore", "General Medicine"),
         ("my leg is swollen after I fell", "Orthopedics"),  # limb pain + injury signal
@@ -175,6 +176,24 @@ def test_general_medicine_already_covered_does_not_suppress_a_genuine_orthopedic
         "my leg is swollen after I fell and i have a fever", [], DEPARTMENTS, {"General Medicine"},
     )
     assert hinted == {"Orthopedics": "limb/joint injury symptoms"}
+
+
+def test_bare_head_as_a_body_location_does_not_hint_general_medicine():
+    # Reported live: "i am feeling numb... where? in the head... having weakness"
+    # got a spurious General Medicine "head pain" card — but the patient never
+    # described a headache; "head" was their answer to WHERE the numbness was, a
+    # body location for a different symptom, not a pain complaint. Bare "head"
+    # alone must not imply "headache".
+    hinted = departments_hinted_by_patient_symptom_words(
+        "i am feeling numb in the head and having weakness", [], DEPARTMENTS, set()
+    )
+    assert "General Medicine" not in hinted
+    assert hinted == {"Neurology": "neurological symptoms"}
+
+
+def test_head_with_an_actual_pain_word_still_hints_general_medicine():
+    hinted = departments_hinted_by_patient_symptom_words("my head hurts", [], DEPARTMENTS, set())
+    assert "General Medicine" in hinted
 
 
 def test_dizziness_alone_hints_ent_only_not_neurology():

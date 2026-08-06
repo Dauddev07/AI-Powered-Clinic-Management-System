@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_role
 from app.core.db import get_db
 from app.models.appointment import Appointment
+from app.models.appointment_feedback import AppointmentFeedback
 from app.models.clinic import Clinic
+from app.models.department import Department
 from app.models.doctor import Doctor
 from app.models.slot import Slot
 from app.models.user import User
@@ -17,7 +19,10 @@ from app.schemas.admin_dashboard import (
     DailyAppointmentCountOut,
     DoctorAppointmentCountOut,
     SlotUtilizationOut,
+    TopRatedDoctorOut,
 )
+
+TOP_RATED_DOCTORS_LIMIT = 3
 
 router = APIRouter(prefix="/admin/dashboard", tags=["admin-dashboard"])
 
@@ -150,3 +155,69 @@ def get_appointments_trend(
         trend.append(DailyAppointmentCountOut(date=day, count=count))
 
     return trend
+
+
+@router.get("/top-rated-doctors", response_model=list[TopRatedDoctorOut])
+def get_top_rated_doctors(
+    current_user: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+) -> list[TopRatedDoctorOut]:
+    """Top 3 active doctors by average AppointmentFeedback rating (ties broken by
+    rating count, more ratings first) — always computed live from current rows,
+    never cached, so it moves the moment a new rating comes in. A doctor with zero
+    ratings can't appear at all (inner join on the rating subquery) — "top rated"
+    inherently requires at least one real rating to rank by. `visit_count` is this
+    doctor's all-time 'completed' appointment count (a visit that actually
+    happened), independent of and not filtered by the rating subquery.
+    """
+    clinic_id = current_user.clinic_id
+
+    rating_subq = (
+        select(
+            AppointmentFeedback.doctor_id.label("doctor_id"),
+            func.avg(AppointmentFeedback.rating).label("avg_rating"),
+            func.count(AppointmentFeedback.id).label("rating_count"),
+        )
+        .where(AppointmentFeedback.clinic_id == clinic_id)
+        .group_by(AppointmentFeedback.doctor_id)
+        .subquery()
+    )
+    visit_subq = (
+        select(
+            Appointment.doctor_id.label("doctor_id"),
+            func.count(Appointment.id).label("visit_count"),
+        )
+        .where(Appointment.clinic_id == clinic_id, Appointment.status == "completed")
+        .group_by(Appointment.doctor_id)
+        .subquery()
+    )
+
+    rows = db.execute(
+        select(
+            Doctor.id,
+            Doctor.full_name,
+            Department.name,
+            rating_subq.c.avg_rating,
+            rating_subq.c.rating_count,
+            func.coalesce(visit_subq.c.visit_count, 0),
+        )
+        .select_from(Doctor)
+        .join(rating_subq, rating_subq.c.doctor_id == Doctor.id)
+        .join(Department, Department.id == Doctor.department_id)
+        .outerjoin(visit_subq, visit_subq.c.doctor_id == Doctor.id)
+        .where(Doctor.clinic_id == clinic_id, Doctor.is_active.is_(True))
+        .order_by(rating_subq.c.avg_rating.desc(), rating_subq.c.rating_count.desc())
+        .limit(TOP_RATED_DOCTORS_LIMIT)
+    ).all()
+
+    return [
+        TopRatedDoctorOut(
+            doctor_id=str(doctor_id),
+            doctor_name=doctor_name,
+            department_name=department_name,
+            average_rating=round(float(avg_rating), 1),
+            rating_count=rating_count,
+            visit_count=visit_count,
+        )
+        for doctor_id, doctor_name, department_name, avg_rating, rating_count, visit_count in rows
+    ]
