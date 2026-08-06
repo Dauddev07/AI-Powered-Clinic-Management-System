@@ -163,6 +163,21 @@ def _heuristic_classify(message: str, history=None) -> str | None:
     if is_department_list_request(message):
         return GENERAL_INFO
 
+    # Rule 1.8 — the CURRENT message itself plainly describes a symptom. Reported
+    # live: General Medicine was resolved for dizziness/fainting, then small talk
+    # ("okay thank you" / "one more question"), then the assistant's own generic
+    # filler reply ("Sure, what would you like to know? ... doctors...") — its
+    # trailing "?" plus mentioning "doctors" tripped rule 2/3's booking-continuity
+    # heuristics (booking context was more recent than the last symptom turn), so
+    # "i am also having pain in my chest" — an unambiguous NEW symptom statement —
+    # was sent to appointment_agent instead of symptom_agent, skipping screening
+    # entirely. A message that itself plainly states a symptom must win regardless
+    # of what the immediately preceding turn's phrasing happened to look like.
+    # Checked after Rule 1 (an actual slot-pick card is still unambiguous — a
+    # reply to THAT is never itself a fresh symptom statement in practice).
+    if is_symptom_message(message):
+        return SYMPTOM_GENERAL
+
     # Rule 2 — screening continuity (item 5): a reply to a plain clarifying
     # question (not one of the markers above) stays with symptom_agent ONLY when
     # the most recent relevant context is still symptom-side, not booking-side.

@@ -374,6 +374,15 @@ def test_bare_reply_after_a_user_turn_not_assistant_still_behaves_as_small_talk(
         "there's a rash on my arm",
         "i have brain tumor",
         "i think i have cancer",
+        # Reported live: "i am also having skin related issues as well" — bare
+        # "skin" matched no keyword at all here, even though
+        # symptom_hints.SYMPTOM_DEPARTMENT_HINTS already treats it as a real
+        # symptom word, silently misrouting a genuinely new symptom to
+        # appointment_agent instead of symptom_agent (see router.py's Rule 1.8).
+        "i am also having skin related issues as well",
+        "i am having pain in my joints",
+        "i am having issue in chewing any solid thing",
+        "i am having pain in my jaw",
     ],
 )
 def test_symptom_messages_detected(message):

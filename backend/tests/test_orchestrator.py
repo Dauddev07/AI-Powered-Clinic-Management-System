@@ -230,6 +230,60 @@ def test_router_rule0_6_department_scope_question_overrides_screening_continuity
     assert _heuristic_classify("so what symptoms does dermatologist treats?", history) == GENERAL_INFO
 
 
+def test_router_rule1_8_a_new_symptom_statement_overrides_stale_booking_continuity():
+    # Reported live: General Medicine was resolved for dizziness/fainting, then
+    # small talk ("okay thank you" / "one more question"), then the assistant's
+    # own generic filler reply ("Sure, what would you like to know? ... doctors
+    # ...") — its trailing "?" plus mentioning "doctors" tripped rule 2/3's
+    # booking-continuity heuristics (the DOCTOR_OPTIONS_MARKER card was more
+    # recent than the last symptom-shaped user turn), sending "i am also having
+    # pain in my chest" — an unambiguous NEW symptom statement — to
+    # appointment_agent, which has no screening logic at all, skipping triage
+    # entirely.
+    history = [
+        _row("user", "i am feeling diziness today"),
+        _row("assistant", "How would you describe the dizziness — mild, occasional, or more severe?"),
+        _row("user", "its occasional and mild and i am also feeling faint"),
+        _row("assistant", "How long have you been feeling faint, and does it happen when you stand up quickly?"),
+        _row("user", "yes it happens when i stands up quickly, and been happening from 2 days"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + '{"department_name": "General Medicine"}'),
+        _row("user", "okay thank you"),
+        _row(
+            "assistant",
+            "You're welcome! If you'd like to book an appointment with one of the listed doctors, just let "
+            "me know which time works best for you. If you have any other questions, feel free to ask.",
+        ),
+        _row("user", "yes i have one more question"),
+        _row(
+            "assistant",
+            "Sure, what would you like to know? Feel free to ask about appointments, doctors, or anything "
+            "else you need help with.",
+        ),
+    ]
+    assert _heuristic_classify("i am also having pain in my chest", history) == SYMPTOM_GENERAL
+
+
+def test_router_rule1_8_new_symptom_after_a_confirmed_booking_still_overrides_continuity():
+    # Reported live: a Cardiology appointment was booked and confirmed
+    # (BOOKING_MARKER), then "i am also having skin related issues as well" went
+    # straight to a Dermatology card with zero screening. Root cause was two
+    # layers deep: bare "skin" wasn't in message_classifier._SYMPTOM_KEYWORDS at
+    # all (even though symptom_hints.py already treats it as real symptom
+    # vocabulary), so is_symptom_message returned False and Rule 1.8 above never
+    # got the chance to fire, falling through to booking-continuity instead.
+    history = [
+        _row("user", "i am having pain in my chest"),
+        _row("assistant", "Is the chest pain severe, bearable, or mild?"),
+        _row("user", "its mild and started today morning with no additional symptoms"),
+        _row("assistant", "Does the pain stay only in your chest, or does it radiate to your arm, jaw, or back?"),
+        _row("user", "it only in chest"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + '{"department_name": "Cardiology"}'),
+        _row("user", "Book with Dr. Farhan Malik at Sat, Aug 8 at 11:00 AM"),
+        _row("assistant", BOOKING_MARKER + '{"doctor_name": "Dr. Farhan Malik"}'),
+    ]
+    assert _heuristic_classify("i am also having skin related issues as well", history) == SYMPTOM_GENERAL
+
+
 def test_router_rule2_continuity_reply_to_screening_question_routes_back_to_symptom():
     # "very severe" has no symptom keyword of its own — only correct because the
     # conversation is still symptom-side (item 5 continuity).
@@ -1075,6 +1129,216 @@ def test_run_symptom_agent_first_message_backstop_applies_after_pure_small_talk(
 
     assert "severe" in result.lower()
     assert "how long" in result.lower()
+
+
+def test_run_symptom_agent_asks_before_a_new_symptom_category_introduced_later_in_the_conversation(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: after Orthopedics was correctly resolved for leg pain
+    # (screened with 2 real questions), "i am also having pain in my eyes as
+    # well" and then "...in my ear as well" both skipped straight to a
+    # department card with ZERO clarifying questions. This backstop previously,
+    # deliberately, only covered a session's first-ever symptom — a later,
+    # genuinely new symptom category was assumed to be reliably screened by the
+    # model's own judgment, which is exactly what failed here (twice in the same
+    # conversation). "ear" pain is PATH-2-eligible (unlike "eyes") — confirms
+    # this trigger fires regardless of PATH-2 status, unlike the first-message
+    # backstop above. Real Department rows are required here (unlike most tests
+    # in this file) — the new-category check resolves hints against real active
+    # department NAMES, so with none in the DB it would silently find nothing.
+    from app.models.department import Department
+
+    for name in ("Orthopedics", "Ophthalmology", "ENT"):
+        db.add(Department(clinic_id=clinic.id, name=name))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for a newly introduced symptom")
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row("user", "i am having pain in my leg"),
+        _row("assistant", "Could you tell me how severe this is and how long you've had it?"),
+        _row("user", "its mild and bearable and been since morning"),
+        _row("assistant", "Are you able to walk or put weight on the leg without increased pain or swelling?"),
+        _row("user", "no im not able to put weight on it"),
+        _row(
+            "assistant",
+            DOCTOR_OPTIONS_MARKER + json.dumps({"department_name": "Orthopedics", "note": "...", "doctors": []}),
+        ),
+    ]
+    eyes_result = symptom_agent.run_symptom_agent(
+        db, ctx, "i am also having pain in my eyes as well", "en", history
+    )
+    assert "severe" in eyes_result.lower()
+    assert "how long" in eyes_result.lower()
+
+    history_with_eyes = history + [
+        _row("user", "i am also having pain in my eyes as well"),
+        _row(
+            "assistant",
+            DOCTOR_OPTIONS_MARKER + json.dumps({"department_name": "Ophthalmology", "note": "...", "doctors": []}),
+        ),
+    ]
+    ear_result = symptom_agent.run_symptom_agent(
+        db, ctx, "i am also having pain in my ear as well", "en", history_with_eyes
+    )
+    assert "severe" in ear_result.lower()
+    assert "how long" in ear_result.lower()
+
+
+def test_run_symptom_agent_does_not_re_ask_for_the_same_symptom_category_being_screened(
+    monkeypatch, db, ctx, clinic
+):
+    # A follow-up message continuing the SAME symptom (a swelling/weight-bearing
+    # answer to the assistant's own screening question) must NOT be treated as a
+    # "new symptom category" just because the resolved DEPARTMENT changes
+    # (General Medicine -> Orthopedics) once the injury signal is present — that
+    # would re-ask instead of ever reaching a real card.
+    from app.models.department import Department
+
+    for name in ("Orthopedics", "General Medicine"):
+        db.add(Department(clinic_id=clinic.id, name=name))
+    db.flush()
+
+    card = json.dumps(
+        {"note": "Based on your leg injury, Orthopedics would be appropriate.", "department_name": "Orthopedics",
+         "doctors": [{"doctor_id": "d1", "doctor_name": "Dr. A", "specialization": None, "slots": []}]}
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: DOCTOR_OPTIONS_MARKER + card)
+
+    history = [
+        _row("user", "i am having pain in my leg"),
+        _row("assistant", "Could you tell me how severe this is and how long you've had it?"),
+        _row("user", "its mild and bearable and been since morning"),
+        _row("assistant", "Are you able to walk or put weight on the leg without increased pain or swelling?"),
+    ]
+    result = symptom_agent.run_symptom_agent(db, ctx, "no im not able to put weight on it", "en", history)
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+
+
+def test_run_symptom_agent_corrects_the_primary_department_when_it_contradicts_the_hint_table(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: "pain in my legs" -> screened (mild, since morning) ->
+    # explicitly denied swelling/difficulty bearing weight -> the model's OWN
+    # tool call still named Orthopedics ("...without swelling or difficulty
+    # bearing weight, Orthopedics can evaluate this"). Bare limb pain with no
+    # injury signal is General Medicine territory (see symptom_hints.py) — the
+    # model directly contradicted its own established rule. This reply DID call
+    # the real tool (a genuine DOCTOR_OPTIONS_MARKER card), so none of the
+    # non-marker recovery nets (diagnosis-guard, faked-payload, advice-dump,
+    # specialist-recommendation) could catch it — confirms the new primary-
+    # department correction does.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    gen_med = Department(clinic_id=clinic.id, name="General Medicine")
+    ortho = Department(clinic_id=clinic.id, name="Orthopedics")
+    db.add_all([gen_med, ortho])
+    db.flush()
+    gen_med_doctor = Doctor(
+        clinic_id=clinic.id, department_id=gen_med.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Ali Raza", is_active=True,
+    )
+    ortho_doctor = Doctor(
+        clinic_id=clinic.id, department_id=ortho.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Junaid Mirza", is_active=True,
+    )
+    db.add_all([gen_med_doctor, ortho_doctor])
+    db.flush()
+    db.add_all([
+        Slot(
+            clinic_id=clinic.id, doctor_id=gen_med_doctor.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ),
+        Slot(
+            clinic_id=clinic.id, doctor_id=ortho_doctor.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ),
+    ])
+    db.flush()
+
+    wrong_card = json.dumps(
+        {
+            "note": "Based on your mild leg pain without swelling or difficulty bearing weight, "
+            "Orthopedics can evaluate this.",
+            "department_name": "Orthopedics",
+            "doctors": [{"doctor_id": "d1", "doctor_name": "Dr. Junaid Mirza", "specialization": None, "slots": []}],
+        }
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: DOCTOR_OPTIONS_MARKER + wrong_card)
+
+    history = [
+        _row("user", "i am having pain in my legs"),
+        _row("assistant", "Could you tell me how severe this is and how long you've had it?"),
+        _row("user", "its mild and started since morning"),
+        _row("assistant", "Is there any swelling, redness, or difficulty bearing weight on the leg?"),
+    ]
+    result = symptom_agent.run_symptom_agent(db, ctx, "no there is no such symptoms", "en", history)
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "General Medicine"
+    assert payload["doctors"][0]["doctor_name"] == "Dr. Ali Raza"
+
+
+def test_run_symptom_agent_does_not_override_a_department_the_patient_explicitly_named(
+    monkeypatch, db, ctx, clinic
+):
+    # The correction above must NOT fire when the patient themselves asked for
+    # this department by name — that's a real, deliberate choice, not the model
+    # freehanding one.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    ortho = Department(clinic_id=clinic.id, name="Orthopedics")
+    db.add(ortho)
+    db.flush()
+    ortho_doctor = Doctor(
+        clinic_id=clinic.id, department_id=ortho.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Junaid Mirza", is_active=True,
+    )
+    db.add(ortho_doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=ortho_doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    card = json.dumps(
+        {
+            "note": "Sure, here is Orthopedics availability.",
+            "department_name": "Orthopedics",
+            "doctors": [{"doctor_id": "d1", "doctor_name": "Dr. Junaid Mirza", "specialization": None, "slots": []}],
+        }
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: DOCTOR_OPTIONS_MARKER + card)
+
+    history = [
+        _row("user", "i am having pain in my legs, no swelling or anything, mild, since morning"),
+        _row("assistant", "Could you tell me more, or would you like to see Orthopedics directly?"),
+    ]
+    result = symptom_agent.run_symptom_agent(db, ctx, "yes please show me Orthopedics availability", "en", history)
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "Orthopedics"
 
 
 def test_run_symptom_agent_recovers_a_real_department_when_the_model_advice_dumps_instead_of_routing(

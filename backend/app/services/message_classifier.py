@@ -152,6 +152,44 @@ _SYMPTOM_KEYWORDS = frozenset({
     # concise department-card path, producing a long free-text breakdown (doctor
     # schedule + booking mechanics + reschedule policy) instead of a short redirect.
     "tumor", "tumour", "cancer", "diabetes", "diabetic",
+    # Reported live: "i am also having skin related issues as well" — bare "skin"
+    # matched no keyword here at all, so is_symptom_message returned False and
+    # router.py's Rule 1.8 (a message that itself plainly states a symptom must
+    # override stale booking continuity) never fired, silently misrouting a
+    # genuinely new symptom to appointment_agent (no screening logic at all)
+    # instead of symptom_agent. This exposed a much larger, systemic gap: this
+    # list and symptom_hints.SYMPTOM_DEPARTMENT_HINTS (the department-hinting
+    # table) had drifted apart — 119 words that table already treats as real
+    # symptom vocabulary were never added here. Synced in one pass rather than
+    # patching one word at a time as each is separately reported. Deliberately
+    # EXCLUDES a handful of symptom_hints.py words that only mean something
+    # combined with another word there (co-occurrence-gated), not standalone:
+    # "weight" (bare "weight" is not itself symptom-indicative — see
+    # _LIMB_JOINT_INJURY_SIGNAL_WORDS' own docstring), the low-mood persistence
+    # words ("days", "weeks", "always", "lately", "chronic", "chronically",
+    # "constantly", "ongoing", "persistent", "persistently" — pure duration
+    # modifiers with zero symptom meaning alone), and "hearing"/"vision"/"mental"
+    # (too ambiguous standalone in everyday English — "I'm hearing good things",
+    # "my vision for this project", "that's mental!" — a false positive here has
+    # a real cost now that Rule 1.8 depends on it, unlike this function's
+    # original lower-stakes KB-routing use).
+    "abdomen", "abdominal", "acne", "ankle", "anxiety", "arm", "arms", "asthma",
+    "back", "boil", "boils", "bone", "brain", "breathing", "bruising", "calf",
+    "cardiac", "chest", "chew", "chewing", "crying", "dental", "depressed",
+    "depression", "digestive", "ear", "eczema", "elbow", "elbows", "eye", "eyes",
+    "fell", "groin", "hand", "hands", "headaches", "heart", "hip", "hips",
+    "hives", "hoarse", "hoarseness", "hopeless", "hopelessness", "hurting",
+    "hypertension", "insomnia", "jaw", "joint", "joints", "kidney", "kidneys",
+    "knee", "leg", "legs", "lightheaded", "lightheadedness", "lung", "malaise",
+    "menstrual", "menstruation", "migraines", "mole", "moles", "nasal", "nose",
+    "panic", "paralysis", "paralyzed", "pelvic", "period", "periods", "pimple",
+    "pimples", "pregnancy", "pregnant", "redness", "respiratory", "sad",
+    "sadness", "scrotal", "scrotum", "seizure", "seizures", "shoulder",
+    "shoulders", "sinus", "sinusitis", "skin", "spine", "stomach", "stress",
+    "stressed", "sugar", "teeth", "teeths", "testicle", "testicles",
+    "testicular", "testies", "thigh", "thirst", "thirsty", "throat", "tooth",
+    "tremor", "tremors", "urinary", "urinate", "urinating", "urination",
+    "urine", "vaginal", "vertigo", "wart", "warts", "wrist", "wrists",
 })
 
 # Deliberately broad and erring toward false positives (routing more things to

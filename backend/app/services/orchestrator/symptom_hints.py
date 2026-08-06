@@ -232,7 +232,13 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
 # allergic reaction, edema can all cause it) — "swelling"/"swollen" were removed
 # from this set for that reason. Orthopedics now requires an actual injury/trauma
 # word; plain swelling with nothing else falls back to General Medicine, same as
-# any other bare limb symptom.
+# any other bare limb symptom. Reported live (5th report): "swelling as well and
+# i cant put weight on it" still only got General Medicine — "weight" (as in
+# "can't put weight on it" / "can't bear weight") was never in this set at all,
+# even though difficulty bearing weight is one of the strongest, most
+# unambiguous orthopedic red flags there is. Added here; only fires alongside a
+# limb/joint word already (same co-occurrence gate as every other word in this
+# set), so the false-positive surface stays narrow.
 _LIMB_JOINT_WORDS = frozenset({
     "leg", "legs", "knee", "ankle", "thigh", "calf",
     "back", "backache", "spine", "shoulder", "shoulders", "arm", "arms",
@@ -240,7 +246,7 @@ _LIMB_JOINT_WORDS = frozenset({
 })
 _LIMB_JOINT_INJURY_SIGNAL_WORDS = frozenset({
     "redness", "bruising", "bruised", "twisted", "injury", "injured", "fell",
-    "stiff", "stiffness",
+    "stiff", "stiffness", "weight",
 })
 
 # Companion to the "low mood" table entry above: passing mood adjectives ("sad",

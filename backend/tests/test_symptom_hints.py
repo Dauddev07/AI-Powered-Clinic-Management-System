@@ -152,6 +152,17 @@ def test_swelling_with_a_real_injury_word_still_hints_orthopedics():
     assert "Orthopedics" in hinted
 
 
+def test_inability_to_bear_weight_hints_orthopedics_only():
+    # Reported live: "swelling as well and i cant put weight on it" still only got
+    # General Medicine — difficulty bearing weight is one of the strongest,
+    # most unambiguous orthopedic red flags there is, but "weight" wasn't a
+    # tracked injury-signal word at all.
+    hinted = departments_hinted_by_patient_symptom_words(
+        "there is swelling as well and i cant put weight on it, pain in my leg", [], DEPARTMENTS, set()
+    )
+    assert hinted == {"Orthopedics": "limb/joint injury symptoms"}
+
+
 def test_limb_pain_does_not_add_a_redundant_general_medicine_card_when_orthopedics_already_covers_it():
     # Reported live: a patient described hand swelling + chest pain. The LLM's own
     # tool call already (correctly) produced an Orthopedics card for the hand, but

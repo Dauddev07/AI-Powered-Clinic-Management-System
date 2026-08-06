@@ -114,6 +114,30 @@ def _no_symptom_described_yet(history: list[ConversationMemory]) -> bool:
     )
 
 
+# Reported live: after Orthopedics was correctly resolved for leg pain (screened
+# with 2 real questions), "i am also having pain in my eyes as well" and then
+# "...in my ear as well" both skipped straight to a department card with ZERO
+# clarifying questions — the PATH-3 backstop above deliberately only covers a
+# session's FIRST-EVER symptom (see its own docstring: "a symptom raised for the
+# first time LATER in an ongoing conversation is intentionally NOT covered here
+# — the model's own MULTIPLE DISTINCT SYMPTOMS handling already has real
+# conversation context to reason from"). That assumption is exactly what failed
+# here — same "prompt instruction alone isn't reliable" lesson as every other
+# backstop in this file, just for a case this file's own comments had previously
+# argued didn't need one. Detects a genuinely NEW, not-yet-discussed symptom
+# category (not just more detail about the one already being screened) by
+# comparing what the CURRENT MESSAGE ALONE hints (history=[], so escalation
+# words like "weight" that only mean something combined with an EARLIER turn's
+# anatomy word correctly hint nothing by themselves) against what PRIOR history
+# alone already hinted — anything in the former but not the latter is new.
+def _introduces_a_new_symptom_category(
+    message: str, history: list[ConversationMemory], department_names: list[str]
+) -> bool:
+    prior_hints = set(departments_hinted_by_patient_symptom_words("", history, department_names, set()))
+    message_alone_hints = set(departments_hinted_by_patient_symptom_words(message, [], department_names, set()))
+    return bool(message_alone_hints - prior_hints)
+
+
 # Reported live: "pain in my chest and in testies as well" (mild, bearable, 2 days)
 # got a reply that never actually called get_department_availability — the model
 # free-texted a recommendation paragraph, then hand-typed a fragment that MIMICS the
@@ -171,6 +195,19 @@ _SPECIALIST_TITLE_RE = re.compile(r"\b(?:" + "|".join(_SPECIALIST_TITLE_WORDS) +
 
 def _recommends_a_specialist_in_free_text(reply: str) -> bool:
     return bool(_SPECIALIST_TITLE_RE.search(reply))
+
+
+def _patient_named_this_department(department_name: str, message: str, history: list[ConversationMemory]) -> bool:
+    """True when the patient themselves (never the assistant) said this
+    department's name somewhere in the conversation — used to tell "the patient
+    explicitly asked for this department" apart from "the model picked this
+    department on its own," since only the latter should ever get overridden by
+    the hint table below."""
+    patient_texts = [message] + [
+        getattr(row, "content", "") or "" for row in history if getattr(row, "role", None) == "user"
+    ]
+    combined = " ".join(patient_texts).lower()
+    return department_name.lower() in combined
 
 
 def _build_system_prompt(language_name: str, department_names: list[str], include_path2: bool) -> str:
@@ -272,24 +309,37 @@ def run_symptom_agent(
     # calling out this exact shape of message as the most common way the rule gets
     # broken. A prompt instruction alone was not a reliable enough guarantee for
     # this correctness-critical step, same conclusion reached for every other
-    # deterministic backstop in this file — so the highest-confidence case (a
-    # symptom mentioned for the very first time in a brand new session) is now
-    # enforced in code instead of hoped for. Deliberately narrow in scope: only
-    # fires when history is completely empty (this really is message #1), PATH 2
-    # doesn't already apply (that path already reliably asks first), the patient
-    # hasn't already given duration+severity together (PATH 3's own stated
-    # exception — genuine clarification already present, not a quota), and this
-    # isn't itself a recommendation request (handled separately above). A symptom
-    # raised for the first time LATER in an ongoing conversation is intentionally
-    # NOT covered here — the model's own MULTIPLE DISTINCT SYMPTOMS handling
-    # already has real conversation context to reason from in that case, which a
-    # brand new session has none of.
+    # deterministic backstop in this file. Two independent triggers, both gated by
+    # the same three universal exceptions (a recommendation request, duration+
+    # severity already given, a self-diagnosis claim):
+    #   1. The session's first-ever symptom (_no_symptom_described_yet) — kept
+    #      scoped to `not include_path2` since PATH 2 already reliably asks its
+    #      own first question in THIS specific case.
+    #   2. A genuinely NEW symptom category introduced LATER in an ongoing
+    #      conversation (_introduces_a_new_symptom_category) — this one was
+    #      PREVIOUSLY, deliberately excluded (the model's own "MULTIPLE DISTINCT
+    #      SYMPTOMS" handling was assumed to reliably screen it, same as PATH 2
+    #      above). Reported live: after Orthopedics was correctly resolved for leg
+    #      pain, "i am also having pain in my eyes as well" and then "...in my
+    #      ear as well" both skipped straight to a card with zero questions — that
+    #      assumption failed too, so this trigger deliberately does NOT check
+    #      `include_path2` at all (one of the two live-failing messages was
+    #      itself PATH-2-eligible, so that guard wouldn't have helped anyway).
+    no_symptom_yet = _no_symptom_described_yet(history)
     if (
-        not include_path2
-        and _no_symptom_described_yet(history)
-        and not is_department_recommendation_request(message)
+        not is_department_recommendation_request(message)
         and not _message_already_gives_duration_and_severity(message)
         and not _is_self_diagnosis_claim(message)
+        and (
+            (not include_path2 and no_symptom_yet)
+            # Guarded by `not no_symptom_yet` so this stays mutually exclusive
+            # with trigger 1 above — without it, a brand-new session's FIRST
+            # symptom would always "introduce a new category" too (nothing in
+            # empty prior history to diff against), silently reapplying this
+            # trigger to PATH-2-eligible first messages trigger 1 deliberately
+            # exempts.
+            or (not no_symptom_yet and _introduces_a_new_symptom_category(message, history, department_names))
+        )
     ):
         return (
             "Could you tell me how severe this is (mild, moderate, or severe) and how "
@@ -344,6 +394,44 @@ def run_symptom_agent(
         payload = json.loads(reply[len(DOCTOR_OPTIONS_MARKER):])
         covered_department = payload.get("department_name")
         original_note = payload.get("note")
+
+        # Reported live: "pain in my legs" -> screened (mild, since morning) ->
+        # explicitly denied swelling/difficulty bearing weight -> the model's OWN
+        # tool call still named Orthopedics ("...without swelling or difficulty
+        # bearing weight, Orthopedics can evaluate this") — a direct contradiction
+        # of this exact symptom shape's own established rule (bare limb pain, no
+        # injury signal, is General Medicine territory; see the limb/joint if/else
+        # in symptom_hints.py). Every recovery net above only intercepts replies
+        # that DON'T call the tool — this one did call it, just with the wrong
+        # department, so none of them caught it. When the hint table has a
+        # confident answer for what the patient actually said and the model's own
+        # chosen department isn't even IN that answer, the deterministic table
+        # wins: the primary card is rebuilt against the hinted department instead.
+        # Skipped when the PATIENT themselves asked for this department by name
+        # (see _patient_named_this_department) — that's a real, deliberate patient
+        # choice, not the model freehanding one.
+        hinted_for_primary = departments_hinted_by_patient_symptom_words(message, history, department_names, set())
+        if (
+            hinted_for_primary
+            and covered_department not in hinted_for_primary
+            and not _patient_named_this_department(covered_department, message, history)
+        ):
+            corrected_department, corrected_label = next(iter(hinted_for_primary.items()))
+            reply = _get_department_availability_impl(
+                db, ctx, corrected_department,
+                note=f"Based on the {corrected_label} described, {corrected_department} would be appropriate.",
+            )
+            # The corrected department might have no open slots at all (a real,
+            # different outcome shape — NO_SLOTS_MARKER, not DOCTOR_OPTIONS_MARKER)
+            # — the "missing"/extra-department logic below only applies to the
+            # doctor-options shape, so this returns as-is rather than crashing on
+            # a payload that was never produced.
+            if not reply.startswith(DOCTOR_OPTIONS_MARKER):
+                return reply
+            payload = json.loads(reply[len(DOCTOR_OPTIONS_MARKER):])
+            covered_department = payload.get("department_name")
+            original_note = payload.get("note")
+
         missing = _departments_named_in_note_but_not_covered(original_note, department_names, covered_department)
         # The model's own note already explains both departments by name in one
         # sentence (that's how this list was found) — reuse it verbatim rather than
