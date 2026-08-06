@@ -133,6 +133,59 @@ def test_limb_pain_with_injury_signal_and_unrelated_symptom_still_includes_gener
     assert hinted == {"Orthopedics": "limb/joint injury symptoms", "General Medicine": "fever/body aches"}
 
 
+def test_bare_neck_pain_hints_orthopedics():
+    # Reported live (1st report): "i am having pain in my neck" got no department
+    # hint at all — "neck" wasn't in _LIMB_JOINT_WORDS, so the whole limb/joint
+    # co-occurrence branch never fired for it, leaving the LLM to free-text ask
+    # the patient to pick a specialist themselves instead of showing a routed
+    # card. Neck was first added to the conditional bare-anatomy bucket
+    # (General Medicine default, like leg/arm), but reported live again (2nd
+    # report): a patient's neck pain got mislabeled "limb/joint pain" and routed
+    # to General Medicine when the expected department was Orthopedics — the
+    # neck is a spine/joint region, not a generic limb, so like "joint" itself
+    # it hints Orthopedics unconditionally, no injury signal required.
+    hinted = departments_hinted_by_patient_symptom_words(
+        "i am having pain in my neck", [], DEPARTMENTS, set()
+    )
+    assert hinted == {"Orthopedics": "neck/joint pain"}
+
+
+def test_neck_pain_with_injury_signal_still_hints_orthopedics_only():
+    hinted = departments_hinted_by_patient_symptom_words(
+        "i twisted my neck and it hurts", [], DEPARTMENTS, set()
+    )
+    assert hinted == {"Orthopedics": "neck/joint pain"}
+
+
+def test_neck_pain_with_numbness_hints_neurology_only_not_orthopedics():
+    # Reported live (3rd report): "pain in my neck and i am feeling numb" got
+    # BOTH a Neurology card (correct, from numbness) and a redundant Orthopedics
+    # card for the same neck pain — same case, not two. Numbness alongside neck
+    # pain points to a neurological cause, so Orthopedics must not also fire.
+    hinted = departments_hinted_by_patient_symptom_words(
+        "i am having pain in my neck and i am feeling numb", [], DEPARTMENTS, set()
+    )
+    assert hinted == {"Neurology": "neurological symptoms"}
+
+
+def test_neck_pain_with_weakness_hints_neurology_only_not_orthopedics():
+    hinted = departments_hinted_by_patient_symptom_words(
+        "my neck hurts and i have some weakness", [], DEPARTMENTS, set()
+    )
+    assert hinted == {"Neurology": "neurological symptoms"}
+
+
+def test_neck_and_eye_pain_still_hints_both_orthopedics_and_ophthalmology():
+    # No neurological signal present here — confirms the suppression above is
+    # specific to numbness/weakness/tremor/paralysis, not to "neck co-occurring
+    # with any other symptom" in general.
+    hinted = departments_hinted_by_patient_symptom_words(
+        "i am having pain in my neck and also have pain in my eyes as well",
+        [], DEPARTMENTS, set(),
+    )
+    assert hinted == {"Orthopedics": "neck/joint pain", "Ophthalmology": "eye symptoms"}
+
+
 def test_plain_swelling_alone_does_not_hint_orthopedics():
     # Reported live: "swelling on hand" alone still routed to Orthopedics, but
     # plain swelling isn't specific to injury (infection, allergic reaction, edema

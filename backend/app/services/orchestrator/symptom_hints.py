@@ -80,6 +80,9 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
     # table entry here — it needs an if/else, not an OR-only keyword match. See
     # _LIMB_JOINT_WORDS + _LIMB_JOINT_INJURY_SIGNAL_WORDS and the branch in
     # departments_hinted_by_patient_symptom_words below for why and how.
+    # NOTE: "neck"/"necks" is ALSO deliberately NOT here (unlike "joint" above),
+    # for the same reason — see _NECK_NEUROLOGICAL_SIGNAL_WORDS and the branch
+    # below for why and how.
     # NOTE: bare "head" is deliberately NOT in this entry — see
     # _GENERIC_PAIN_WORDS and the co-occurrence branch below for why and how.
     (
@@ -244,6 +247,11 @@ _LIMB_JOINT_WORDS = frozenset({
     "back", "backache", "spine", "shoulder", "shoulders", "arm", "arms",
     "hand", "hands", "hip", "hips", "wrist", "wrists", "elbow", "elbows",
 })
+# "neck"/"necks" deliberately NOT in this set — it gets its own dedicated
+# co-occurrence branch below (_NECK_NEUROLOGICAL_SIGNAL_WORDS) rather than
+# folding into this General-Medicine-by-default bucket, since a real injury
+# signal isn't the thing that should redirect it: numbness/weakness alongside
+# neck pain means Neurology, not Orthopedics, regardless of any injury word.
 _LIMB_JOINT_INJURY_SIGNAL_WORDS = frozenset({
     "redness", "bruising", "bruised", "twisted", "injury", "injured", "fell",
     "stiff", "stiffness", "weight",
@@ -277,6 +285,18 @@ _LOW_MOOD_PERSISTENCE_WORDS = frozenset({
 # pain word; "headache"/"migraine" already inherently mean pain and stay
 # unconditional in the table entry above.
 _GENERIC_PAIN_WORDS = frozenset({"pain", "ache", "aches", "aching", "hurt", "hurts", "hurting", "sore"})
+
+# Reported live: "pain in my neck and i am feeling numb" got TWO cards —
+# Neurology (correctly, from the numbness/weakness table entry above) AND a
+# second Orthopedics card for the same neck pain. Same complaint, not two —
+# numbness/weakness alongside neck pain is a neurological presentation (possible
+# nerve involvement), not a separate orthopedic one, so Orthopedics must not
+# also fire here. Mirrors the same words as the numbness/weakness table entry
+# above (kept as a separate constant, not a shared import, since the two lists
+# serve different roles: one is a positive trigger, this one is a suppressor).
+_NECK_NEUROLOGICAL_SIGNAL_WORDS = frozenset({
+    "numbness", "numb", "weakness", "tremor", "tremors", "paralysis", "paralyzed",
+})
 
 
 def departments_hinted_by_patient_symptom_words(
@@ -327,6 +347,8 @@ def departments_hinted_by_patient_symptom_words(
     if "head" in words and words & _GENERIC_PAIN_WORDS:
         for hint in ("general medicine", "internal medicine", "family medicine"):
             hinted_substrings.setdefault(hint, "head pain")
+    if words & {"neck", "necks"} and not (words & _NECK_NEUROLOGICAL_SIGNAL_WORDS):
+        hinted_substrings.setdefault("ortho", "neck/joint pain")
     if not hinted_substrings:
         return {}
     # Anchored to the START of a word only (not "anywhere inside one") — e.g. the

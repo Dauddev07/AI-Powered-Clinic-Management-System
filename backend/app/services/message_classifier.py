@@ -181,7 +181,8 @@ _SYMPTOM_KEYWORDS = frozenset({
     "hives", "hoarse", "hoarseness", "hopeless", "hopelessness", "hurting",
     "hypertension", "insomnia", "jaw", "joint", "joints", "kidney", "kidneys",
     "knee", "leg", "legs", "lightheaded", "lightheadedness", "lung", "malaise",
-    "menstrual", "menstruation", "migraines", "mole", "moles", "nasal", "nose",
+    "menstrual", "menstruation", "migraines", "mole", "moles", "nasal", "neck",
+    "necks", "nose",
     "panic", "paralysis", "paralyzed", "pelvic", "period", "periods", "pimple",
     "pimples", "pregnancy", "pregnant", "redness", "respiratory", "sad",
     "sadness", "scrotal", "scrotum", "seizure", "seizures", "shoulder",
@@ -225,7 +226,7 @@ _PATH2_SYMPTOM_PHRASES = (
 # that mentions "pain" as its own word AND names one of these body parts, in either
 # order and with words in between, still needs PATH 2's screening question.
 _PATH2_PAIN_BODY_PARTS = frozenset({
-    "stomach", "abdominal", "abdomen", "chest", "head", "back", "ear", "tooth", "teeth",
+    "stomach", "abdominal", "abdomen", "chest", "head", "back", "ear", "tooth", "teeth", "neck",
 })
 
 # The one exception that skips PATH 2's screening question entirely (see

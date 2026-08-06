@@ -1,10 +1,75 @@
-import { Fragment, useEffect } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { fetchPublicTopRatedDoctors } from "../api/clinics";
 import { useAuth } from "../auth/AuthContext";
 import Logo from "../components/Logo";
+import StarIcon from "../components/StarIcon";
 import { useReveal, revealDelayClass } from "../hooks/useReveal";
 import { DEPARTMENTS } from "./landingDepartments";
 import styles from "./Landing.module.css";
+
+// Rank-badge tone per position — gold/silver/bronze is the universal "top 3"
+// convention, so it reads at a glance without needing the "#1/#2/#3" label to
+// do all the work on its own. Mirrors AdminHome's own top-rated-doctors card.
+const RANK_TONES = ["gold", "silver", "bronze"];
+
+function getInitials(fullName) {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0][0] || "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] || "" : "";
+  return (first + last).toUpperCase();
+}
+
+function DoctorStars({ rating }) {
+  const rounded = Math.round(rating);
+  return (
+    <span className={styles.doctorStars} aria-label={`${rating} out of 5 stars`}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <StarIcon
+          key={n}
+          filled={rounded >= n}
+          size={15}
+          className={rounded >= n ? styles.starFilled : styles.starEmpty}
+        />
+      ))}
+    </span>
+  );
+}
+
+function TopRatedDoctorCard({ doctor, rank }) {
+  const tone = RANK_TONES[rank] || "bronze";
+  return (
+    <div className={`${styles.doctorCard} ${styles[`doctorCard_${tone}`]}`}>
+      <span className={`${styles.rankBadge} ${styles[`rankBadge_${tone}`]}`}>#{rank + 1}</span>
+      <div className={styles.doctorCardHeader}>
+        <span className={styles.doctorAvatar} aria-hidden="true">
+          {getInitials(doctor.doctor_name)}
+        </span>
+        <div className={styles.doctorCardHeaderText}>
+          <div className={styles.doctorName}>{doctor.doctor_name}</div>
+          <div className={styles.doctorDepartment}>{doctor.department_name}</div>
+        </div>
+      </div>
+      <div className={styles.doctorRatingRow}>
+        <DoctorStars rating={doctor.average_rating} />
+        <span className={styles.doctorRatingValue}>{doctor.average_rating.toFixed(1)}</span>
+      </div>
+      <div className={styles.doctorStatRow}>
+        <div className={styles.doctorStat}>
+          <span className={styles.doctorStatValue}>{doctor.rating_count}</span>
+          <span className={styles.doctorStatLabel}>{doctor.rating_count === 1 ? "rating" : "ratings"}</span>
+        </div>
+        <div className={styles.doctorStatDivider} aria-hidden="true" />
+        <div className={styles.doctorStat}>
+          <span className={styles.doctorStatValue}>{doctor.visit_count}</span>
+          <span className={styles.doctorStatLabel}>{doctor.visit_count === 1 ? "visit" : "visits"}</span>
+        </div>
+      </div>
+      <div className={styles.doctorClinic}>{doctor.clinic_name}</div>
+    </div>
+  );
+}
 
 const WHY_CARDS = [
   {
@@ -60,6 +125,7 @@ export default function Landing() {
   const { isAuthenticated, user } = useAuth();
   const location = useLocation();
   const register = useReveal();
+  const [topRatedDoctors, setTopRatedDoctors] = useState(null);
 
   // Client-side route changes don't trigger the browser's native hash-scroll,
   // so a cross-page nav link (e.g. from the footer) landing here with a hash
@@ -69,6 +135,25 @@ export default function Landing() {
     const el = document.querySelector(location.hash);
     if (el) el.scrollIntoView({ behavior: "smooth" });
   }, [location.hash]);
+
+  // Public, unauthenticated, cross-clinic — always live, so a new rating
+  // anywhere can move this list before the visitor's next reload. No error
+  // state surfaced here: a failed fetch (or genuinely zero ratings yet) just
+  // means the section quietly doesn't render, same as an empty array does —
+  // this is a marketing page, not a dashboard that owes the visitor a status.
+  useEffect(() => {
+    let cancelled = false;
+    fetchPublicTopRatedDoctors()
+      .then((data) => {
+        if (!cancelled) setTopRatedDoctors(data);
+      })
+      .catch(() => {
+        if (!cancelled) setTopRatedDoctors([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className={styles.page}>
@@ -167,6 +252,28 @@ export default function Landing() {
           </div>
         </section>
       </div>
+
+      {topRatedDoctors && topRatedDoctors.length > 0 && (
+        <div className={styles.bandCard}>
+          <section className={styles.section} aria-labelledby="top-rated-heading">
+            <span className={`${styles.eyebrow} reveal`} ref={register}>Trusted by patients</span>
+            <h2 id="top-rated-heading" className={`${styles.sectionTitle} reveal`} ref={register}>
+              Our top rated doctors
+            </h2>
+            <div className={styles.doctorGrid}>
+              {topRatedDoctors.map((doctor, i) => (
+                <div
+                  key={doctor.doctor_id}
+                  className={`reveal ${revealDelayClass(i)}`}
+                  ref={register}
+                >
+                  <TopRatedDoctorCard doctor={doctor} rank={i} />
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
 
       <div className={styles.bandCard}>
         <section className={styles.section} aria-labelledby="why-us-heading">
