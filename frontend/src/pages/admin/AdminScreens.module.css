@@ -512,6 +512,11 @@
     width: 100%;
   }
   .table tbody tr {
+    /* Same fix as PatientScreens.module.css's identical rule: width: 100%
+       above is content-box (no box-sizing set here, no universal reset in
+       this codebase), so the padding + border below were being added ON TOP
+       of that 100%, rendering each row wider than its container. */
+    box-sizing: border-box;
     border: 1px solid var(--app-border);
     border-radius: 8px;
     margin-bottom: 0.75rem;

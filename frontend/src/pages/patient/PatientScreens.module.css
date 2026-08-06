@@ -386,6 +386,12 @@
     width: 100%;
   }
   .table tbody tr {
+    /* Reported live: the card's border/rounded corner extended past its own
+       right edge on narrow screens — width: 100% above is a content-box width
+       (no box-sizing set here, and this codebase has no universal box-sizing
+       reset), so the padding + border below were being added ON TOP of that
+       100%, rendering each row wider than its container instead of within it. */
+    box-sizing: border-box;
     border: 1px solid var(--app-border);
     border-radius: 8px;
     margin-bottom: 0.75rem;

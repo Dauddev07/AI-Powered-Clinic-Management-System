@@ -1,4 +1,5 @@
 .toggleBtn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -7,22 +8,19 @@
   height: 2.25rem;
   padding: 0;
   border-radius: 999px;
-  background: none;
-  border: 1px solid transparent;
-  color: var(--app-accent);
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
   cursor: pointer;
-  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease, transform 180ms ease;
+  overflow: visible;
+  transition: border-color 220ms ease, transform 180ms ease, box-shadow 220ms ease;
 }
 
 .toggleBtn:hover {
-  background: var(--app-accent-bg);
-  border-color: var(--app-border);
-  color: var(--app-accent-hover);
-  transform: translateY(-1px);
+  transform: translateY(-1px) scale(1.05);
 }
 
 .toggleBtn:active {
-  transform: translateY(0) scale(0.92);
+  transform: translateY(0) scale(0.9);
 }
 
 .toggleBtn:focus-visible {
@@ -30,21 +28,65 @@
   outline-offset: 2px;
 }
 
+/* Soft color-matched halo, blurred behind the icon — invisible at rest, eases
+   in on hover/focus so the button reads as "lit up" rather than a flat flip.
+   Color comes from each state's own variant below, not the app accent, since
+   the point is to feel like sunlight/moonlight, distinct from the rest of the
+   header's uniform accent-green icon language. */
+.glowRing {
+  position: absolute;
+  inset: -6px;
+  border-radius: inherit;
+  background: var(--toggle-glow);
+  filter: blur(7px);
+  opacity: 0;
+  transition: opacity 260ms ease;
+  pointer-events: none;
+}
+
+.toggleBtn:hover .glowRing,
+.toggleBtn:focus-visible .glowRing {
+  opacity: 0.55;
+}
+
+.toggleBtn_sun {
+  --toggle-glow: radial-gradient(circle, #ffcf5c 0%, transparent 72%);
+  border-color: color-mix(in srgb, #ffcf5c 35%, var(--app-border));
+}
+
+.toggleBtn_sun:hover {
+  border-color: #ffcf5c;
+  box-shadow: 0 2px 10px color-mix(in srgb, #ff9d3d 30%, transparent);
+}
+
+.toggleBtn_moon {
+  --toggle-glow: radial-gradient(circle, #8f9cf0 0%, transparent 72%);
+  border-color: color-mix(in srgb, #8f9cf0 35%, var(--app-border));
+}
+
+.toggleBtn_moon:hover {
+  border-color: #8f9cf0;
+  box-shadow: 0 2px 10px color-mix(in srgb, #4c56b8 30%, transparent);
+}
+
 .iconWrap {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 /* Plays once whenever the icon swaps (sun <-> moon) — a quarter-turn-and-settle
-   read as "the light just changed," not a bare instant swap. */
+   with a little overshoot reads as "the light just changed," not a bare
+   instant swap. */
 .iconSpin {
-  animation: theme-icon-swap 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: theme-icon-swap 480ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 @keyframes theme-icon-swap {
   from {
-    transform: rotate(-90deg) scale(0.5);
+    transform: rotate(-100deg) scale(0.4);
     opacity: 0;
   }
   to {
@@ -53,8 +95,25 @@
   }
 }
 
+/* Gentle idle breathing glow so the button doesn't sit completely inert
+   between interactions — subtle enough not to compete for attention next to
+   the header's other (static) icons. */
+.toggleBtn_sun .iconWrap {
+  animation: sun-breathe 3.4s ease-in-out infinite;
+}
+
+@keyframes sun-breathe {
+  0%, 100% {
+    filter: drop-shadow(0 0 0 transparent);
+  }
+  50% {
+    filter: drop-shadow(0 0 3px color-mix(in srgb, #ffcf5c 55%, transparent));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .iconSpin {
+  .iconSpin,
+  .toggleBtn_sun .iconWrap {
     animation: none;
   }
 }

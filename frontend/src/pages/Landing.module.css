@@ -3,6 +3,7 @@
 }
 
 .hero {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -14,18 +15,24 @@
      AppHeader so this stays correct if the header's own height ever changes. */
   min-height: calc(100vh - var(--app-header-height, 4.25rem));
   min-height: calc(100dvh - var(--app-header-height, 4.25rem));
-  /* var(--app-bg-page) is already the effective color here via .page's
-     background — set explicitly (same value, unchanged) so it's a real
-     fallback layer if the image below fails to load, not just an accident
-     of inheritance. This whole background is DARK-THEME ONLY — hero-bg.jpg is
-     a fixed photo authored against a dark backdrop with light, low-contrast
-     linework that has no legible "lightened" version; light theme overrides
-     this entire block below with a gradient instead of trying to recolor the
-     photo (which read as "light mode doesn't actually apply here" — reported
-     live). Dark theme's own text/accent colors need no special-casing at all:
-     they're already what the global --app-* tokens resolve to in dark theme,
-     the exact values this photo was designed against. */
+  /* Fallback layer if the image (on .heroBg below) fails to load — this
+     element itself has no background image of its own. */
   background-color: var(--app-bg-page);
+  overflow: hidden;
+}
+
+/* The photo lives on its own absolutely-positioned layer BEHIND .content
+   (never directly on .hero) specifically so the light-theme filter below can
+   target the image alone — filter is a whole-subtree effect in CSS, so
+   putting it directly on .hero would ALSO invert every child (headline,
+   Logo, tagline, the Back-to-Dashboard button), which already have their own
+   correct light-theme colors and would come out double-inverted/broken.
+   z-index: 0 sits below .content's implicit stacking (a flex child with no
+   z-index of its own still paints after this, since it comes later in DOM
+   order) — no z-index needed on .content itself. */
+.heroBg {
+  position: absolute;
+  inset: 0;
   background-image: url("../assets/hero-bg.jpg");
   background-size: cover;
   /* The image's focal point (the heart/EKG motif) sits at roughly 25% across
@@ -36,26 +43,29 @@
      not just as a default. */
   background-position: 25% 45%;
   background-repeat: no-repeat;
+  z-index: 0;
+  /* Smoothly animates the light-theme filter below on toggle, instead of a
+     hard jump. */
+  transition: filter 320ms ease;
 }
 
-/* Light theme: no photo (see the dark-theme comment above for why), just the
-   same soft accent-tinted radial gradient already used on Login/Register —
-   keeps the hero on-brand and consistent with the rest of the light theme
-   instead of a bare flat fill, without trying to fake-relight a fixed dark
-   photo. Every child element (headline, description, Logo, tagline, the
-   Back-to-Dashboard button) already reads the real --app-* tokens with no
-   overrides needed — they're illegible only against the old dark photo, and
-   read perfectly fine dark-on-light against this gradient. */
-:root[data-theme="light"] .hero {
-  background-image: radial-gradient(
-    130% 130% at 25% 20%,
-    color-mix(in srgb, var(--app-accent) 12%, var(--app-bg-page)) 0%,
-    var(--app-bg-page) 60%
-  );
+/* Light theme: same photo, recolored via filter rather than swapped out —
+   hero-bg.jpg is a fixed asset (near-black background, faint sage-green
+   linework), so there's no separate light-mode file to point to. invert(1)
+   flips the near-black background to near-white; hue-rotate(180deg) then
+   approximately restores the original hue on top of that flip (the standard
+   trick for relighting a mostly-monochrome/duotone image via CSS alone,
+   without needing a second asset) — undoing the invert's side effect of
+   turning the green linework magenta. First attempt at this used a plain
+   accent-tinted gradient with no image at all instead — reported live that
+   the actual background image shouldn't just disappear in light mode, hence
+   recoloring the real photo here instead of replacing it. */
+:root[data-theme="light"] .heroBg {
+  filter: invert(1) hue-rotate(180deg);
 }
 
 @media (max-width: 480px) {
-  .hero {
+  .heroBg {
     /* Narrower still means an even tighter crop — nudge the anchor left so
        the motif doesn't scroll past the left edge of the visible slice. */
     background-position: 15% 45%;
@@ -63,6 +73,12 @@
 }
 
 .content {
+  /* position + z-index required here, not just DOM order — a positioned
+     element (.heroBg, position: absolute) always paints above a non-positioned
+     one regardless of source order, so without this .heroBg would cover the
+     hero's actual text/logo content despite coming first in the markup. */
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;

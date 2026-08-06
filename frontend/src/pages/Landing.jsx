@@ -167,6 +167,7 @@ export default function Landing() {
       </p>
 
       <section className={styles.hero}>
+        <div className={styles.heroBg} aria-hidden="true" />
         <div className={styles.content}>
           <Logo size="lg" />
           <div className={styles.tagline} aria-hidden="true">
