@@ -114,6 +114,25 @@ def _no_symptom_described_yet(history: list[ConversationMemory]) -> bool:
     )
 
 
+def _preceding_assistant_turn_asked_a_screening_question(history: list[ConversationMemory]) -> bool:
+    """True when the last assistant turn was a plain free-text clarifying question
+    (severity/duration, body location, associated symptoms, temperature, etc.) —
+    as opposed to a structured DOCTOR_OPTIONS/DEPARTMENT_LIST/NO_SLOTS card, which
+    means something else entirely (awaiting a slot pick, not more symptom detail).
+    Used by _introduces_a_new_symptom_category below to tell "the patient is
+    answering the question we just asked" apart from "the patient is volunteering
+    an unprompted new complaint."""
+    if not history:
+        return False
+    last = history[-1]
+    if getattr(last, "role", None) != "assistant":
+        return False
+    content = (getattr(last, "content", "") or "").strip()
+    if not content or content.startswith((DOCTOR_OPTIONS_MARKER, DEPARTMENT_LIST_MARKER, NO_SLOTS_MARKER)):
+        return False
+    return content.endswith("?") or content.endswith("؟")
+
+
 # Reported live: after Orthopedics was correctly resolved for leg pain (screened
 # with 2 real questions), "i am also having pain in my eyes as well" and then
 # "...in my ear as well" both skipped straight to a department card with ZERO
@@ -130,9 +149,26 @@ def _no_symptom_described_yet(history: list[ConversationMemory]) -> bool:
 # words like "weight" that only mean something combined with an EARLIER turn's
 # anatomy word correctly hint nothing by themselves) against what PRIOR history
 # alone already hinted — anything in the former but not the latter is new.
+#
+# Reported live (2nd report): "im sick" -> asked severity/duration -> answered
+# ("3 days, mild") -> asked "where exactly / what type of problem" -> answered
+# "fever, body ache" -> asked severity/duration AGAIN -> re-answered the same
+# thing -> asked "any other symptoms (cough, sore throat...)" -> answered "sore
+# throat" -> asked severity/duration a THIRD time. Each answer happened to hint a
+# department the prior turns hadn't (fever/ache -> General Medicine, then sore
+# throat -> ENT), so this function correctly detected a "new category" each
+# time — but the patient wasn't volunteering an unprompted new complaint, they
+# were directly answering the assistant's own immediately-preceding question.
+# Severity/duration answered once for the overall episode shouldn't be re-asked
+# just because a later ANSWER happens to touch a different department's
+# keywords. Guarded by checking whether the preceding assistant turn was itself
+# a screening question first: if so, this message is elaboration on an existing,
+# already-screened complaint, not a new one, regardless of what it hints.
 def _introduces_a_new_symptom_category(
     message: str, history: list[ConversationMemory], department_names: list[str]
 ) -> bool:
+    if _preceding_assistant_turn_asked_a_screening_question(history):
+        return False
     prior_hints = set(departments_hinted_by_patient_symptom_words("", history, department_names, set()))
     message_alone_hints = set(departments_hinted_by_patient_symptom_words(message, [], department_names, set()))
     return bool(message_alone_hints - prior_hints)

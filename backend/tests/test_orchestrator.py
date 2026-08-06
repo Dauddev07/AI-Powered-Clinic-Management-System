@@ -1188,6 +1188,65 @@ def test_run_symptom_agent_asks_before_a_new_symptom_category_introduced_later_i
     assert "how long" in ear_result.lower()
 
 
+def test_run_symptom_agent_does_not_re_ask_severity_when_answering_its_own_screening_question(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: "im sick" -> asked severity/duration -> answered ("3 days,
+    # mild") -> asked "where exactly / what type of problem" -> answered "fever,
+    # body ache" -> asked severity/duration AGAIN -> re-answered the same thing ->
+    # asked "any other symptoms" -> answered "sore throat" -> asked severity/
+    # duration a THIRD time. Each answer happened to hint a NEW department
+    # (fever/ache -> General Medicine, sore throat -> ENT) that the prior turns
+    # hadn't hinted, so _introduces_a_new_symptom_category correctly detected a
+    # "new category" each time — but the patient was directly answering the
+    # assistant's own immediately-preceding question, not volunteering an
+    # unprompted new complaint. Real Department rows required, same as the test
+    # above, since the new-category check resolves against real active names.
+    from app.models.department import Department
+
+    for name in ("General Medicine", "ENT"):
+        db.add(Department(clinic_id=clinic.id, name=name))
+    db.flush()
+
+    # Unlike the "genuinely new category" test above, the backstop must NOT fire
+    # here — normal flow proceeds to the LLM, so it's mocked to return a benign
+    # reply (not made to fail-if-called) and the assertion is on THAT reply, not
+    # on a hand-typed severity/duration question.
+    monkeypatch.setattr(
+        symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Let me check availability for you."
+    )
+
+    history = [
+        _row("user", "im sick"),
+        _row(
+            "assistant",
+            "Could you tell me how severe this is (mild, moderate, or severe) and how long you've had it?",
+        ),
+        _row("user", "its been 3 days, its mild rn"),
+        _row(
+            "assistant",
+            "Where exactly are you feeling the symptoms (which part of your body) and what type of "
+            "problem is it (e.g., pain, fever, cough, rash, etc.)?",
+        ),
+    ]
+    fever_result = symptom_agent.run_symptom_agent(
+        db, ctx, "all body feels warm, im feeling body ache, its fever", "en", history
+    )
+    assert fever_result == "Let me check availability for you."
+
+    history_with_fever = history + [
+        _row("user", "all body feels warm, im feeling body ache, its fever"),
+        _row(
+            "assistant",
+            "Do you have any other symptoms such as cough, sore throat, rash, nausea, or vomiting?",
+        ),
+    ]
+    throat_result = symptom_agent.run_symptom_agent(
+        db, ctx, "sore throat", "en", history_with_fever
+    )
+    assert throat_result == "Let me check availability for you."
+
+
 def test_run_symptom_agent_does_not_re_ask_for_the_same_symptom_category_being_screened(
     monkeypatch, db, ctx, clinic
 ):
