@@ -298,6 +298,31 @@ def is_department_recommendation_request(message: str) -> bool:
     return bool(_RECOMMENDATION_RE.search(message.strip()))
 
 
+# Reported live: after a Cardiology recommendation, "so what does dermatologist
+# looks to?" then "so what symptoms does dermatologist treats?" both landed on
+# symptom_agent (the preceding assistant turn was a question, so router.py's screening-
+# continuity rule kept routing here), which has no way to answer a general "what does
+# this specialty treat" question — it just produced its generic "I'm not able to
+# diagnose... tell me more about your symptom" dead end, ignoring the actual question
+# asked. This is a general informational question about a specialty's SCOPE, not a
+# symptom description or a recommendation request, and belongs with general_info_agent
+# instead (real KB/DB-grounded answer, same as any other clinic-info question).
+_DEPARTMENT_SCOPE_RE = re.compile(
+    r"\bwhat\s+(?:kind\s+of\s+|type\s+of\s+)?(?:symptoms?|conditions?|things|issues)?\s*"
+    r"(?:does|do|can)\s+(?:a\s+|an\s+|the\s+)?[a-z]+(?:\s+[a-z]+)?\s+"
+    r"(?:treats?|handles?|deals?\s+with|looks?\s+at|manages?|addresses?|covers?|sees?|specializes?\s+in)\b",
+    re.IGNORECASE,
+)
+
+
+def is_department_scope_question(message: str) -> bool:
+    """True when the patient is asking what a specialty/department TREATS in
+    general ("what symptoms does a dermatologist treat", "what does cardiology
+    handle") — an informational question about scope, not a description of their
+    own symptoms and not a recommendation request."""
+    return bool(_DEPARTMENT_SCOPE_RE.search(message.strip()))
+
+
 def is_symptom_message(message: str) -> bool:
     """True when the message mentions a symptom/complaint — used by chat.py to route
     a turn to real department-list context (see app.services.department_availability)

@@ -204,6 +204,32 @@ def test_router_rule1_5_department_list_request_routes_to_general_info_despite_a
     assert _heuristic_classify(message) == GENERAL_INFO
 
 
+def test_router_rule0_6_department_scope_question_overrides_screening_continuity():
+    # Reported live: after a Cardiology recommendation and a clarifying follow-up
+    # question from the assistant, "so what symptoms does dermatologist treats?"
+    # fell to rule 2 (screening continuity — preceding turn was a question, symptom
+    # context still most recent) and stayed with symptom_agent, which produced its
+    # generic "I'm not able to diagnose... tell me more about your symptom" dead
+    # end instead of answering the actual question asked. Rule 0.6 must win even
+    # when the preceding assistant turn looks like a clarifying question.
+    history = [
+        _row("user", "i am having pain in my chest"),
+        _row("assistant", "Is the chest pain severe, bearable, or mild?"),
+        _row("user", "its mild and steady and it is from past 1 week"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + '{"department_name": "Cardiology"}'),
+        _row("user", "i think dermatologist can be a best fit for it?isnt it?"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + '{"department_name": "Cardiology"}'),
+        _row("user", "so what does dermatologist looks to?"),
+        _row(
+            "assistant",
+            "Based on the chest pain you described, Cardiology might be a better fit than "
+            "Dermatology. Would you like me to show Cardiology availability instead, or "
+            "would you still like to see Dermatology's availability?",
+        ),
+    ]
+    assert _heuristic_classify("so what symptoms does dermatologist treats?", history) == GENERAL_INFO
+
+
 def test_router_rule2_continuity_reply_to_screening_question_routes_back_to_symptom():
     # "very severe" has no symptom keyword of its own — only correct because the
     # conversation is still symptom-side (item 5 continuity).
@@ -502,6 +528,11 @@ def test_run_symptom_agent_fetches_head_and_leg_pain_departments_hinted_by_sympt
     # a keyword in SYMPTOM_DEPARTMENT_HINTS at all, so this exact keyword-hint
     # backstop (already proven for skin/dermatology above) had nothing to find for
     # either one, even though the model's note named neither department either.
+    # Follow-up report: once "leg" unconditionally hinted Orthopedics, a patient who
+    # explicitly denied any leg symptoms still got an unwanted Orthopedics card —
+    # bare limb pain with no injury signal now routes to General Medicine instead
+    # (see symptom_hints.py's "limb/joint pain" entry), so Orthopedics is correctly
+    # absent here.
     from datetime import datetime, timedelta, timezone
 
     from app.models.department import Department
@@ -512,8 +543,6 @@ def test_run_symptom_agent_fetches_head_and_leg_pain_departments_hinted_by_sympt
     db.add(dentistry)
     gen_med = Department(clinic_id=clinic.id, name="General Medicine")
     db.add(gen_med)
-    ortho = Department(clinic_id=clinic.id, name="Orthopedics")
-    db.add(ortho)
     db.flush()
     dentist = Doctor(
         clinic_id=clinic.id, department_id=dentistry.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
@@ -525,13 +554,8 @@ def test_run_symptom_agent_fetches_head_and_leg_pain_departments_hinted_by_sympt
         full_name="Dr. Ali Raza", is_active=True,
     )
     db.add(gen_med_doctor)
-    ortho_doctor = Doctor(
-        clinic_id=clinic.id, department_id=ortho.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
-        full_name="Dr. Junaid Mirza", is_active=True,
-    )
-    db.add(ortho_doctor)
     db.flush()
-    for doc in (dentist, gen_med_doctor, ortho_doctor):
+    for doc in (dentist, gen_med_doctor):
         db.add(Slot(
             clinic_id=clinic.id, doctor_id=doc.id,
             start_utc=datetime.now(timezone.utc) + timedelta(days=1),
@@ -563,7 +587,7 @@ def test_run_symptom_agent_fetches_head_and_leg_pain_departments_hinted_by_sympt
     assert result.startswith(DEPARTMENT_LIST_MARKER)
     payload = json.loads(result[len(DEPARTMENT_LIST_MARKER):])
     names = {d["department_name"] for d in payload["departments"]}
-    assert names == {"Dentistry", "General Medicine", "Orthopedics"}
+    assert names == {"Dentistry", "General Medicine"}
 
 
 def test_run_symptom_agent_names_the_specific_symptom_in_the_hinted_departments_note(
@@ -983,6 +1007,84 @@ def test_run_symptom_agent_recovers_a_real_department_when_the_model_diagnosed_i
     assert payload["doctors"][0]["doctor_name"] == "Dr. Ali Raza"
     # The diagnostic free text must never reach the patient.
     assert "diabetes" not in result.lower()
+
+
+def test_run_symptom_agent_recovers_when_the_model_fakes_a_tool_payload_instead_of_calling_it(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: "pain in my chest and in testies as well" (mild, bearable, 2
+    # days) got a reply that never called get_department_availability at all — the
+    # model free-texted a recommendation paragraph, then hand-typed a fragment
+    # mimicking the tool's own JSON shape ({"department_name": ..., "note": ...}) as
+    # plain text, naming only ONE department (General Medicine, dropping the
+    # chest-pain->Cardiology hint entirely). This reply contains no diagnostic
+    # phrasing at all ("a General Medicine appointment would be appropriate" isn't
+    # "you have X"), so the existing diagnosis-violation recovery net never fired —
+    # confirms the new faked-payload detector catches this case too and rebuilds
+    # real cards for BOTH hinted departments.
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+    from datetime import datetime, timedelta, timezone
+
+    cardio = Department(clinic_id=clinic.id, name="Cardiology")
+    gen_med = Department(clinic_id=clinic.id, name="General Medicine")
+    db.add_all([cardio, gen_med])
+    db.flush()
+    cardio_doctor = Doctor(
+        clinic_id=clinic.id, department_id=cardio.id,
+        external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}", full_name="Dr. Ahmed Farooq", is_active=True,
+    )
+    gen_med_doctor = Doctor(
+        clinic_id=clinic.id, department_id=gen_med.id,
+        external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}", full_name="Dr. Ali Raza", is_active=True,
+    )
+    db.add_all([cardio_doctor, gen_med_doctor])
+    db.flush()
+    db.add_all([
+        Slot(
+            clinic_id=clinic.id, doctor_id=cardio_doctor.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ),
+        Slot(
+            clinic_id=clinic.id, doctor_id=gen_med_doctor.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ),
+    ])
+    db.flush()
+
+    faked_payload_reply = (
+        "Based on what you've described, a General Medicine appointment would be "
+        "appropriate to assess both the chest and testicular discomfort.\n\n"
+        "Note: This is for a routine follow-up; if you notice worsening pain, new "
+        "symptoms, or any concerning changes, seek immediate medical care.\n\n"
+        '{\n  "department_name": "General Medicine",\n'
+        '  "note": "Chest and testicular discomfort assessment"\n}'
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: faked_payload_reply)
+
+    history = [
+        _row("user", "i am having pain in my chest and in testies as well"),
+        _row(
+            "assistant",
+            "Is the chest pain severe, bearable, or mild? Also, is the testicular pain "
+            "constant or does it come and go?",
+        ),
+    ]
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "the pain is mild and bearable and it is from 2 days with no other symptoms", "en", history
+    )
+
+    # The fake, hand-typed JSON fragment must never reach the patient verbatim.
+    assert "Note: This is for a routine follow-up" not in result
+    assert "Cardiology" in result
+    assert "General Medicine" in result
+    assert "Dr. Ahmed Farooq" in result
+    assert "Dr. Ali Raza" in result
 
 
 def test_run_symptom_agent_recovers_neurology_when_the_model_diagnosed_a_brain_tumor(monkeypatch, db, ctx, clinic):

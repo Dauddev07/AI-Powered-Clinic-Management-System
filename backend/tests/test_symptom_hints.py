@@ -23,10 +23,12 @@ DEPARTMENTS = [
         ("my eyes hurt and my vision is blurry", "Ophthalmology"),
         ("I have a toothache", "Dentistry"),
         ("pain in my teeths", "Dentistry"),  # typo regression
-        ("my knee and ankle hurt", "Orthopedics"),
+        ("my knee and ankle hurt", "General Medicine"),  # bare limb pain, no injury signal
         ("I sprained my joint", "Orthopedics"),
-        ("my shoulder and back hurt", "Orthopedics"),
-        ("my wrist and elbow are sore", "Orthopedics"),
+        ("my shoulder and back hurt", "General Medicine"),
+        ("my wrist and elbow are sore", "General Medicine"),
+        ("my leg is swollen after I fell", "Orthopedics"),  # limb pain + injury signal
+        ("my hand hurts a lot", "General Medicine"),  # previously-missing "hand" keyword
         ("I have a headache", "General Medicine"),
         ("I get migraines often", "General Medicine"),
         ("I have chest pain and palpitations", "Cardiology"),
@@ -50,6 +52,10 @@ DEPARTMENTS = [
         ("I feel mild dizziness", "Neurology"),
         ("I have vertigo", "ENT"),
         ("I feel lightheaded", "Neurology"),
+        ("pain in my chest and in testies as well", "Cardiology"),
+        ("pain in my chest and in testies as well", "General Medicine"),
+        ("I have testicular pain", "General Medicine"),
+        ("there's pain in my groin", "General Medicine"),
     ],
 )
 def test_symptom_words_hint_the_expected_department(message, expected_department):
@@ -103,3 +109,43 @@ def test_ankle_swelling_does_not_hint_pulmonology():
         "my ankle is swollen and sprained", [], DEPARTMENTS, set()
     )
     assert "Pulmonology" not in hinted
+
+
+def test_limb_pain_with_injury_signal_hints_orthopedics_only_not_general_medicine():
+    # Reported live: "leg pain after i fell should go to orthopedics" — a real
+    # limb injury should resolve to Orthopedics ALONE, not Orthopedics alongside a
+    # default General Medicine card. General Medicine only appears when something
+    # else independently calls for it (e.g. a separately mentioned fever).
+    hinted = departments_hinted_by_patient_symptom_words(
+        "my leg is swollen after I fell", [], DEPARTMENTS, set()
+    )
+    assert hinted == {"Orthopedics": "limb/joint injury symptoms"}
+
+
+def test_limb_pain_with_injury_signal_and_unrelated_symptom_still_includes_general_medicine():
+    # General Medicine should still show up here, but because of the fever, not
+    # because of the limb pain — confirms the limb/joint branch doesn't suppress
+    # OTHER categories' independent General Medicine hint.
+    hinted = departments_hinted_by_patient_symptom_words(
+        "my leg is swollen after I fell and i also have a fever", [], DEPARTMENTS, set()
+    )
+    assert hinted == {"Orthopedics": "limb/joint injury symptoms", "General Medicine": "fever/body aches"}
+
+
+def test_plain_swelling_alone_does_not_hint_orthopedics():
+    # Reported live: "swelling on hand" alone still routed to Orthopedics, but
+    # plain swelling isn't specific to injury (infection, allergic reaction, edema
+    # can all cause it) — it should fall back to General Medicine like any other
+    # bare limb symptom unless an actual injury/trauma word is also present.
+    hinted = departments_hinted_by_patient_symptom_words(
+        "swelling on hand and leg", [], DEPARTMENTS, set()
+    )
+    assert hinted == {"General Medicine": "limb/joint pain"}
+    assert "Orthopedics" not in hinted
+
+
+def test_swelling_with_a_real_injury_word_still_hints_orthopedics():
+    hinted = departments_hinted_by_patient_symptom_words(
+        "my hand is swollen and bruised", [], DEPARTMENTS, set()
+    )
+    assert "Orthopedics" in hinted

@@ -10,6 +10,7 @@ from app.services.message_classifier import (
     _heuristic_classify,
     classify_message_intent,
     is_department_list_request,
+    is_department_scope_question,
     is_symptom_message,
     needs_booking_action_tools,
     needs_path2_screening,
@@ -587,3 +588,35 @@ def test_is_department_list_request_false_for_singular_or_unrelated_messages(mes
     # Singular "department" (asking about ONE specific doctor/department) must not
     # be treated as a request for the full list — plural is required by design.
     assert is_department_list_request(message) is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "so what symptoms does dermatologist treats?",
+        "what does cardiology treat?",
+        "what symptoms does a neurologist handle?",
+        "what conditions does the ENT department deal with?",
+        "what does a dermatologist look at?",
+        "what does psychiatry specialize in?",
+    ],
+)
+def test_is_department_scope_question_true_for_scope_phrasings(message):
+    # Reported live: this kind of general "what does this specialty treat" question
+    # landed on symptom_agent (via screening continuity) and got its generic
+    # "I'm not able to diagnose... tell me more about your symptom" dead end instead
+    # of a real answer — it's an informational question, not a symptom description.
+    assert is_department_scope_question(message) is True
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "I have a headache",
+        "book me with Dr. Ahmed",
+        "what are your clinic hours?",
+        "i think dermatologist can be a best fit for it",
+    ],
+)
+def test_is_department_scope_question_false_for_unrelated_messages(message):
+    assert is_department_scope_question(message) is False

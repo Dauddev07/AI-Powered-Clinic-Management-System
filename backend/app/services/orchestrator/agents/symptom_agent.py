@@ -89,6 +89,24 @@ def _is_self_diagnosis_claim(message: str) -> bool:
     return bool(words & _SELF_DIAGNOSIS_WORDS)
 
 
+# Reported live: "pain in my chest and in testies as well" (mild, bearable, 2 days)
+# got a reply that never actually called get_department_availability — the model
+# free-texted a recommendation paragraph, then hand-typed a fragment that MIMICS the
+# tool's own JSON payload shape ({"department_name": ..., "note": ...}) as plain
+# text instead of a real tool call. No real doctor/slot data ever existed behind it,
+# and only ONE department (missing the chest-pain->Cardiology hint) was named. The
+# existing recovery net below only fired for diagnosis-language violations
+# ("you have X") — this reply contains no diagnostic phrasing at all, so it slipped
+# through untouched. This pattern (a literal `"department_name"` key typed in prose)
+# is a reliable, low-false-positive signal that the model faked the tool's output
+# instead of calling it, and is checked independently of the diagnosis-language rule.
+_FAKED_TOOL_PAYLOAD_RE = re.compile(r'"department_name"\s*:', re.IGNORECASE)
+
+
+def _looks_like_a_faked_tool_payload(reply: str) -> bool:
+    return bool(_FAKED_TOOL_PAYLOAD_RE.search(reply))
+
+
 def _build_system_prompt(language_name: str, department_names: list[str], include_path2: bool) -> str:
     context_line = (
         f"Active departments at this clinic: {', '.join(department_names)}."
@@ -209,8 +227,7 @@ def run_symptom_agent(
     ):
         return (
             "Could you tell me how severe this is (mild, moderate, or severe) and how "
-            "long you've had it? Any other symptoms alongside it, like swelling, fever, "
-            "or numbness?"
+            "long you've had it?"
         )
 
     language_name = llm._LANGUAGE_NAMES.get(language, "English")
@@ -239,8 +256,9 @@ def run_symptom_agent(
     # department from what the patient actually said and call the tool ourselves,
     # so the turn still ends with a real department/doctor option on the table —
     # the diagnostic free text itself is discarded, never shown to the patient.
-    if not reply.startswith((DOCTOR_OPTIONS_MARKER, DEPARTMENT_LIST_MARKER, NO_SLOTS_MARKER)) and violates_no_diagnosis_rule(
-        reply
+    # Also covers the faked-tool-payload case above — same recovery, wider trigger.
+    if not reply.startswith((DOCTOR_OPTIONS_MARKER, DEPARTMENT_LIST_MARKER, NO_SLOTS_MARKER)) and (
+        violates_no_diagnosis_rule(reply) or _looks_like_a_faked_tool_payload(reply)
     ):
         hinted = departments_hinted_by_patient_symptom_words(message, history, department_names, set())
         if hinted:

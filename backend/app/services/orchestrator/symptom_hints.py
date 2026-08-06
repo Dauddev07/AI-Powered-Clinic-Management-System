@@ -55,24 +55,10 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
         ("ortho",),
         "bone/joint injury",
     ),
-    # Reported live: "pain in my teeth, head and legs as well" only ever produced a
-    # Dentistry card — neither "head"/"headache" nor "leg"/"legs" matched ANY
-    # keyword in this table at all, so the existing cross-check in symptom_agent.py
-    # (which already adds an extra department card for every real symptom the
-    # patient's own words point to, once the model has returned its first card) had
-    # nothing to find for either one. Not a missing mechanism, a missing keyword.
-    (frozenset({"leg", "legs", "knee", "ankle", "thigh", "calf"}), ("ortho",), "leg pain"),
-    # Same gap, other common joints/limbs not covered by "bone/joint injury" above
-    # (that entry needs an injury WORD like "sprain"/"fracture"; plain "my shoulder
-    # hurts" names no injury at all, same shape as plain "leg" above).
-    (
-        frozenset({
-            "back", "backache", "spine", "shoulder", "shoulders", "arm", "arms",
-            "hip", "hips", "wrist", "wrists", "elbow", "elbows",
-        }),
-        ("ortho",),
-        "joint/muscle pain",
-    ),
+    # NOTE: "limb/joint pain" (leg/arm/shoulder/hand/etc.) is deliberately NOT a
+    # table entry here — it needs an if/else, not an OR-only keyword match. See
+    # _LIMB_JOINT_WORDS + _LIMB_JOINT_INJURY_SIGNAL_WORDS and the branch in
+    # departments_hinted_by_patient_symptom_words below for why and how.
     (
         frozenset({"head", "headache", "headaches", "migraine", "migraines"}),
         ("general medicine", "internal medicine", "family medicine"),
@@ -96,6 +82,21 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
         frozenset({"kidney", "kidneys", "urinary", "urine"}),
         ("internal medicine", "general medicine"),
         "urinary symptoms",
+    ),
+    (
+        # Reported live: "pain in my chest and in testies as well" only ever got a
+        # single General Medicine card with no reasoning attached — testicular/groin
+        # pain had NO entry anywhere in this table, so once the chest-pain fallback
+        # (Cardiology) was added there was still nothing to hint General Medicine
+        # for the testicular complaint specifically. This clinic has no dedicated
+        # Urology department, so General/internal/family medicine are the real hint
+        # targets today; "urolog" is included too so this keeps working unchanged
+        # if a Urology department is ever added.
+        frozenset({
+            "testicle", "testicles", "testicular", "testies", "groin", "scrotum", "scrotal",
+        }),
+        ("general medicine", "internal medicine", "family medicine", "urolog"),
+        "groin/testicular symptoms",
     ),
     (
         frozenset({
@@ -174,6 +175,37 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
     ),
 )
 
+# Handles limb/joint pain (leg, arm, shoulder, hand, ...): a genuine if/else, not
+# an OR-only table entry. Reported live (1st report): "pain in my teeth, head and
+# legs as well" produced only a Dentistry card — "leg" matched no keyword at all,
+# silently dropping it. Reported live (2nd report): once "leg" unconditionally
+# hinted Orthopedics, a patient with mild, symptom-free limb pain who explicitly
+# denied anything else got an unwanted Orthopedics card too. Reported live (3rd
+# report): "leg pain after i fell" should go to Orthopedics ALONE, not both — so
+# bare anatomy words route to General Medicine, but once an actual injury/red-flag
+# word is ALSO present, that routes to Orthopedics INSTEAD of General Medicine, not
+# alongside it (see the if/else below, not a table entry, since the table can only
+# express OR per entry, never "A unless B, then C instead"). Deliberately excludes
+# "difficulty"/"moving"/"move" from the injury-signal words — reported live, a
+# patient who explicitly denied any issue ("i dont have any difficulty moving my
+# legs and arms") would still match those words via plain keyword presence,
+# negation-unaware, same known tradeoff as every other word-based check here.
+# Reported live (4th report): "swelling on hand" ALONE was still routing to
+# Orthopedics, but plain swelling isn't specific to injury at all (infection,
+# allergic reaction, edema can all cause it) — "swelling"/"swollen" were removed
+# from this set for that reason. Orthopedics now requires an actual injury/trauma
+# word; plain swelling with nothing else falls back to General Medicine, same as
+# any other bare limb symptom.
+_LIMB_JOINT_WORDS = frozenset({
+    "leg", "legs", "knee", "ankle", "thigh", "calf",
+    "back", "backache", "spine", "shoulder", "shoulders", "arm", "arms",
+    "hand", "hands", "hip", "hips", "wrist", "wrists", "elbow", "elbows",
+})
+_LIMB_JOINT_INJURY_SIGNAL_WORDS = frozenset({
+    "redness", "bruising", "bruised", "twisted", "injury", "injured", "fell",
+    "stiff", "stiffness",
+})
+
 
 def departments_hinted_by_patient_symptom_words(
     message: str, history: list[ConversationMemory], department_names: list[str], already_covered: set[str]
@@ -194,6 +226,12 @@ def departments_hinted_by_patient_symptom_words(
         if words & keywords:
             for hint in hints:
                 hinted_substrings.setdefault(hint, label)
+    if words & _LIMB_JOINT_WORDS:
+        if words & _LIMB_JOINT_INJURY_SIGNAL_WORDS:
+            hinted_substrings.setdefault("ortho", "limb/joint injury symptoms")
+        else:
+            for hint in ("general medicine", "internal medicine", "family medicine"):
+                hinted_substrings.setdefault(hint, "limb/joint pain")
     if not hinted_substrings:
         return {}
     # Anchored to the START of a word only (not "anywhere inside one") — e.g. the

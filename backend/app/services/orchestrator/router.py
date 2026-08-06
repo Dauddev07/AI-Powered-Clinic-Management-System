@@ -38,6 +38,7 @@ from app.services.message_classifier import (
     _preceding_assistant_turn_looks_like_a_question,
     is_department_list_request,
     is_department_recommendation_request,
+    is_department_scope_question,
     is_symptom_message,
     needs_booking_action_tools,
 )
@@ -132,6 +133,18 @@ def _heuristic_classify(message: str, history=None) -> str | None:
     # symptom-to-department check, regardless of what card was shown last turn.
     if is_department_recommendation_request(message):
         return SYMPTOM_GENERAL
+
+    # Rule 0.6 — a general "what does this specialty treat" scope question, checked
+    # before Rule 1's marker continuity and Rule 2's screening continuity so it wins
+    # regardless of what card or clarifying question came right before it. Reported
+    # live: "so what symptoms does dermatologist treats?" followed a clarifying
+    # question from symptom_agent, so screening continuity (Rule 2) kept routing it
+    # right back to symptom_agent, which has no way to answer a scope question and
+    # just produced its generic dead-end redirect. This is informational, not a
+    # symptom description or a recommendation request — belongs with
+    # general_info_agent, same as any other clinic-info question.
+    if is_department_scope_question(message):
+        return GENERAL_INFO
 
     # Rule 1 — unambiguous: the preceding turn was a slot-pick card or an
     # appointment-agent disambiguation question. Either can only ever mean
