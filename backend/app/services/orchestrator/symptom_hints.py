@@ -109,10 +109,18 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
         "groin/testicular symptoms",
     ),
     (
-        frozenset({
-            "anxiety", "depression", "depressed", "mental", "stress", "stressed",
-            "sad", "sadness", "hopeless", "hopelessness", "crying", "panic", "insomnia",
-        }),
+        # Reported live: "i am feeling very sad today and dizzy as well" fired a
+        # full Psychiatry card off the single word "sad" — no follow-up, no
+        # screening, unlike physical symptoms which always go through PATH-2
+        # duration/severity screening before a card appears. Split into two tiers:
+        # words that already NAME a clinical condition (anxiety, depression, panic,
+        # insomnia, "mental") represent a real presenting complaint on their own and
+        # still fire unconditionally. Passing mood adjectives that could just be a
+        # throwaway remark ("sad", "stressed", "crying", "hopeless") need an actual
+        # persistence/duration signal alongside them — see
+        # _LOW_MOOD_PASSING_WORDS/_LOW_MOOD_PERSISTENCE_WORDS below, same
+        # "bare word needs corroboration" shape as the limb/joint and cough entries.
+        frozenset({"anxiety", "depression", "depressed", "mental", "panic", "insomnia"}),
         ("psych",),
         "low mood",
     ),
@@ -158,10 +166,16 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
         # named Dentistry (for the jaw) and silently dropped dizziness entirely,
         # since no keyword in this table covered it at all — same "whole symptom
         # missing" gap as the pre-fix Gynecology/urinary/back entries above.
-        # Vertigo/dizziness is worked up by ENT (inner-ear/balance) and Neurology,
-        # not Dentistry, so both are hinted here.
+        # Vertigo/dizziness is worked up by ENT (inner-ear/balance) first and
+        # foremost — that's the by-far-most-common cause, so ENT alone is hinted
+        # here. Reported live (2nd report): dizziness unconditionally hinting
+        # Neurology TOO meant "sad and dizzy, mild, with nausea" produced a
+        # Neurology card with zero actual neuro signs present. Neurology already
+        # has its own dedicated trigger above (numbness/weakness/tremor/paralysis)
+        # — a real neuro red flag still adds it correctly through that entry;
+        # dizziness alone no longer needs to duplicate that.
         frozenset({"dizziness", "dizzy", "vertigo", "lightheaded", "lightheadedness"}),
-        ("ent", "otolaryn", "neuro"),
+        ("ent", "otolaryn"),
         "dizziness",
     ),
     (
@@ -216,6 +230,23 @@ _LIMB_JOINT_INJURY_SIGNAL_WORDS = frozenset({
     "stiff", "stiffness",
 })
 
+# Companion to the "low mood" table entry above: passing mood adjectives ("sad",
+# "stressed", "crying", "hopeless") only hint Psychiatry when an actual
+# persistence/duration signal is also present — a single "feeling sad today"
+# mentioned alongside an unrelated physical complaint shouldn't produce a full
+# specialist card with zero screening, same "bare word needs corroboration" shape
+# as the limb/joint and cough entries. Named clinical terms (anxiety, depression,
+# panic, insomnia) are NOT in this set — those stay in the unconditional table
+# entry above since they already represent a real presenting complaint on their
+# own, not just a passing remark.
+_LOW_MOOD_PASSING_WORDS = frozenset({
+    "sad", "sadness", "stress", "stressed", "hopeless", "hopelessness", "crying",
+})
+_LOW_MOOD_PERSISTENCE_WORDS = frozenset({
+    "days", "weeks", "months", "lately", "always", "constantly", "chronic",
+    "chronically", "persistent", "persistently", "ongoing",
+})
+
 
 def departments_hinted_by_patient_symptom_words(
     message: str, history: list[ConversationMemory], department_names: list[str], already_covered: set[str]
@@ -260,6 +291,8 @@ def departments_hinted_by_patient_symptom_words(
             if not already_covered_by_ortho:
                 for hint in ("general medicine", "internal medicine", "family medicine"):
                     hinted_substrings.setdefault(hint, "limb/joint pain")
+    if words & _LOW_MOOD_PASSING_WORDS and words & _LOW_MOOD_PERSISTENCE_WORDS:
+        hinted_substrings.setdefault("psych", "low mood")
     if not hinted_substrings:
         return {}
     # Anchored to the START of a word only (not "anywhere inside one") — e.g. the

@@ -49,9 +49,9 @@ DEPARTMENTS = [
         ("I'm having irregular periods", "Gynecology"),
         ("I have a fever and body aches", "General Medicine"),
         ("I feel mild dizziness", "ENT"),
-        ("I feel mild dizziness", "Neurology"),
         ("I have vertigo", "ENT"),
-        ("I feel lightheaded", "Neurology"),
+        ("I feel lightheaded", "ENT"),
+        ("I feel dizzy and numb", "Neurology"),  # dizziness + a real neuro red flag
         ("pain in my chest and in testies as well", "Cardiology"),
         ("pain in my chest and in testies as well", "General Medicine"),
         ("I have testicular pain", "General Medicine"),
@@ -175,3 +175,52 @@ def test_general_medicine_already_covered_does_not_suppress_a_genuine_orthopedic
         "my leg is swollen after I fell and i have a fever", [], DEPARTMENTS, {"General Medicine"},
     )
     assert hinted == {"Orthopedics": "limb/joint injury symptoms"}
+
+
+def test_dizziness_alone_hints_ent_only_not_neurology():
+    # Reported live: "i am feeling very sad today and dizzy as well... mild... also
+    # have nausea" produced FOUR cards (General Medicine, ENT, Neurology,
+    # Psychiatry) for what's really one coherent complaint — dizziness
+    # unconditionally hinting Neurology too, with zero actual neuro signs present,
+    # was one of the two causes. ENT (vestibular/inner-ear) is the far more common
+    # cause and is hinted alone; Neurology only comes in via its own dedicated
+    # trigger when a real neuro red flag is present (see the next test).
+    hinted = departments_hinted_by_patient_symptom_words(
+        "i feel dizzy and mild and have nausea", [], DEPARTMENTS, set()
+    )
+    assert hinted == {"ENT": "dizziness"}
+
+
+def test_dizziness_with_a_real_neuro_red_flag_still_hints_neurology():
+    hinted = departments_hinted_by_patient_symptom_words(
+        "i feel dizzy and numb", [], DEPARTMENTS, set()
+    )
+    assert hinted == {"ENT": "dizziness", "Neurology": "neurological symptoms"}
+
+
+def test_passing_mood_word_alone_does_not_hint_psychiatry():
+    # Reported live: "feeling very sad today" (a single passing adjective, said
+    # alongside an unrelated physical complaint) fired a full Psychiatry card with
+    # zero screening — unlike physical symptoms, which always go through PATH-2
+    # duration/severity screening before a card appears. "today" signals recency,
+    # not persistence, so this should NOT fire.
+    hinted = departments_hinted_by_patient_symptom_words(
+        "i am feeling very sad today", [], DEPARTMENTS, set()
+    )
+    assert "Psychiatry" not in hinted
+
+
+def test_passing_mood_word_with_persistence_still_hints_psychiatry():
+    hinted = departments_hinted_by_patient_symptom_words(
+        "i have been feeling sad for weeks", [], DEPARTMENTS, set()
+    )
+    assert "Psychiatry" in hinted
+
+
+def test_named_clinical_mood_terms_still_hint_psychiatry_unconditionally():
+    # Anxiety/depression/panic/insomnia already NAME a real presenting complaint,
+    # unlike a passing adjective like "sad" — these keep firing without needing a
+    # persistence word alongside them.
+    for message in ("I have anxiety", "I have depression", "I have panic attacks", "I have insomnia"):
+        hinted = departments_hinted_by_patient_symptom_words(message, [], DEPARTMENTS, set())
+        assert "Psychiatry" in hinted, message
