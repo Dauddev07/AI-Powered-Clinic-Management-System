@@ -114,6 +114,180 @@ def _looks_like_signal_free_short_statement(message: str) -> bool:
     return not non_word_chars
 
 
+# The rule cascade below used to be a straight if/elif chain, numbered 0.5, 0.6, 1,
+# 1.5, 1.8, 2, 3, 4, 5, 6 in the order they run. Those fractional numbers are a
+# record of rules getting wedged between existing ones over time as new
+# misrouting cases were reported live — which worked, but made the actual
+# evaluation order something you had to read the whole function to reconstruct,
+# and gave a new rule no natural place to declare where it belongs. Restructured
+# into an explicit, ordered table instead: same rules, same order, same
+# first-match-wins semantics — just declared as data instead of implied by
+# where an `if` happens to sit in the function body. Every rule keeps its
+# original name/number and full "reported live" rationale so nothing about WHY
+# each rule exists is lost, and every existing test (test_router_ruleN_...)
+# still exercises the exact same behavior since only the plumbing changed.
+#
+# Each rule function has the same signature — (message, history, last_role,
+# last_content) -> str | None — even when it only needs a subset of those
+# arguments, so the cascade below can treat every rule identically.
+
+
+def _rule_0_5_department_recommendation(message, history, last_role, last_content):
+    """The patient is asking for a department RECOMMENDATION ("what do you think",
+    "isn't X a better idea"), checked before even Rule 1's marker continuity.
+    Reported live: after a DOCTOR_OPTIONS_MARKER card was shown, this kind of
+    message fell to Rule 1 and went straight to appointment_agent, which has no
+    symptom awareness at all — it just showed availability for whatever
+    department got named next, then hallucinated a "reason" for a follow-up
+    question instead of reasoning from the patient's REAL described symptoms. A
+    recommendation request must always reach symptom_agent's deterministic
+    symptom-to-department check, regardless of what card was shown last turn."""
+    if is_department_recommendation_request(message):
+        return SYMPTOM_GENERAL
+    return None
+
+
+def _rule_0_6_department_scope_question(message, history, last_role, last_content):
+    """A general "what does this specialty treat" scope question, checked before
+    Rule 1's marker continuity and Rule 2's screening continuity so it wins
+    regardless of what card or clarifying question came right before it. Reported
+    live: "so what symptoms does dermatologist treats?" followed a clarifying
+    question from symptom_agent, so screening continuity (Rule 2) kept routing it
+    right back to symptom_agent, which has no way to answer a scope question and
+    just produced its generic dead-end redirect. This is informational, not a
+    symptom description or a recommendation request — belongs with
+    general_info_agent, same as any other clinic-info question."""
+    if is_department_scope_question(message):
+        return GENERAL_INFO
+    return None
+
+
+def _rule_1_marker_continuity(message, history, last_role, last_content):
+    """The preceding turn was a slot-pick card or an appointment-agent
+    disambiguation question — normally unambiguous, "continue the appointment
+    flow," EXCEPT when the CURRENT message itself plainly describes a symptom.
+    Reported live: a Cardiology DOCTOR_OPTIONS card was shown for chest pain,
+    then "i am also having some skin related issues" — an unprompted, genuinely
+    NEW symptom, unrelated to any slot-pick — matched this rule and went
+    straight to appointment_agent, which has no symptom-triage logic at all and
+    just showed Dermatology availability with ZERO clarifying questions,
+    skipping symptom_agent's screening backstop entirely (that backstop can't
+    help if the message never reaches symptom_agent in the first place). The
+    rule's own old assumption — "a reply to THAT is never itself a fresh
+    symptom statement in practice" — is exactly what failed here; Rule 1.8
+    below already exists for this exact case ("current message plainly states
+    a symptom") but could never fire for a marker-preceded turn, since this
+    rule always won first. A genuine slot-pick reply ("the 9am one", "Dr.
+    Farooq please") contains no symptom keyword, so is_symptom_message stays
+    False for it and this rule still applies normally."""
+    if (
+        last_role == "assistant"
+        and last_content.startswith((DOCTOR_OPTIONS_MARKER, DOCTOR_DISAMBIGUATION_MARKER))
+        and not is_symptom_message(message)
+    ):
+        return APPOINTMENT
+    return None
+
+
+def _rule_1_5_department_list_request(message, history, last_role, last_content):
+    """Explicit request for the full department list. Reported live: "what are
+    the available depts" wasn't recognized at all — it contains "available", one
+    of needs_booking_action_tools' own keywords, so without this rule it would
+    fall to rule 3 below and reach appointment_agent, which has no tool that can
+    list every department (get_department_availability requires one specific
+    name). Checked before screening/booking continuity since it's an explicit,
+    unambiguous new request that should win regardless of what the conversation
+    was doing a moment ago."""
+    if is_department_list_request(message):
+        return GENERAL_INFO
+    return None
+
+
+def _rule_1_8_current_message_states_a_symptom(message, history, last_role, last_content):
+    """The CURRENT message itself plainly describes a symptom. Reported live:
+    General Medicine was resolved for dizziness/fainting, then small talk
+    ("okay thank you" / "one more question"), then the assistant's own generic
+    filler reply ("Sure, what would you like to know? ... doctors...") — its
+    trailing "?" plus mentioning "doctors" tripped rule 2/3's booking-continuity
+    heuristics (booking context was more recent than the last symptom turn), so
+    "i am also having pain in my chest" — an unambiguous NEW symptom statement —
+    was sent to appointment_agent instead of symptom_agent, skipping screening
+    entirely. A message that itself plainly states a symptom must win regardless
+    of what the immediately preceding turn's phrasing happened to look like.
+    Rule 1 above now already excludes this case (a marker-preceded turn that
+    itself plainly describes a symptom no longer matches Rule 1 at all), so in
+    practice this rule is what actually catches it; kept as its own named rule
+    since it also covers every OTHER non-marker "preceding turn" shape."""
+    if is_symptom_message(message):
+        return SYMPTOM_GENERAL
+    return None
+
+
+def _rule_2_screening_continuity(message, history, last_role, last_content):
+    """Screening continuity (item 5): a reply to a plain clarifying question (not
+    one of the markers above) stays with symptom_agent ONLY when the most recent
+    relevant context is still symptom-side, not booking-side."""
+    if _preceding_assistant_turn_looks_like_a_question(history) and _symptom_context_more_recent_than_booking_context(
+        history
+    ):
+        return SYMPTOM_GENERAL
+    return None
+
+
+def _rule_3_booking_action_signal(message, history, last_role, last_content):
+    """Explicit booking-action signal. Reuses needs_booking_action_tools() exactly
+    as-is, including its own "preceding turn is a question" trigger — safe to
+    reuse here because rule 2 already carved out the one case where a
+    question-reply should NOT default to appointment."""
+    if needs_booking_action_tools(message, history):
+        return APPOINTMENT
+    return None
+
+
+def _rule_4_symptom_signal_anywhere(message, history, last_role, last_content):
+    """Symptom signal, this message or earlier in the conversation."""
+    if is_symptom_message(message) or _most_recent_symptom_turn_index(history) >= 0:
+        return SYMPTOM_GENERAL
+    return None
+
+
+def _rule_5_classic_conversational_heuristic(message, history, last_role, last_content):
+    """Plain conversational/personal-recall/logistics phrasing: reuse
+    message_classifier's own heuristic; anything it can decide maps to
+    GENERAL_INFO (small talk and personal-recall are both handled fine by
+    general_info_agent's prompt, same as get_chat_reply did before it)."""
+    if _classic_heuristic_classify(message, history) is not None:
+        return GENERAL_INFO
+    return None
+
+
+def _rule_6_signal_free_short_statement(message, history, last_role, last_content):
+    """Signal-free short statement: reported live, "my name is daud" (4 words, no
+    symptom/booking keyword) fell through every rule above and got classified
+    SYMPTOM_GENERAL by the biased LLM fallback below, attaching the entire
+    triage prompt to a message with nothing to do with symptoms. See
+    _looks_like_signal_free_short_statement's docstring for why this is safe."""
+    if _looks_like_signal_free_short_statement(message):
+        return GENERAL_INFO
+    return None
+
+
+# First-match-wins, in this exact order — see each rule function's docstring for
+# why it sits where it does relative to its neighbors.
+_RULE_CASCADE = (
+    ("0.5", _rule_0_5_department_recommendation),
+    ("0.6", _rule_0_6_department_scope_question),
+    ("1", _rule_1_marker_continuity),
+    ("1.5", _rule_1_5_department_list_request),
+    ("1.8", _rule_1_8_current_message_states_a_symptom),
+    ("2", _rule_2_screening_continuity),
+    ("3", _rule_3_booking_action_signal),
+    ("4", _rule_4_symptom_signal_anywhere),
+    ("5", _rule_5_classic_conversational_heuristic),
+    ("6", _rule_6_signal_free_short_statement),
+)
+
+
 def _heuristic_classify(message: str, history=None) -> str | None:
     """Fast, free pre-filter — returns a definitive classification for clear-cut
     cases, or None when genuinely ambiguous (falls through to _llm_classify)."""
@@ -122,116 +296,10 @@ def _heuristic_classify(message: str, history=None) -> str | None:
     last_role = getattr(last, "role", None) if last else None
     last_content = (getattr(last, "content", "") or "") if last else ""
 
-    # Rule 0.5 — the patient is asking for a department RECOMMENDATION ("what do you
-    # think", "isn't X a better idea"), checked before even Rule 1's marker
-    # continuity. Reported live: after a DOCTOR_OPTIONS_MARKER card was shown, this
-    # kind of message fell to Rule 1 and went straight to appointment_agent, which
-    # has no symptom awareness at all — it just showed availability for whatever
-    # department got named next, then hallucinated a "reason" for a follow-up
-    # question instead of reasoning from the patient's REAL described symptoms. A
-    # recommendation request must always reach symptom_agent's deterministic
-    # symptom-to-department check, regardless of what card was shown last turn.
-    if is_department_recommendation_request(message):
-        return SYMPTOM_GENERAL
-
-    # Rule 0.6 — a general "what does this specialty treat" scope question, checked
-    # before Rule 1's marker continuity and Rule 2's screening continuity so it wins
-    # regardless of what card or clarifying question came right before it. Reported
-    # live: "so what symptoms does dermatologist treats?" followed a clarifying
-    # question from symptom_agent, so screening continuity (Rule 2) kept routing it
-    # right back to symptom_agent, which has no way to answer a scope question and
-    # just produced its generic dead-end redirect. This is informational, not a
-    # symptom description or a recommendation request — belongs with
-    # general_info_agent, same as any other clinic-info question.
-    if is_department_scope_question(message):
-        return GENERAL_INFO
-
-    # Rule 1 — the preceding turn was a slot-pick card or an appointment-agent
-    # disambiguation question — normally unambiguous, "continue the appointment
-    # flow," EXCEPT when the CURRENT message itself plainly describes a symptom.
-    # Reported live: a Cardiology DOCTOR_OPTIONS card was shown for chest pain,
-    # then "i am also having some skin related issues" — an unprompted, genuinely
-    # NEW symptom, unrelated to any slot-pick — matched this rule and went
-    # straight to appointment_agent, which has no symptom-triage logic at all and
-    # just showed Dermatology availability with ZERO clarifying questions,
-    # skipping symptom_agent's screening backstop entirely (that backstop can't
-    # help if the message never reaches symptom_agent in the first place). The
-    # rule's own old assumption — "a reply to THAT is never itself a fresh
-    # symptom statement in practice" — is exactly what failed here; Rule 1.8
-    # below already exists for this exact case ("current message plainly states
-    # a symptom") but could never fire for a marker-preceded turn, since this
-    # rule always won first. A genuine slot-pick reply ("the 9am one", "Dr.
-    # Farooq please") contains no symptom keyword, so is_symptom_message stays
-    # False for it and this rule still applies normally.
-    if (
-        last_role == "assistant"
-        and last_content.startswith((DOCTOR_OPTIONS_MARKER, DOCTOR_DISAMBIGUATION_MARKER))
-        and not is_symptom_message(message)
-    ):
-        return APPOINTMENT
-
-    # Rule 1.5 — explicit request for the full department list. Reported live:
-    # "what are the available depts" wasn't recognized at all — it contains
-    # "available", one of needs_booking_action_tools' own keywords, so without this
-    # rule it would fall to rule 3 below and reach appointment_agent, which has no
-    # tool that can list every department (get_department_availability requires one
-    # specific name). Checked before screening/booking continuity since it's an
-    # explicit, unambiguous new request that should win regardless of what the
-    # conversation was doing a moment ago.
-    if is_department_list_request(message):
-        return GENERAL_INFO
-
-    # Rule 1.8 — the CURRENT message itself plainly describes a symptom. Reported
-    # live: General Medicine was resolved for dizziness/fainting, then small talk
-    # ("okay thank you" / "one more question"), then the assistant's own generic
-    # filler reply ("Sure, what would you like to know? ... doctors...") — its
-    # trailing "?" plus mentioning "doctors" tripped rule 2/3's booking-continuity
-    # heuristics (booking context was more recent than the last symptom turn), so
-    # "i am also having pain in my chest" — an unambiguous NEW symptom statement —
-    # was sent to appointment_agent instead of symptom_agent, skipping screening
-    # entirely. A message that itself plainly states a symptom must win regardless
-    # of what the immediately preceding turn's phrasing happened to look like.
-    # Rule 1 above now already excludes this case (a marker-preceded turn that
-    # itself plainly describes a symptom no longer matches Rule 1 at all), so in
-    # practice this rule is what actually catches it; kept as its own named rule
-    # since it also covers every OTHER non-marker "preceding turn" shape.
-    if is_symptom_message(message):
-        return SYMPTOM_GENERAL
-
-    # Rule 2 — screening continuity (item 5): a reply to a plain clarifying
-    # question (not one of the markers above) stays with symptom_agent ONLY when
-    # the most recent relevant context is still symptom-side, not booking-side.
-    if _preceding_assistant_turn_looks_like_a_question(history) and _symptom_context_more_recent_than_booking_context(
-        history
-    ):
-        return SYMPTOM_GENERAL
-
-    # Rule 3 — explicit booking-action signal. Reuses needs_booking_action_tools()
-    # exactly as-is, including its own "preceding turn is a question" trigger —
-    # safe to reuse here because rule 2 already carved out the one case where a
-    # question-reply should NOT default to appointment.
-    if needs_booking_action_tools(message, history):
-        return APPOINTMENT
-
-    # Rule 4 — symptom signal, this message or earlier in the conversation.
-    if is_symptom_message(message) or _most_recent_symptom_turn_index(history) >= 0:
-        return SYMPTOM_GENERAL
-
-    # Rule 5 — plain conversational/personal-recall/logistics phrasing: reuse
-    # message_classifier's own heuristic; anything it can decide maps to
-    # GENERAL_INFO (small talk and personal-recall are both handled fine by
-    # general_info_agent's prompt, same as get_chat_reply did before it).
-    if _classic_heuristic_classify(message, history) is not None:
-        return GENERAL_INFO
-
-    # Rule 6 — signal-free short statement: reported live, "my name is daud" (4
-    # words, no symptom/booking keyword) fell through every rule above and got
-    # classified SYMPTOM_GENERAL by the biased LLM fallback below, attaching the
-    # entire triage prompt to a message with nothing to do with symptoms. See
-    # _looks_like_signal_free_short_statement's docstring for why this is safe.
-    if _looks_like_signal_free_short_statement(message):
-        return GENERAL_INFO
-
+    for _name, rule in _RULE_CASCADE:
+        result = rule(message, history, last_role, last_content)
+        if result is not None:
+            return result
     return None
 
 

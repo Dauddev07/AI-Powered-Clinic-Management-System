@@ -401,6 +401,18 @@ def _preceding_assistant_turn_looks_like_a_question(history) -> bool:
     return content.endswith("?") or content.endswith("؟")
 
 
+# The specific "cancel" / "reschedule" action-verb vocabularies — pulled out as
+# their own named constants (rather than only living inline inside
+# _BOOKING_ACTION_KEYWORDS below) because app.services.orchestrator.agents.
+# appointment_agent needs these exact same two word sets for its own, much
+# narrower purpose (_detect_action_intent: deciding WHICH action a message
+# names, not just whether it's booking-related at all). They used to be defined
+# independently in both files with identical membership — real duplication that
+# could silently drift apart if one were ever updated without the other. One
+# shared definition here means there's only one place to update either list.
+_CANCEL_ACTION_WORDS = frozenset({"cancel", "cancellation", "cancelled", "canceling", "cancelling"})
+_RESCHEDULE_ACTION_WORDS = frozenset({"reschedule", "rescheduling", "postpone", "postponing"})
+
 # Booking-action intent vocabulary for needs_booking_action_tools() below —
 # deliberately broad/over-inclusive, same fail-safe philosophy as
 # _KNOWLEDGE_KEYWORDS: binding book_appointment/reschedule_appointment/
@@ -408,9 +420,8 @@ def _preceding_assistant_turn_looks_like_a_question(history) -> bool:
 # that's actually needed breaks the booking flow outright. The asymmetry means this
 # should err toward matching too much, never too little.
 _BOOKING_ACTION_KEYWORDS = frozenset({
-    "book", "booking", "appointment", "appointments", "schedule", "reschedule",
-    "rescheduling", "cancel", "cancellation", "cancelled", "canceling", "cancelling",
-    "postpone", "postponing", "confirm", "confirmed", "slot", "slots",
+    "book", "booking", "appointment", "appointments", "schedule",
+    "confirm", "confirmed", "slot", "slots",
     # Reported gap: "is there any cardiologist available on Friday?" named no booking
     # action word at all, so it fell through to general_info_agent (KB-only, no
     # get_department_availability tool) and got answered from static Retrieved
@@ -418,7 +429,7 @@ _BOOKING_ACTION_KEYWORDS = frozenset({
     # "availability" is exactly how patients ask this without ever saying "book" or
     # "slot" — must route to a tool-bound agent same as those do.
     "available", "availability",
-})
+}) | _CANCEL_ACTION_WORDS | _RESCHEDULE_ACTION_WORDS
 
 # Phrasal cancel/reschedule intent that a single-word keyword check would miss —
 # "I can't make it anymore" carries the same intent as "cancel" without using that

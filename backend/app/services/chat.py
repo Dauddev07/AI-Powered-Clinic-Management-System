@@ -164,22 +164,81 @@ def _is_marker_reply(reply: str) -> bool:
     return reply.startswith((BOOKING_MARKER, DOCTOR_OPTIONS_MARKER, DEPARTMENT_LIST_MARKER, DOCTOR_DISAMBIGUATION_MARKER))
 
 
+# GUARD PIPELINE — red_flag (checks the incoming message, can short-circuit the
+# whole turn before any agent runs) and diagnosis_guard (checks/rewrites the
+# agent's own reply afterward) are both "a prompt instruction alone is not a
+# guarantee, so a plain deterministic check runs regardless of what the model
+# would have done" — the same idea applied at two different points in the turn.
+# They used to be two individually-wired calls inside handle_chat_message; now
+# each stage is an ordered tuple of guard functions, so a second guard at either
+# stage (e.g. a future abuse/rate-limit check before the agent runs) is a matter
+# of adding one function to a tuple, not editing this function's control flow
+# again. Behavior for the two guards that exist today is unchanged either way.
+@dataclass
+class GuardOutcome:
+    reply: str
+    red_flag: bool = False
+
+
+def _red_flag_guard(message: str) -> GuardOutcome | None:
+    """Emergency detection runs before anything else — a real emergency
+    short-circuits triage, booking, and KB retrieval entirely and returns the
+    urgent routing message immediately. A prompt instruction alone is not a
+    guarantee, so this is a plain server-side regex gate, not something the LLM
+    is asked to decide."""
+    if detect_red_flag(message):
+        return GuardOutcome(reply=red_flag_message(), red_flag=True)
+    return None
+
+
+# Pre-agent guards: each takes the raw incoming message and can fully resolve
+# the turn (return a GuardOutcome) before routing/the specialist agent ever
+# runs. First non-None result wins; None means "not this guard's concern, try
+# the next one" — same first-match-wins shape as router._RULE_CASCADE.
+_PRE_AGENT_GUARDS: tuple = (_red_flag_guard,)
+
+
+def _run_pre_agent_guards(message: str) -> GuardOutcome | None:
+    for guard in _PRE_AGENT_GUARDS:
+        outcome = guard(message)
+        if outcome is not None:
+            return outcome
+    return None
+
+
+def _diagnosis_phrasing_guard(reply: str, language: str) -> str:
+    """Server-side regex backstop that rewrites diagnostic-sounding phrasing out
+    of the agent's own reply — skipped entirely for a marker-prefixed reply (see
+    _is_marker_reply's docstring)."""
+    if _is_marker_reply(reply):
+        return reply
+    return enforce_no_diagnosis(reply, language)
+
+
+# Post-agent guards: each takes the specialist agent's reply and returns a
+# (possibly rewritten) reply, applied in order. Today there's only one; a
+# second post-agent guard is one more entry in this tuple.
+_POST_AGENT_GUARDS: tuple = (_diagnosis_phrasing_guard,)
+
+
+def _run_post_agent_guards(reply: str, language: str) -> str:
+    for guard in _POST_AGENT_GUARDS:
+        reply = guard(reply, language)
+    return reply
+
+
 def handle_chat_message(
     db: Session, ctx: ClinicContext, message: str, session_id: uuid.UUID | None
 ) -> ChatTurnResult:
     session_id = session_id or uuid.uuid4()
     language = detect_language(message)
 
-    # Emergency detection runs before anything else — a real emergency short-circuits
-    # triage, booking, and KB retrieval entirely and returns the urgent routing
-    # message immediately. A prompt instruction alone is not a guarantee, so this is
-    # a plain server-side regex gate, not something the LLM is asked to decide.
-    if detect_red_flag(message):
-        reply = red_flag_message()
+    pre_guard_outcome = _run_pre_agent_guards(message)
+    if pre_guard_outcome is not None:
         _save_message(db, ctx, session_id, "user", message)
-        _save_message(db, ctx, session_id, "assistant", reply, red_flag=True)
+        _save_message(db, ctx, session_id, "assistant", pre_guard_outcome.reply, red_flag=pre_guard_outcome.red_flag)
         db.commit()
-        return ChatTurnResult(session_id=session_id, reply=reply, red_flag=True)
+        return ChatTurnResult(session_id=session_id, reply=pre_guard_outcome.reply, red_flag=pre_guard_outcome.red_flag)
 
     # Loaded before the current turn is saved, so the prompt's history never
     # double-includes the message being answered right now.
@@ -225,8 +284,7 @@ def handle_chat_message(
             db, ctx, message, language, _trim_history(history, GENERAL_INFO_AGENT_HISTORY_LIMIT)
         )
 
-    if not _is_marker_reply(reply):
-        reply = enforce_no_diagnosis(reply, language)
+    reply = _run_post_agent_guards(reply, language)
 
     _save_message(db, ctx, session_id, "user", message)
     _save_message(db, ctx, session_id, "assistant", reply)

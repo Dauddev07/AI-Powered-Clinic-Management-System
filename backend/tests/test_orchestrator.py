@@ -2208,6 +2208,96 @@ def test_run_appointment_agent_narrowing_phrase_without_prior_card_falls_through
     assert "ask ONE direct confirming question" in captured["system_prompt"]
 
 
+def test_run_appointment_agent_narrows_after_resolving_a_name_disambiguation_reply(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: "only show available slots for dr iqra" matched two doctors
+    # (Dr. Iqra Qureshi, Dr. Iqra Raza) and correctly asked "did you mean X or Y?".
+    # The patient's reply, "I mean Dr. Iqra Raza (ENT).", named no narrowing word
+    # of its own — the ORIGINAL narrowing intent, stated in the message that
+    # triggered the name disambiguation, was lost, and the full unfiltered
+    # two-doctor card was shown again instead of a filtered single-doctor one.
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+
+    ent = Department(clinic_id=clinic.id, name="ENT")
+    dentistry = Department(clinic_id=clinic.id, name="Dentistry")
+    db.add_all([ent, dentistry])
+    db.flush()
+    iqra_raza = Doctor(
+        clinic_id=clinic.id, department_id=ent.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Iqra Raza", is_active=True,
+    )
+    waqas = Doctor(
+        clinic_id=clinic.id, department_id=ent.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Waqas Farooq", is_active=True,
+    )
+    iqra_qureshi = Doctor(
+        clinic_id=clinic.id, department_id=dentistry.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Iqra Qureshi", is_active=True,
+    )
+    db.add_all([iqra_raza, waqas, iqra_qureshi])
+    db.flush()
+
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.slot import Slot
+
+    db.add_all([
+        Slot(
+            clinic_id=clinic.id, doctor_id=iqra_raza.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ),
+        Slot(
+            clinic_id=clinic.id, doctor_id=waqas.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ),
+    ])
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be involved in filtering an already-shown card")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    card = json.dumps(
+        {
+            "note": "Based on what you've described, this sounds like something ENT should look at",
+            "department_name": "ENT",
+            "doctors": [
+                {"doctor_name": "Dr. Iqra Raza", "specialization": "Head & Neck Surgery", "slots": []},
+                {"doctor_name": "Dr. Waqas Farooq", "specialization": "Otolaryngology", "slots": []},
+            ],
+        }
+    )
+
+    # Step 1: the ambiguous-name request correctly asks which Iqra is meant.
+    history = [_row("assistant", DOCTOR_OPTIONS_MARKER + card)]
+    disambiguation = appointment_agent.run_appointment_agent(
+        db, ctx, "only show available slots for dr iqra", "en", history
+    )
+    assert disambiguation.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    disambiguation_payload = json.loads(disambiguation[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert disambiguation_payload["kind"] == "doctor_name"
+
+    # Step 2: answering which doctor is meant must still apply the original
+    # narrowing request, returning a real, filtered single-doctor card.
+    history = [
+        _row("assistant", DOCTOR_OPTIONS_MARKER + card),
+        _row("user", "only show available slots for dr iqra"),
+        _row("assistant", disambiguation),
+    ]
+    result = appointment_agent.run_appointment_agent(db, ctx, "I mean Dr. Iqra Raza (ENT).", "en", history)
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert [d["doctor_name"] for d in payload["doctors"]] == ["Dr. Iqra Raza"]
+
+
 # --- appointment-ambiguity handoff (cancel/reschedule against real appointments) ----
 
 
@@ -2251,6 +2341,41 @@ def test_run_appointment_agent_asks_confirmation_before_cancelling_when_exactly_
     payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
     assert payload["kind"] == "cancel_confirm"
     assert payload["candidate"]["appointment_id"] == str(appt.id)
+
+
+def test_run_appointment_agent_phrases_confirmation_as_an_answer_to_a_capability_question(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    # Reported live: the confirm-before-act gate itself was correct, but "can i
+    # also cancel my appointment?" got the same command-toned "Just to confirm —
+    # you'd like to cancel..." wording as a direct "cancel my appointment", which
+    # reads as ignoring the question being asked. Same safety gate, different
+    # wording only when the message is phrased as a capability question.
+    appt = _future_appointment(db, clinic, patient, doctor)
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM")),
+    )
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "can i also cancel my appointment?", "en", [])
+
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "cancel_confirm"
+    assert payload["question"].startswith("Yes, you can")
+    assert "Just to confirm" not in payload["question"]
+
+    # A direct command still gets the original "Just to confirm" wording.
+    direct_result = appointment_agent.run_appointment_agent(db, ctx, "cancel my appointment", "en", [])
+    direct_payload = json.loads(direct_result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert direct_payload["question"].startswith("Just to confirm")
+
+    # "yes" after the capability-question wording still actually cancels — the
+    # underlying gate/marker mechanism is unchanged.
+    history = [_row("assistant", result)]
+    cancel_result = appointment_agent.run_appointment_agent(db, ctx, "yes", "en", history)
+    assert "has been cancelled" in cancel_result
+    db.refresh(appt)
+    assert appt.status == "cancelled"
 
 
 def test_run_appointment_agent_cancels_only_after_explicit_yes_to_confirmation(
@@ -2672,6 +2797,152 @@ def test_run_appointment_agent_only_binds_its_five_tools(monkeypatch, db, ctx):
         "get_my_appointments",
         "get_department_availability",
     }
+
+
+# =====================================================================================
+# Scenario matrix: pending-state x message-type combinations
+# =====================================================================================
+# Nearly every appointment_agent bug fixed in this file was a PENDING STATE (a marker
+# question the assistant just asked — cancel_confirm / appointment disambiguation /
+# doctor_name disambiguation) crossed with a MESSAGE TYPE (how the patient's reply is
+# phrased) that had never been exercised together before — e.g. a narrowing request
+# stated before a name-disambiguation question, then answered with a plain name that
+# carries no narrowing word of its own. This matrix drives all three pending kinds
+# this module supports against several distinct reply shapes and checks the one
+# invariant that must hold no matter which combination fires: a real appointment is
+# only ever mutated by an unambiguous "yes" to its own cancel_confirm question — never
+# by an unrelated message, a "no", or a message answering a different pending
+# question.
+
+
+def test_scenario_matrix_cancel_confirm_pending_only_yes_mutates(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    appt = _future_appointment(db, clinic, patient, doctor)
+    db.commit()
+    candidate = {
+        "appointment_id": str(appt.id), "doctor_name": "Dr. Ahmed Khan",
+        "department_name": "Cardiology", "when": "Mon, Aug 10 at 9:00 AM",
+    }
+    pending = appointment_agent.DOCTOR_DISAMBIGUATION_MARKER + json.dumps(
+        {"kind": "cancel_confirm", "question": "confirm?", "candidate": candidate}
+    )
+    history = [_row("assistant", pending)]
+
+    # "no" -> declined, never mutated.
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM for a clear no")),
+    )
+    appointment_agent.run_appointment_agent(db, ctx, "no", "en", history)
+    db.refresh(appt)
+    assert appt.status == "confirmed"
+
+    # An unrelated reply -> falls through to normal handling, still not mutated by
+    # this turn alone (no cancel keyword in this message, no active resolution).
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", lambda *a, **k: "reply")
+    appointment_agent.run_appointment_agent(db, ctx, "what are your opening hours", "en", history)
+    db.refresh(appt)
+    assert appt.status == "confirmed"
+
+    # "yes" -> and only "yes" -> actually cancels.
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("cancelling must never go through the LLM")),
+    )
+    result = appointment_agent.run_appointment_agent(db, ctx, "yes", "en", history)
+    assert "has been cancelled" in result
+    db.refresh(appt)
+    assert appt.status == "cancelled"
+
+
+def test_scenario_matrix_appointment_disambiguation_pending_only_a_real_match_resolves(
+    monkeypatch, db, ctx, clinic, doctor, other_doctor, patient
+):
+    _future_appointment(db, clinic, patient, doctor)
+    other_appt = _future_appointment(db, clinic, patient, other_doctor)
+    candidates = [
+        {"appointment_id": "id-1", "doctor_name": "Dr. Ahmed Khan", "department_name": "Cardiology", "when": "Mon"},
+        {"appointment_id": str(other_appt.id), "doctor_name": "Dr. Ahmed Raza", "department_name": "Neurology", "when": "Tue"},
+    ]
+    pending = appointment_agent.DOCTOR_DISAMBIGUATION_MARKER + json.dumps(
+        {"kind": "appointment", "action": "cancel", "question": "which one?", "candidates": candidates}
+    )
+    history = [_row("assistant", pending)]
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM before the patient confirms a cancel")),
+    )
+
+    # A reply matching neither candidate -> re-asks, no resolution at all.
+    reask = appointment_agent.run_appointment_agent(db, ctx, "the first one please", "en", history)
+    assert reask.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    assert json.loads(reask[len(DOCTOR_DISAMBIGUATION_MARKER):])["kind"] == "appointment"
+
+    # A reply naming the real candidate -> resolves to a cancel_confirm question for
+    # THAT SPECIFIC appointment, still not an actual cancellation yet.
+    resolved = appointment_agent.run_appointment_agent(db, ctx, "Dr. Ahmed Raza", "en", history)
+    resolved_payload = json.loads(resolved[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert resolved_payload["kind"] == "cancel_confirm"
+    assert resolved_payload["candidate"]["appointment_id"] == str(other_appt.id)
+
+
+def test_scenario_matrix_doctor_name_disambiguation_pending_only_a_real_match_resolves(
+    monkeypatch, db, ctx, clinic
+):
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+
+    ent = Department(clinic_id=clinic.id, name="ENT")
+    dentistry = Department(clinic_id=clinic.id, name="Dentistry")
+    db.add_all([ent, dentistry])
+    db.flush()
+    db.add_all([
+        Doctor(
+            clinic_id=clinic.id, department_id=ent.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+            full_name="Dr. Iqra Raza", is_active=True,
+        ),
+        Doctor(
+            clinic_id=clinic.id, department_id=dentistry.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+            full_name="Dr. Iqra Qureshi", is_active=True,
+        ),
+    ])
+    db.flush()
+
+    candidates = [
+        {"doctor_name": "Dr. Iqra Qureshi", "department_name": "Dentistry"},
+        {"doctor_name": "Dr. Iqra Raza", "department_name": "ENT"},
+    ]
+    pending = appointment_agent.DOCTOR_DISAMBIGUATION_MARKER + json.dumps(
+        {"kind": "doctor_name", "question": "which one?", "candidates": candidates}
+    )
+    history = [_row("assistant", pending)]
+
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["system_prompt"] = system_prompt
+        return "reply"
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+
+    # A reply naming neither doctor by name at all still reaches the LLM normally
+    # (no forced/fake resolution) — this pending kind has no dedicated re-ask
+    # short-circuit of its own, unlike the other two.
+    appointment_agent.run_appointment_agent(db, ctx, "actually never mind", "en", history)
+    assert "RESOLVED DOCTOR" not in captured["system_prompt"]
+
+    # A reply naming the real doctor resolves to exactly that one, correct
+    # department included, and reaches the LLM with a real RESOLVED DOCTOR block
+    # (no prior DOCTOR_OPTIONS/DEPARTMENT_LIST card in this history, so it isn't
+    # treated as already-shown — full narrowing behavior for that combination is
+    # covered by test_run_appointment_agent_narrows_after_resolving_a_name_
+    # disambiguation_reply above).
+    result = appointment_agent.run_appointment_agent(db, ctx, "I mean Dr. Iqra Raza (ENT).", "en", history)
+    assert result == "reply"
+    assert "RESOLVED DOCTOR" in captured["system_prompt"]
+    assert "Dr. Iqra Raza" in captured["system_prompt"]
 
 
 # =====================================================================================

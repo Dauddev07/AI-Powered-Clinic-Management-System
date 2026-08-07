@@ -80,7 +80,11 @@ from app.services.department_availability import (
     get_department_availability,
     list_active_department_names,
 )
-from app.services.message_classifier import _preceding_assistant_turn_looks_like_a_question
+from app.services.message_classifier import (
+    _CANCEL_ACTION_WORDS,
+    _RESCHEDULE_ACTION_WORDS,
+    _preceding_assistant_turn_looks_like_a_question,
+)
 from app.services.orchestrator.symptom_hints import departments_hinted_by_patient_symptom_words
 
 _APPOINTMENT_AGENT_TOOL_NAMES = {
@@ -106,8 +110,10 @@ doctor, or no such list is present at all), call get_department_availability \
 yourself to check fresh rather than guessing or claiming nothing is available.
 """
 
-_CANCEL_KEYWORDS = frozenset({"cancel", "cancellation", "cancelling", "canceling", "cancelled"})
-_RESCHEDULE_KEYWORDS = frozenset({"reschedule", "rescheduling", "postpone", "postponing"})
+# Reuses message_classifier's own _CANCEL_ACTION_WORDS/_RESCHEDULE_ACTION_WORDS —
+# see that module for why these are shared rather than defined twice.
+_CANCEL_KEYWORDS = _CANCEL_ACTION_WORDS
+_RESCHEDULE_KEYWORDS = _RESCHEDULE_ACTION_WORDS
 
 # Reported live: "book with dr raza ali" -> "Did you mean Dr. Ali Raza in General
 # Medicine?" -> patient replies "yes" -> the very next reply asks "which department
@@ -152,23 +158,39 @@ def _is_short_negative_reply(message: str) -> bool:
     return bool(_NEGATIVE_RE.match(message.strip()))
 
 
-def _cancel_confirmation_reply(appointment: dict) -> str:
-    """Composed entirely from a real, current appointment row — never model-
-    generated, same principle as _disambiguation_marker_reply/
-    _appointment_disambiguation_reply below."""
-    question = (
-        f"Just to confirm — you'd like to cancel your appointment with "
-        f"{appointment['doctor_name']} in {appointment['department_name']} on "
-        f"{appointment['when']}?"
-    )
-    payload = {"kind": "cancel_confirm", "question": question, "candidate": appointment}
-    return DOCTOR_DISAMBIGUATION_MARKER + json.dumps(payload)
+# Reported live: "can i also cancel my appointment?" got the same "Just to confirm
+# — you'd like to cancel..." wording as a direct "cancel my appointment" command.
+# The confirm-before-act GATE was correct and stayed unchanged (still never cancels
+# without an explicit yes below) — but a "can I...?" is a genuine question about
+# capability, and answering it with a command-toned confirmation reads as if the
+# question was ignored. This only changes the wording for that one phrasing; the
+# underlying cancel_confirm marker/pending-confirmation mechanism is identical
+# either way, so "yes" after either wording still resolves the same way.
+_CAPABILITY_QUESTION_RE = re.compile(
+    r"^\s*(?:can|could)\s+i\b|^\s*am\s+i\s+able\s+to\b|^\s*is\s+it\s+possible\s+(?:for\s+me\s+)?to\b",
+    re.IGNORECASE,
+)
 
 
-def _pending_cancel_confirmation(history: list[ConversationMemory]) -> dict | None:
-    """True only when the assistant's OWN last turn was
-    _cancel_confirmation_reply's own question — a genuine reply to it, not just any
-    later message, mirroring _pending_appointment_disambiguation below."""
+def _message_is_a_capability_question(message: str) -> bool:
+    return bool(_CAPABILITY_QUESTION_RE.match(message.strip()))
+
+
+# Every "I need one more thing from you before I can act" question this module
+# asks (cancel confirmation, appointment disambiguation, doctor-name
+# disambiguation) is rendered the same way: a DOCTOR_DISAMBIGUATION_MARKER reply
+# tagged with a `kind`. Originally each had its own copy of "check the assistant's
+# last turn, parse the marker, check the kind" — which is exactly how the
+# doctor-name case ended up with no shared recovery path when a later fix (the
+# narrowing filter) needed to look at it too. One shared lookup means a new kind
+# added later automatically gets the same "is this actually a live pending
+# question, not a stale one" guarantee as the others, instead of needing its own
+# copy remembered.
+def _last_assistant_disambiguation_payload(history: list[ConversationMemory]) -> dict | None:
+    """Returns the parsed JSON payload of the assistant's own last turn if it was
+    a DOCTOR_DISAMBIGUATION_MARKER-prefixed reply — None for any other last turn,
+    including an earlier marker reply the conversation has already moved past, so
+    a stale question is never mistaken for a live one."""
     if not history:
         return None
     last = history[-1]
@@ -178,10 +200,37 @@ def _pending_cancel_confirmation(history: list[ConversationMemory]) -> dict | No
     if not content.startswith(DOCTOR_DISAMBIGUATION_MARKER):
         return None
     try:
-        payload = json.loads(content[len(DOCTOR_DISAMBIGUATION_MARKER):])
+        return json.loads(content[len(DOCTOR_DISAMBIGUATION_MARKER):])
     except (ValueError, TypeError):
         return None
-    if payload.get("kind") != "cancel_confirm":
+
+
+def _cancel_confirmation_reply(appointment: dict, phrased_as_capability_question: bool = False) -> str:
+    """Composed entirely from a real, current appointment row — never model-
+    generated, same principle as _disambiguation_marker_reply/
+    _appointment_disambiguation_reply below."""
+    if phrased_as_capability_question:
+        question = (
+            f"Yes, you can — you have an appointment with {appointment['doctor_name']} in "
+            f"{appointment['department_name']} on {appointment['when']}. Just let me know if "
+            f"you'd like me to go ahead and cancel it."
+        )
+    else:
+        question = (
+            f"Just to confirm — you'd like to cancel your appointment with "
+            f"{appointment['doctor_name']} in {appointment['department_name']} on "
+            f"{appointment['when']}?"
+        )
+    payload = {"kind": "cancel_confirm", "question": question, "candidate": appointment}
+    return DOCTOR_DISAMBIGUATION_MARKER + json.dumps(payload)
+
+
+def _pending_cancel_confirmation(history: list[ConversationMemory]) -> dict | None:
+    """True only when the assistant's OWN last turn was
+    _cancel_confirmation_reply's own question — a genuine reply to it, not just any
+    later message, mirroring _pending_appointment_disambiguation below."""
+    payload = _last_assistant_disambiguation_payload(history)
+    if payload is None or payload.get("kind") != "cancel_confirm":
         return None
     return payload.get("candidate")
 
@@ -213,6 +262,27 @@ def _message_references_a_doctor_by_pronoun(message: str) -> bool:
     return bool(words & _DOCTOR_PRONOUN_WORDS)
 
 
+# Both "recover a doctor named a turn or two ago" and "recover a cancel/reschedule
+# verb stated a turn or two ago" (below) need the identical shape of scan: walk
+# recent USER turns only, most-recent-first, stop at the first hit, never reach
+# past a shared bound. Two independent copies of that loop is how the two
+# lookback depths could quietly drift apart if only one were ever tuned — one
+# shared scanner removes that risk.
+def _scan_recent_user_messages(history: list[ConversationMemory], matcher, limit: int):
+    """Returns the first non-None result of `matcher(content)` when scanning the
+    most recent `limit` user turns, most recent first. `matcher` takes a single
+    message string and returns whatever "found" value matters to the caller (a
+    DoctorMatch, an action string, ...) or None to keep scanning."""
+    user_messages = [
+        getattr(row, "content", "") or "" for row in history if getattr(row, "role", None) == "user"
+    ][-limit:]
+    for content in reversed(user_messages):
+        result = matcher(content)
+        if result is not None:
+            return result
+    return None
+
+
 _DOCTOR_REFERENCE_LOOKBACK_TURNS = 6
 
 
@@ -222,14 +292,11 @@ def _most_recently_named_doctor(db: Session, clinic_id, history: list[Conversati
     name — bounded lookback over user turns only, mirroring
     _most_recent_action_intent's own bounded scan, so this can't reach back into an
     unrelated, much older part of the conversation."""
-    user_messages = [
-        getattr(row, "content", "") or "" for row in history if getattr(row, "role", None) == "user"
-    ][-_DOCTOR_REFERENCE_LOOKBACK_TURNS:]
-    for content in reversed(user_messages):
+    def matcher(content: str):
         matches = find_doctors_by_name(db, clinic_id, content)
-        if len(matches) == 1:
-            return matches[0]
-    return None
+        return matches[0] if len(matches) == 1 else None
+
+    return _scan_recent_user_messages(history, matcher, limit=_DOCTOR_REFERENCE_LOOKBACK_TURNS)
 
 
 # Reported live: after a two-doctor DOCTOR_OPTIONS card was shown (General
@@ -248,6 +315,37 @@ _NARROW_TO_ONE_DOCTOR_WORDS = frozenset({"only", "just", "specifically", "solely
 def _message_asks_to_narrow_to_one_doctor(message: str) -> bool:
     words = set(re.findall(r"[a-z0-9']+", message.lower()))
     return bool(words & _NARROW_TO_ONE_DOCTOR_WORDS)
+
+
+# Reported live: "only show available slots for dr iqra" matched TWO doctors
+# (Dr. Iqra Qureshi, Dr. Iqra Raza) and correctly asked "did you mean X or Y?" —
+# but once the patient answered "I mean Dr. Iqra Raza (ENT)." (a plain name, no
+# narrowing word of its own), the ORIGINAL narrowing request was lost: this reply
+# message alone doesn't say "only"/"just", so the narrowing check above never
+# fired, and the full unfiltered two-doctor card was shown again. The patient's
+# intent to narrow was stated once, in the message that triggered the name
+# disambiguation — it shouldn't have to be repeated in the very next reply just
+# because that reply happened to be answering a different (name) question.
+def _pending_doctor_name_disambiguation(history: list[ConversationMemory]) -> dict | None:
+    """True only when the assistant's OWN last turn was
+    _disambiguation_marker_reply's own question — the doctor-name counterpart to
+    _pending_cancel_confirmation/_pending_appointment_disambiguation above, added
+    once the narrowing check below needed it too."""
+    payload = _last_assistant_disambiguation_payload(history)
+    if payload is None or payload.get("kind") != "doctor_name":
+        return None
+    return payload
+
+
+def _message_or_pending_name_disambiguation_asks_to_narrow(
+    message: str, history: list[ConversationMemory]
+) -> bool:
+    if _message_asks_to_narrow_to_one_doctor(message):
+        return True
+    if _pending_doctor_name_disambiguation(history) is None:
+        return False
+    prior_message = _most_recent_user_message(history)
+    return bool(prior_message and _message_asks_to_narrow_to_one_doctor(prior_message))
 
 
 def _detect_action_intent(message: str) -> str | None:
@@ -275,14 +373,7 @@ def _most_recent_action_intent(history: list[ConversationMemory]) -> str | None:
     on their first request, expecting that same context to still apply). Bounded
     lookback over user turns only, so this can't reach back into an unrelated,
     much older part of the conversation."""
-    user_messages = [
-        getattr(row, "content", "") or "" for row in history if getattr(row, "role", None) == "user"
-    ][-_ACTION_INTENT_LOOKBACK_TURNS:]
-    for content in reversed(user_messages):
-        action = _detect_action_intent(content)
-        if action is not None:
-            return action
-    return None
+    return _scan_recent_user_messages(history, _detect_action_intent, limit=_ACTION_INTENT_LOOKBACK_TURNS)
 
 
 # Reported live: patient described fever + body aches (correctly routed to General
@@ -452,19 +543,8 @@ def _pending_appointment_disambiguation(history: list[ConversationMemory]) -> di
     _appointment_disambiguation_reply's own question — a genuine reply to it, not
     just any later message, so an unrelated message sent after being asked doesn't
     get misread as answering a stale question."""
-    if not history:
-        return None
-    last = history[-1]
-    if getattr(last, "role", None) != "assistant":
-        return None
-    content = getattr(last, "content", "") or ""
-    if not content.startswith(DOCTOR_DISAMBIGUATION_MARKER):
-        return None
-    try:
-        payload = json.loads(content[len(DOCTOR_DISAMBIGUATION_MARKER):])
-    except (ValueError, TypeError):
-        return None
-    if payload.get("kind") != "appointment":
+    payload = _last_assistant_disambiguation_payload(history)
+    if payload is None or payload.get("kind") != "appointment":
         return None
     return payload
 
@@ -643,7 +723,7 @@ def run_appointment_agent(
     # layer at all; it always asks first, deterministically, and only actually
     # cancels once _pending_cancel_confirmation above sees an explicit "yes".
     if resolved_appointment is not None and resolved_appointment_action == "cancel":
-        return _cancel_confirmation_reply(resolved_appointment)
+        return _cancel_confirmation_reply(resolved_appointment, _message_is_a_capability_question(message))
 
     # Symptom-vs-department mismatch check: only for a fresh booking-department
     # reference, never for a cancel/reschedule action already resolved above (that's
@@ -718,7 +798,7 @@ def run_appointment_agent(
         resolved_match is not None
         and doctor_already_shown
         and resolved_appointment is None
-        and _message_asks_to_narrow_to_one_doctor(message)
+        and _message_or_pending_name_disambiguation_asks_to_narrow(message, history)
     ):
         availability = get_department_availability(
             db, ctx.clinic_id, resolved_match.department_name, doctor_id=resolved_match.doctor_id
