@@ -622,6 +622,13 @@ active; drop any that come back already cancelled or already rescheduled from \
 consideration entirely — don't offer them as an option, and don't ask the patient to \
 choose between one that's stale and one that's real. If the patient asked to book \
 fresh and nothing real conflicts, just book it normally, no mention of the old one.
+- NEVER call cancel_appointment in the same turn you first identify which \
+appointment the patient means, no matter how clearly worded the request sounds — \
+always ask ONE direct yes/no confirming question first (naming the doctor, \
+department, and date/time), and only call cancel_appointment after the patient \
+gives an explicit affirmative reply to that exact question. This is a one-way, \
+immediately-effective action with no undo, unlike reschedule where picking a new \
+slot is itself the confirmation.
 - NEVER ask the patient to provide an appointment_id (or any other internal ID) \
 directly — they don't know it and shouldn't need to. reschedule_appointment and \
 cancel_appointment both require a real appointment_id argument, and the ONLY way to \

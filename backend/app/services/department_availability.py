@@ -139,6 +139,7 @@ def get_department_availability(
     department_name: str,
     earliest_date: date | None = None,
     latest_date: date | None = None,
+    doctor_id: uuid.UUID | None = None,
 ) -> DepartmentAvailabilityResult:
     """Exact (case-insensitive, trimmed) department-name match only — deliberately no
     fuzzy/closest-match guessing, so a typo'd or nonexistent department is reported as
@@ -157,6 +158,12 @@ def get_department_availability(
     slot but the department does have doctors, a second, unbounded query finds the
     real earliest upcoming slot so the caller can report exactly when that is
     instead of a generic "nothing available" message.
+
+    `doctor_id`, when given, narrows the doctors query to that one real doctor
+    (still required to belong to this department) — used when a patient has
+    already been shown a multi-doctor card and asks to narrow it down to just one
+    of them (e.g. "only show me Dr. X's slots"), rather than always returning
+    every doctor in the department.
     """
     department = db.execute(
         select(Department).where(
@@ -178,10 +185,11 @@ def get_department_availability(
     earliest = max(now, datetime.combine(earliest_date, time.min, tzinfo=timezone.utc)) if earliest_date else now
     latest = datetime.combine(latest_date, time.min, tzinfo=timezone.utc) + timedelta(days=1) if latest_date else None
 
+    doctor_filters = [Doctor.clinic_id == clinic_id, Doctor.department_id == department.id, Doctor.is_active.is_(True)]
+    if doctor_id is not None:
+        doctor_filters.append(Doctor.id == doctor_id)
     doctors = db.execute(
-        select(Doctor)
-        .where(Doctor.clinic_id == clinic_id, Doctor.department_id == department.id, Doctor.is_active.is_(True))
-        .order_by(Doctor.full_name.asc())
+        select(Doctor).where(*doctor_filters).order_by(Doctor.full_name.asc())
     ).scalars().all()
 
     doctor_options: list[DoctorOption] = []

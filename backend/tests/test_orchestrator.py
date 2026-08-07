@@ -2061,6 +2061,153 @@ def test_run_appointment_agent_plain_yes_with_no_preceding_question_does_not_for
     assert "RESOLVED DOCTOR" not in captured["system_prompt"]
 
 
+def test_run_appointment_agent_resolves_doctor_from_pronoun_referencing_prior_message(
+    monkeypatch, db, ctx, doctor
+):
+    # Reported live: "hook me up with dr waqas" got a plain KB-prose reply (routed
+    # to general_info_agent, no card shown) describing him as "otolaryngology" —
+    # then "show me his available slots on fri" named no doctor at all, just the
+    # pronoun "his", and wasn't a bare "yes" either. Neither existing recovery path
+    # fired, leaving the LLM to guess a department_name from raw history — it
+    # apparently echoed "otolaryngology" (a specialization, not the real department
+    # name), and get_department_availability's exact-match lookup rejected it.
+    # This confirms the doctor is now recovered deterministically from the
+    # patient's own prior message via the pronoun, with a real confirming question
+    # asked (never skipped, since the patient never actually confirmed this
+    # identity — unlike the bare-"yes" case).
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["system_prompt"] = system_prompt
+        return "reply"
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+
+    history = [
+        _row("user", "hook me up with dr ahmed khan"),
+        _row(
+            "assistant",
+            "Dr. Ahmed Khan sees patients for cardiology Monday through Thursday "
+            "from 2:00 pm to 8:00 pm with 15-minute appointment slots.",
+        ),
+    ]
+    appointment_agent.run_appointment_agent(db, ctx, "show me his available slots on fri", "en", history)
+
+    assert "RESOLVED DOCTOR" in captured["system_prompt"]
+    assert "Dr. Ahmed Khan" in captured["system_prompt"]
+    assert "Cardiology" in captured["system_prompt"]
+    assert "ask ONE direct confirming question" in captured["system_prompt"]
+
+
+def test_run_appointment_agent_pronoun_with_no_prior_named_doctor_does_not_force_a_match(
+    monkeypatch, db, ctx, doctor
+):
+    # No doctor named anywhere in recent history — "his" must not spuriously
+    # resolve to an unrelated doctor.
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["system_prompt"] = system_prompt
+        return "reply"
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+
+    history = [
+        _row("user", "what are your opening hours"),
+        _row("assistant", "We're open 9am to 5pm, Monday through Saturday."),
+    ]
+    appointment_agent.run_appointment_agent(db, ctx, "show me his available slots on fri", "en", history)
+
+    assert "RESOLVED DOCTOR" not in captured["system_prompt"]
+
+
+def test_run_appointment_agent_narrows_shown_card_to_one_named_doctor_on_request(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # Reported live: a DOCTOR_OPTIONS card showed two doctors (Dr. Ali Raza, Dr.
+    # Farhan Rehman) in General Medicine. "only show me available slots for dr
+    # farhan rehman" re-showed the exact same unfiltered two-doctor card —
+    # get_department_availability has no doctor-filtering capability at all, so
+    # even a correctly-resolved single doctor had nothing downstream to act on it.
+    # Must now return a real, filtered, single-doctor card built directly from the
+    # DB, never routed through the LLM at all.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    other = Doctor(
+        clinic_id=clinic.id, department_id=department.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Farhan Rehman", is_active=True,
+    )
+    db.add(other)
+    db.flush()
+    db.add_all([
+        Slot(
+            clinic_id=clinic.id, doctor_id=doctor.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ),
+        Slot(
+            clinic_id=clinic.id, doctor_id=other.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ),
+    ])
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be involved in filtering an already-shown card")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    card = json.dumps(
+        {
+            "departments": [
+                {
+                    "department_name": "Cardiology",
+                    "doctors": [
+                        {"doctor_name": "Dr. Ahmed Khan", "specialization": None, "slots": []},
+                        {"doctor_name": "Dr. Farhan Rehman", "specialization": None, "slots": []},
+                    ],
+                }
+            ]
+        }
+    )
+    history = [_row("assistant", DEPARTMENT_LIST_MARKER + card)]
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "only show me available slots for dr farhan rehman", "en", history
+    )
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert [d["doctor_name"] for d in payload["doctors"]] == ["Dr. Farhan Rehman"]
+
+
+def test_run_appointment_agent_narrowing_phrase_without_prior_card_falls_through_normally(
+    monkeypatch, db, ctx, doctor
+):
+    # "only"/"just" with a doctor named for the first time (never shown in a card
+    # yet) must not spuriously short-circuit — doctor_already_shown is False here.
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["system_prompt"] = system_prompt
+        return "reply"
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "only show me available slots for dr ahmed khan", "en", []
+    )
+
+    assert result == "reply"
+    assert "ask ONE direct confirming question" in captured["system_prompt"]
+
+
 # --- appointment-ambiguity handoff (cancel/reschedule against real appointments) ----
 
 
@@ -2084,24 +2231,84 @@ def _future_appointment(db, clinic, patient, doctor, days_from_now=1, status="co
     return appt
 
 
-def test_run_appointment_agent_auto_resolves_when_exactly_one_active_appointment(
+def test_run_appointment_agent_asks_confirmation_before_cancelling_when_exactly_one_active_appointment(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    # Reported live: "show me my upcoming appointment" (one shown), then "can i
+    # cancel that?" — a QUESTION, not a command — cancelled the appointment
+    # outright with zero confirmation. Cancel must always ask first, deterministically,
+    # and never reach the LLM/tool layer until the patient explicitly confirms.
+    appt = _future_appointment(db, clinic, patient, doctor)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called before the patient confirms a cancel")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "can i cancel that?", "en", [])
+
+    assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "cancel_confirm"
+    assert payload["candidate"]["appointment_id"] == str(appt.id)
+
+
+def test_run_appointment_agent_cancels_only_after_explicit_yes_to_confirmation(
     monkeypatch, db, ctx, clinic, doctor, patient
 ):
     appt = _future_appointment(db, clinic, patient, doctor)
-    captured = {}
+    db.commit()
 
-    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
-        captured["system_prompt"] = system_prompt
-        return "reply"
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must never be involved in the actual cancel action")
 
-    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
 
-    result = appointment_agent.run_appointment_agent(db, ctx, "cancel my appointment", "en", [])
+    candidate = {
+        "appointment_id": str(appt.id),
+        "doctor_name": "Dr. Ahmed Khan",
+        "department_name": "Cardiology",
+        "when": "Mon, Aug 10 at 9:00 AM",
+    }
+    pending = appointment_agent.DOCTOR_DISAMBIGUATION_MARKER + json.dumps(
+        {"kind": "cancel_confirm", "question": "confirm?", "candidate": candidate}
+    )
+    history = [_row("assistant", pending)]
 
-    assert result == "reply"
-    assert "RESOLVED APPOINTMENT" in captured["system_prompt"]
-    assert str(appt.id) in captured["system_prompt"]
-    assert "Call cancel_appointment with this exact appointment_id" in captured["system_prompt"]
+    result = appointment_agent.run_appointment_agent(db, ctx, "yes", "en", history)
+
+    assert "has been cancelled" in result
+    db.refresh(appt)
+    assert appt.status == "cancelled"
+
+
+def test_run_appointment_agent_declining_confirmation_leaves_appointment_untouched(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    appt = _future_appointment(db, clinic, patient, doctor)
+    db.commit()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be called when the patient declines the cancel")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    candidate = {
+        "appointment_id": str(appt.id),
+        "doctor_name": "Dr. Ahmed Khan",
+        "department_name": "Cardiology",
+        "when": "Mon, Aug 10 at 9:00 AM",
+    }
+    pending = appointment_agent.DOCTOR_DISAMBIGUATION_MARKER + json.dumps(
+        {"kind": "cancel_confirm", "question": "confirm?", "candidate": candidate}
+    )
+    history = [_row("assistant", pending)]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "no", "en", history)
+
+    assert "was not cancelled" in result
+    db.refresh(appt)
+    assert appt.status == "confirmed"
 
 
 def test_run_appointment_agent_short_circuits_asking_which_when_multiple_active_and_no_doctor_named(
@@ -2133,21 +2340,20 @@ def test_run_appointment_agent_narrows_multiple_active_via_named_doctor_in_same_
 ):
     _future_appointment(db, clinic, patient, doctor)
     other_appt = _future_appointment(db, clinic, patient, other_doctor)
-    captured = {}
 
-    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
-        captured["system_prompt"] = system_prompt
-        return "reply"
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called before the patient confirms a cancel")
 
-    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
 
     result = appointment_agent.run_appointment_agent(
         db, ctx, "cancel my appointment with Dr. Ahmed Raza", "en", []
     )
 
-    assert result == "reply"
-    assert "RESOLVED APPOINTMENT" in captured["system_prompt"]
-    assert str(other_appt.id) in captured["system_prompt"]
+    assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "cancel_confirm"
+    assert payload["candidate"]["appointment_id"] == str(other_appt.id)
 
 
 def test_run_appointment_agent_named_doctor_with_no_active_appointment_never_falls_back_to_another_one(
@@ -2198,24 +2404,22 @@ def test_run_appointment_agent_resolves_a_reply_to_pending_appointment_disambigu
         {"kind": "appointment", "action": "cancel", "question": "which one?", "candidates": candidates}
     )
     history = [_row("assistant", pending)]
-    captured = {}
 
-    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
-        captured["system_prompt"] = system_prompt
-        return "reply"
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called before the patient confirms a cancel")
 
-    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
 
     result = appointment_agent.run_appointment_agent(db, ctx, "Dr. Ahmed Raza", "en", history)
 
-    assert result == "reply"
-    assert "RESOLVED APPOINTMENT" in captured["system_prompt"]
+    assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
     # Resolves to the candidate the reply actually matched (Dr. Ahmed Raza's real
-    # id), not the other, non-matching candidate in the same payload.
-    assert str(other_appt.id) in captured["system_prompt"]
-    assert "wrong-would-be-a-bug" not in captured["system_prompt"]
-    # No redundant RESOLVED DOCTOR confirmation for the same doctor on top of this.
-    assert "ask ONE direct confirming question" not in captured["system_prompt"]
+    # id), not the other, non-matching candidate in the same payload — then asks a
+    # fresh confirm-before-cancel question rather than acting immediately.
+    assert payload["kind"] == "cancel_confirm"
+    assert payload["candidate"]["appointment_id"] == str(other_appt.id)
+    assert "wrong-would-be-a-bug" not in result
 
 
 def test_run_appointment_agent_reasks_when_reply_to_pending_disambiguation_matches_nothing(

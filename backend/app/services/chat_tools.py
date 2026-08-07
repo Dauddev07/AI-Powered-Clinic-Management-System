@@ -368,6 +368,21 @@ def _cancel_appointment_impl(db: Session, ctx: ClinicContext, appointment_id: st
     return f"Your appointment with {out.doctor_name} in {out.department_name} on {_format_when(out.start_utc, tz)} has been cancelled."
 
 
+def cancel_appointment_now(db: Session, ctx: ClinicContext, appointment_id: str) -> str:
+    """Public entry point for appointment_agent's deterministic cancel-confirmation
+    handoff (see app.services.orchestrator.agents.appointment_agent) — cancels
+    immediately once the patient has explicitly confirmed, without going through the
+    LLM tool-calling loop at all. Reported live: "can I cancel that?" (a question,
+    not a command) got treated identically to an imperative "cancel it" and the
+    appointment was cancelled with zero confirmation step. Mirrors the
+    never-let-the-model-freehand-a-mutating-action principle used elsewhere in this
+    module (e.g. reschedule/cancel redirect ids in build_tools) — a destructive
+    action gets a real, code-enforced confirm step, not just a prompt instruction
+    the model might skip.
+    """
+    return _cancel_appointment_impl(db, ctx, appointment_id)
+
+
 def list_upcoming_appointments(db: Session, ctx: ClinicContext) -> list[dict]:
     """Real, current confirmed-and-future appointments for this patient — used by
     appointment_agent's deterministic pre-check (see

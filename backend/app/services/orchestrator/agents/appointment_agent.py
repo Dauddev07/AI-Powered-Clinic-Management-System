@@ -67,8 +67,19 @@ from app.core.tenancy import ClinicContext
 from app.models.conversation_memory import ConversationMemory
 from app.services import llm
 from app.services.chat_markers import DEPARTMENT_LIST_MARKER, DOCTOR_DISAMBIGUATION_MARKER, DOCTOR_OPTIONS_MARKER
-from app.services.chat_tools import build_tools, list_upcoming_appointments, resolve_bare_weekday_window
-from app.services.department_availability import find_doctors_by_name, list_active_department_names
+from app.services.chat_tools import (
+    _doctor_options_payload,
+    _no_slots_message,
+    build_tools,
+    cancel_appointment_now,
+    list_upcoming_appointments,
+    resolve_bare_weekday_window,
+)
+from app.services.department_availability import (
+    find_doctors_by_name,
+    get_department_availability,
+    list_active_department_names,
+)
 from app.services.message_classifier import _preceding_assistant_turn_looks_like_a_question
 from app.services.orchestrator.symptom_hints import departments_hinted_by_patient_symptom_words
 
@@ -120,11 +131,123 @@ def _is_short_affirmative_reply(message: str) -> bool:
     return bool(_AFFIRMATIVE_RE.match(message.strip()))
 
 
+# Reported live: patient asked "show me my upcoming appointment" (one appointment
+# shown), then "can i cancel that?" — a QUESTION, not a command — and the
+# appointment was cancelled outright with no confirmation. Root cause:
+# _detect_action_intent below is a pure keyword check with no concept of sentence
+# mood, so a question and an imperative both resolve identically, and the resolved
+# single appointment used to go straight into the prompt as an unconditional "Call
+# cancel_appointment" instruction. Cancel is the one action here with no natural
+# confirming step of its own (reschedule's confirmation IS the patient picking a
+# slot from a shown list) — so it gets an explicit, code-enforced confirm-then-act
+# gate instead, same "the LLM never freehands a mutating action" principle as
+# reschedule/cancel redirect ids in chat_tools.build_tools.
+_NEGATIVE_RE = re.compile(
+    r"^\s*(?:no|nope|nah|don'?t|do ?not|never ?mind|forget it|cancel that)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_short_negative_reply(message: str) -> bool:
+    return bool(_NEGATIVE_RE.match(message.strip()))
+
+
+def _cancel_confirmation_reply(appointment: dict) -> str:
+    """Composed entirely from a real, current appointment row — never model-
+    generated, same principle as _disambiguation_marker_reply/
+    _appointment_disambiguation_reply below."""
+    question = (
+        f"Just to confirm — you'd like to cancel your appointment with "
+        f"{appointment['doctor_name']} in {appointment['department_name']} on "
+        f"{appointment['when']}?"
+    )
+    payload = {"kind": "cancel_confirm", "question": question, "candidate": appointment}
+    return DOCTOR_DISAMBIGUATION_MARKER + json.dumps(payload)
+
+
+def _pending_cancel_confirmation(history: list[ConversationMemory]) -> dict | None:
+    """True only when the assistant's OWN last turn was
+    _cancel_confirmation_reply's own question — a genuine reply to it, not just any
+    later message, mirroring _pending_appointment_disambiguation below."""
+    if not history:
+        return None
+    last = history[-1]
+    if getattr(last, "role", None) != "assistant":
+        return None
+    content = getattr(last, "content", "") or ""
+    if not content.startswith(DOCTOR_DISAMBIGUATION_MARKER):
+        return None
+    try:
+        payload = json.loads(content[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    except (ValueError, TypeError):
+        return None
+    if payload.get("kind") != "cancel_confirm":
+        return None
+    return payload.get("candidate")
+
+
 def _most_recent_user_message(history: list[ConversationMemory]) -> str | None:
     for row in reversed(history):
         if getattr(row, "role", None) == "user":
             return getattr(row, "content", "") or None
     return None
+
+
+# Reported live: "hook me up with dr waqas" got a plain KB-prose reply describing
+# his typical hours (routed to general_info_agent, no marker card — nothing to
+# recover a name from later). The very next message, "show me his available slots
+# on fri", names no doctor at all (just the pronoun "his") and isn't a bare "yes"
+# either, so neither the RESOLVED DOCTOR name-in-message check nor the
+# _is_short_affirmative_reply recovery path below fired — the LLM was left to guess
+# a department_name from raw history alone, and apparently echoed the KB prose's
+# "otolaryngology" (a specialization, not the real department name "ENT"), which
+# get_department_availability's exact-match lookup naturally rejected. This pronoun
+# check plus _most_recently_named_doctor below recovers the doctor deterministically
+# from the patient's own earlier message instead, same principle as the affirmative-
+# reply recovery path just below.
+_DOCTOR_PRONOUN_WORDS = frozenset({"his", "her", "him", "he", "she", "their", "them"})
+
+
+def _message_references_a_doctor_by_pronoun(message: str) -> bool:
+    words = set(re.findall(r"[a-z0-9']+", message.lower()))
+    return bool(words & _DOCTOR_PRONOUN_WORDS)
+
+
+_DOCTOR_REFERENCE_LOOKBACK_TURNS = 6
+
+
+def _most_recently_named_doctor(db: Session, clinic_id, history: list[ConversationMemory]):
+    """Recovers a doctor named a turn or two ago when the patient's current message
+    only references them by pronoun ("his"/"her"/"their") instead of repeating the
+    name — bounded lookback over user turns only, mirroring
+    _most_recent_action_intent's own bounded scan, so this can't reach back into an
+    unrelated, much older part of the conversation."""
+    user_messages = [
+        getattr(row, "content", "") or "" for row in history if getattr(row, "role", None) == "user"
+    ][-_DOCTOR_REFERENCE_LOOKBACK_TURNS:]
+    for content in reversed(user_messages):
+        matches = find_doctors_by_name(db, clinic_id, content)
+        if len(matches) == 1:
+            return matches[0]
+    return None
+
+
+# Reported live: after a two-doctor DOCTOR_OPTIONS card was shown (General
+# Medicine: Dr. Ali Raza, Dr. Farhan Rehman), "only show me available slots for
+# dr farhan rehman" re-showed the exact same unfiltered two-doctor card again.
+# Root cause: get_department_availability has no doctor-filtering capability at
+# all, and the system prompt (see llm._TOOL_RULES_SHARED) explicitly tells the
+# model "there is no way to query one doctor's slots directly... relay its card
+# as usual" — so even once resolved_match correctly identifies exactly one
+# doctor, nothing downstream could act on it. Handled deterministically instead,
+# same "never let the model freehand a card, build it from real DB rows" principle
+# as every other marker-prefixed reply in this module.
+_NARROW_TO_ONE_DOCTOR_WORDS = frozenset({"only", "just", "specifically", "solely"})
+
+
+def _message_asks_to_narrow_to_one_doctor(message: str) -> bool:
+    words = set(re.findall(r"[a-z0-9']+", message.lower()))
+    return bool(words & _NARROW_TO_ONE_DOCTOR_WORDS)
 
 
 def _detect_action_intent(message: str) -> str | None:
@@ -407,14 +530,15 @@ def _build_system_prompt(
     if resolved_appointment is None:
         resolved_appointment_block = ""
     else:
+        # Only "reschedule" ever reaches here — a resolved "cancel" always
+        # short-circuits earlier in run_appointment_agent with a deterministic
+        # confirm-first question, never reaching the LLM/tool layer at all.
         action_sentence = (
             "This is a RESCHEDULE: once the patient picks a new time from the slots you "
             "show them, call reschedule_appointment with this exact appointment_id and the "
             "new slot_id — never book_appointment, even if their wording sounds like "
             'booking a fresh appointment (e.g. "I\'d like to book the appointment with Dr. '
             'X").\n\n'
-            if resolved_appointment_action == "reschedule"
-            else "Call cancel_appointment with this exact appointment_id.\n\n"
         )
         resolved_appointment_block = (
             f"RESOLVED APPOINTMENT: the patient's {resolved_appointment_action} request refers "
@@ -456,6 +580,23 @@ def run_appointment_agent(
     resolved_appointment: dict | None = None
     resolved_appointment_action: str | None = None
 
+    # Cancel-confirmation handoff: resolved BEFORE anything else, so a reply to the
+    # assistant's own "just to confirm — cancel X?" question is never re-interpreted
+    # as a fresh, unrelated message.
+    cancel_pending = _pending_cancel_confirmation(history)
+    if cancel_pending is not None:
+        if _is_short_affirmative_reply(message):
+            return cancel_appointment_now(db, ctx, cancel_pending["appointment_id"])
+        if _is_short_negative_reply(message):
+            return (
+                f"No problem — your appointment with {cancel_pending['doctor_name']} in "
+                f"{cancel_pending['department_name']} on {cancel_pending['when']} was not cancelled."
+            )
+        # Anything else (a new question, a change of mind stated differently, etc.)
+        # falls through to normal handling below rather than being forced into a
+        # yes/no box — worst case it re-asks, which is always safe for a mutating
+        # action like this.
+
     pending = _pending_appointment_disambiguation(history)
     if pending is not None:
         candidate = _match_candidate(message, pending["candidates"])
@@ -495,6 +636,14 @@ def run_appointment_agent(
             elif len(active) == 1:
                 resolved_appointment = active[0]
                 resolved_appointment_action = action
+
+    # Cancel is a one-way, immediately-effective mutation with no natural
+    # confirming step of its own (unlike reschedule, where picking a new slot IS
+    # the confirmation) — so a freshly resolved cancel never reaches the LLM/tool
+    # layer at all; it always asks first, deterministically, and only actually
+    # cancels once _pending_cancel_confirmation above sees an explicit "yes".
+    if resolved_appointment is not None and resolved_appointment_action == "cancel":
+        return _cancel_confirmation_reply(resolved_appointment)
 
     # Symptom-vs-department mismatch check: only for a fresh booking-department
     # reference, never for a cancel/reschedule action already resolved above (that's
@@ -548,10 +697,35 @@ def run_appointment_agent(
                     # an already-shown card so the model proceeds directly instead
                     # of asking the same confirming question a second time.
                     doctor_already_shown = True
+        if resolved_match is None and _message_references_a_doctor_by_pronoun(message):
+            # "show me his available slots on fri" names no doctor of its own, just
+            # a pronoun — recover the real doctor (and their real department_name,
+            # not a specialization or other prose the patient/KB text used) from
+            # the patient's own earlier message. Still asks a confirming question
+            # below (doctor_already_shown stays False) since, unlike the bare-"yes"
+            # case above, the patient never actually confirmed this identity yet.
+            resolved_match = _most_recently_named_doctor(db, ctx.clinic_id, history)
         if resolved_match is not None and not doctor_already_shown:
             doctor_already_shown = _doctor_already_shown(
                 history, resolved_match.full_name, resolved_match.department_name
             )
+
+    # A patient narrowing an already-shown multi-doctor card down to just one of
+    # those doctors ("only show me Dr. X's slots") gets a real, filtered card built
+    # directly from the DB — never routed through the LLM/tool-calling loop, which
+    # has no way to filter get_department_availability's result at all.
+    if (
+        resolved_match is not None
+        and doctor_already_shown
+        and resolved_appointment is None
+        and _message_asks_to_narrow_to_one_doctor(message)
+    ):
+        availability = get_department_availability(
+            db, ctx.clinic_id, resolved_match.department_name, doctor_id=resolved_match.doctor_id
+        )
+        if not availability.doctors:
+            return _no_slots_message(resolved_match.department_name)
+        return _doctor_options_payload(db, ctx.clinic_id, availability)
 
     # Handoff step 2: recover the most recent card (if any) and render it into the
     # prompt so the model can resolve a natural-language reference against it.
