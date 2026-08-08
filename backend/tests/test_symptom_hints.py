@@ -51,7 +51,8 @@ DEPARTMENTS = [
         ("I have a fever and body aches", "General Medicine"),
         ("I feel mild dizziness", "ENT"),
         ("I have vertigo", "ENT"),
-        ("I feel lightheaded", "ENT"),
+        ("I feel lightheaded", "General Medicine"),  # bare lightheadedness, no ear/vertigo signal
+        ("I feel lightheaded and the room keeps spinning", "ENT"),  # lightheaded + vertigo signal
         ("I feel dizzy and numb", "Neurology"),  # dizziness + a real neuro red flag
         ("pain in my chest and in testies as well", "Cardiology"),
         ("pain in my chest and in testies as well", "General Medicine"),

@@ -1043,6 +1043,103 @@ def test_run_symptom_agent_recommendation_request_names_dentistry_for_jaw_pain_n
     assert "Dentistry" in result
 
 
+def _make_dept_with_slot(db, clinic, name):
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    dept = Department(clinic_id=clinic.id, name=name)
+    db.add(dept)
+    db.flush()
+    doctor = Doctor(
+        clinic_id=clinic.id,
+        department_id=dept.id,
+        external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name=f"Dr. {name}",
+        is_active=True,
+    )
+    db.add(doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+
+def test_run_symptom_agent_recommendation_request_names_general_medicine_for_bare_lightheadedness_not_a_guessed_cardiology(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: "im very light headed" -> "its not that much severe..book me
+    # an regular appointment" got a General Medicine card from the LLM's own
+    # first-turn reasoning, then "but i think cardiology can be best fit for it"
+    # got a real Cardiology availability card instead. Root cause: "light headed"
+    # (patient typed it as two words) never matched the "lightheaded" keyword in
+    # symptom_hints.py, so this recommendation-request shortcut's scan of prior
+    # history came back empty, fell through to the LLM with nothing to push back
+    # with, and the model just went along with the patient's own guess.
+    # symptom_hints.py now normalizes the space/hyphen variants of "lightheaded"
+    # before tokenizing, AND routes bare lightheadedness (no ear/vertigo/spinning
+    # signal alongside it) to General Medicine specifically, matching how the
+    # LLM's own first-turn reasoning had already (correctly) triaged it — see the
+    # companion test below for the lightheaded+vertigo -> ENT case.
+    for name in ("General Medicine", "Cardiology"):
+        _make_dept_with_slot(db, clinic, name)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for a recommendation request")
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row("user", "im very light headed"),
+        _row("assistant", "If you think this could be serious, please seek immediate medical attention..."),
+        _row("user", "its not that much severe that i should goto emergency book me an regular appointment"),
+        _row("assistant", "General Medicine\nDr. Ali Raza — Internal Medicine\n..."),
+        _row("user", "is general medicine best fit for this case?"),
+        _row("assistant", "Yes, General Medicine is the appropriate department..."),
+    ]
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "but i think cardiology can be best fit for it", "en", history
+    )
+
+    assert "Cardiology" not in result
+    assert "General Medicine" in result
+
+
+def test_run_symptom_agent_recommendation_request_names_ent_for_lightheadedness_with_vertigo(
+    monkeypatch, db, ctx, clinic
+):
+    # Companion to the bare-lightheadedness test above: lightheadedness alongside
+    # an actual ear/balance signal (vertigo, dizziness, spinning, or an ear
+    # symptom) is the room-is-spinning kind, which IS ENT's territory — this must
+    # still route to ENT, not General Medicine, even though bare lightheadedness
+    # alone no longer does.
+    for name in ("General Medicine", "ENT"):
+        _make_dept_with_slot(db, clinic, name)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for a recommendation request")
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row("user", "i feel light headed and the room keeps spining"),
+        _row("assistant", "Could you tell me how severe this is and how long you've had it?"),
+        _row("user", "its mild and started this morning"),
+    ]
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "what do you recommend?", "en", history
+    )
+
+    assert "General Medicine" not in result
+    assert "ENT" in result
+
+
 def test_run_symptom_agent_recommendation_request_falls_through_when_nothing_hinted_yet(monkeypatch, db, ctx):
     # No real symptom has been described yet this session — nothing to base a
     # recommendation on, so this must fall through to the normal triage flow

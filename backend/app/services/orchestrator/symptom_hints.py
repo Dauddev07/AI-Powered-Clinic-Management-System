@@ -190,7 +190,17 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
         # has its own dedicated trigger above (numbness/weakness/tremor/paralysis)
         # — a real neuro red flag still adds it correctly through that entry;
         # dizziness alone no longer needs to duplicate that.
-        frozenset({"dizziness", "dizzy", "vertigo", "lightheaded", "lightheadedness"}),
+        # Reported live (3rd report): "lightheaded"/"lightheadedness" were pulled
+        # OUT of this unconditional set — clinically, bare lightheadedness (no
+        # spinning sensation, no ear involvement) is ordinary General Medicine
+        # territory (dehydration, low blood sugar, standing up too fast, etc.), not
+        # an ENT balance-disorder complaint. It only points to ENT once it's
+        # co-occurring with an actual vertigo/ear signal — see
+        # _LIGHTHEADED_ENT_SIGNAL_WORDS and the co-occurrence branch below for the
+        # if/else (same "bare word needs corroboration" shape as the limb/joint,
+        # cough, and low-mood entries — a table entry can only express OR, never
+        # "A unless B, then C instead").
+        frozenset({"dizziness", "dizzy", "vertigo"}),
         ("ent", "otolaryn"),
         "dizziness",
     ),
@@ -298,6 +308,17 @@ _NECK_NEUROLOGICAL_SIGNAL_WORDS = frozenset({
     "numbness", "numb", "weakness", "tremor", "tremors", "paralysis", "paralyzed",
 })
 
+# Companion to "lightheaded" being pulled out of the dizziness/vertigo table entry
+# above: bare lightheadedness routes to General Medicine, but co-occurring with an
+# actual ear/balance signal (vertigo, dizziness, spinning, or an ear symptom) means
+# the room-is-spinning kind of lightheadedness, which is ENT's territory. "spining"
+# (a common misspelling of "spinning") is included alongside the correct spelling —
+# same "typo variant, not a missing concept" shape as "teeths" above.
+_LIGHTHEADED_ENT_SIGNAL_WORDS = frozenset({
+    "dizzy", "dizziness", "vertigo", "spinning", "spining", "spin",
+    "ear", "earache", "hearing",
+})
+
 
 def departments_hinted_by_patient_symptom_words(
     message: str, history: list[ConversationMemory], department_names: list[str], already_covered: set[str]
@@ -312,7 +333,14 @@ def departments_hinted_by_patient_symptom_words(
     patient_texts = [message] + [
         getattr(row, "content", "") or "" for row in history if getattr(row, "role", None) == "user"
     ]
-    words = set(re.findall(r"[a-z0-9]+", " ".join(patient_texts).lower()))
+    joined = " ".join(patient_texts).lower()
+    # Reported live: "im very light headed" never matched the "lightheaded" keyword
+    # below — tokenizing splits it into separate "light"/"headed" words, same
+    # "space where the keyword is one word" gap as every other fix in this table.
+    # Normalizing the space/hyphen variants to the single-token spelling before
+    # tokenizing catches all three ways a patient might type it.
+    joined = re.sub(r"light[\s-]+headed(ness)?", r"lightheaded\1", joined)
+    words = set(re.findall(r"[a-z0-9]+", joined))
     hinted_substrings: dict[str, str] = {}
     for keywords, hints, label in SYMPTOM_DEPARTMENT_HINTS:
         if words & keywords:
@@ -349,6 +377,12 @@ def departments_hinted_by_patient_symptom_words(
             hinted_substrings.setdefault(hint, "head pain")
     if words & {"neck", "necks"} and not (words & _NECK_NEUROLOGICAL_SIGNAL_WORDS):
         hinted_substrings.setdefault("ortho", "neck/joint pain")
+    if words & {"lightheaded", "lightheadedness"}:
+        if words & _LIGHTHEADED_ENT_SIGNAL_WORDS:
+            hinted_substrings.setdefault("ent", "lightheadedness with vertigo/ear symptoms")
+        else:
+            for hint in ("general medicine", "internal medicine", "family medicine"):
+                hinted_substrings.setdefault(hint, "lightheadedness")
     if not hinted_substrings:
         return {}
     # Anchored to the START of a word only (not "anywhere inside one") — e.g. the
