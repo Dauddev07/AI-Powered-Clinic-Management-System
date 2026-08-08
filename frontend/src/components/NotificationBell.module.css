@@ -201,7 +201,19 @@
 
   .headerActions {
     flex: 1 1 100%;
-    justify-content: space-between;
+    /* Reported live: with space-between here, a lone flex child (the close
+       button, when "Mark all read" isn't rendered because everything's
+       already read) gets pushed to the START of the row instead of staying
+       on the right — space-between has nothing to space it against. flex-end
+       always keeps the close button right-aligned regardless of whether
+       "Mark all read" is present; margin-right: auto on it below (when it IS
+       present) still pushes it to the opposite end, preserving the original
+       two-button spread layout. */
+    justify-content: flex-end;
+  }
+
+  .markAllBtn {
+    margin-right: auto;
   }
 }
 

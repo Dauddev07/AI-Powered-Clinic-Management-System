@@ -14,13 +14,29 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.clinic import Clinic
 from app.models.department import Department
 from app.models.doctor import Doctor
 from app.models.slot import Slot
+
+# Reported live: "only show me available slots of dr farhan rehman after 12 pm
+# on monday" and "show me his available slots after 12 pm" both returned the
+# same top-5-earliest-of-the-day slots (10:00 am onward) with the time-of-day
+# request silently ignored entirely — there was no time-filtering mechanism
+# anywhere in this function, only whole-day earliest_date/latest_date bounds.
+# When a time-of-day filter is requested, this widens the initial candidate
+# pool fetched per doctor (ordered earliest-first, same as always) so there's
+# a real chance of finding MAX_SLOTS_PER_DOCTOR genuine matches even after
+# most of the earliest candidates get filtered out by the time-of-day check,
+# then filters that pool in Python by each slot's LOCAL time-of-day (not UTC —
+# a slot at 5pm clinic-local can be a different UTC hour depending on the
+# clinic's timezone) and keeps only the first MAX_SLOTS_PER_DOCTOR that match.
+_TIME_FILTER_CANDIDATE_POOL = 50
 
 # "dr"/"dr." on its own is never useful as a name-matching word — every doctor's name
 # contains it, so treating it as a match signal would make every query "match" every
@@ -140,6 +156,8 @@ def get_department_availability(
     earliest_date: date | None = None,
     latest_date: date | None = None,
     doctor_id: uuid.UUID | None = None,
+    earliest_time: time | None = None,
+    latest_time: time | None = None,
 ) -> DepartmentAvailabilityResult:
     """Exact (case-insensitive, trimmed) department-name match only — deliberately no
     fuzzy/closest-match guessing, so a typo'd or nonexistent department is reported as
@@ -164,6 +182,13 @@ def get_department_availability(
     already been shown a multi-doctor card and asks to narrow it down to just one
     of them (e.g. "only show me Dr. X's slots"), rather than always returning
     every doctor in the department.
+
+    `earliest_time`/`latest_time`, when given, restrict results to slots whose
+    LOCAL (clinic-timezone) time-of-day falls within that range — e.g. "after
+    12 pm" (earliest_time=12:00, latest_time=None) or "in the evening"
+    (17:00-21:00). Filtered in Python (see _TIME_FILTER_CANDIDATE_POOL above)
+    rather than in SQL, since a UTC column can't be range-filtered by local
+    time-of-day with a simple comparison.
     """
     department = db.execute(
         select(Department).where(
@@ -185,6 +210,11 @@ def get_department_availability(
     earliest = max(now, datetime.combine(earliest_date, time.min, tzinfo=timezone.utc)) if earliest_date else now
     latest = datetime.combine(latest_date, time.min, tzinfo=timezone.utc) + timedelta(days=1) if latest_date else None
 
+    clinic_tz = None
+    if earliest_time is not None or latest_time is not None:
+        clinic = db.get(Clinic, clinic_id)
+        clinic_tz = ZoneInfo(clinic.timezone if clinic else "UTC")
+
     doctor_filters = [Doctor.clinic_id == clinic_id, Doctor.department_id == department.id, Doctor.is_active.is_(True)]
     if doctor_id is not None:
         doctor_filters.append(Doctor.id == doctor_id)
@@ -202,7 +232,22 @@ def get_department_availability(
         )
         if latest is not None:
             stmt = stmt.where(Slot.start_utc < latest)
-        slots = db.execute(stmt.order_by(Slot.start_utc.asc()).limit(MAX_SLOTS_PER_DOCTOR)).scalars().all()
+        stmt = stmt.order_by(Slot.start_utc.asc())
+
+        if clinic_tz is not None:
+            candidates = db.execute(stmt.limit(_TIME_FILTER_CANDIDATE_POOL)).scalars().all()
+            slots = []
+            for slot in candidates:
+                local_time = slot.start_utc.astimezone(clinic_tz).time()
+                if earliest_time is not None and local_time < earliest_time:
+                    continue
+                if latest_time is not None and local_time >= latest_time:
+                    continue
+                slots.append(slot)
+                if len(slots) >= MAX_SLOTS_PER_DOCTOR:
+                    break
+        else:
+            slots = db.execute(stmt.limit(MAX_SLOTS_PER_DOCTOR)).scalars().all()
 
         if not slots:
             continue

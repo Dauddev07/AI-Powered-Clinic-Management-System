@@ -204,6 +204,16 @@ def test_router_rule1_5_department_list_request_routes_to_general_info_despite_a
     assert _heuristic_classify(message) == GENERAL_INFO
 
 
+def test_router_rule1_6_doctor_count_question_routes_to_appointment():
+    # Reported live: "how many cardiologist are there in this clinic??" has no
+    # booking-action keyword and isn't a symptom, so it fell through to
+    # general_info_agent, which answered from static KB prose instead of the
+    # real, current doctor count. appointment_agent has the real per-department
+    # doctor lookup this needs.
+    assert _heuristic_classify("how many cardiologist are there in this clinic??") == APPOINTMENT
+    assert _heuristic_classify("how many doctors do you have in dermatology") == APPOINTMENT
+
+
 def test_router_rule0_6_department_scope_question_overrides_screening_continuity():
     # Reported live: after a Cardiology recommendation and a clarifying follow-up
     # question from the assistant, "so what symptoms does dermatologist treats?"
@@ -2037,6 +2047,48 @@ def test_run_appointment_agent_resolves_doctor_from_a_plain_yes_confirming_a_pri
     assert "ask ONE direct confirming question" not in captured["system_prompt"]
 
 
+def test_run_appointment_agent_resolves_doctor_from_yes_through_an_intermediate_pronoun_message(
+    monkeypatch, db, ctx, doctor
+):
+    # Reported live: "hook me up with dr ali raza" (plain KB-prose reply, no
+    # card) -> "can u book an appointment for me with him?" (named no doctor
+    # itself, just "him" — resolved via the pronoun path from the FIRST
+    # message) -> "Did you mean Dr. Ali Raza in General Medicine?" -> "yes".
+    # The bare-"yes" recovery used to check only the single most recent user
+    # message ("can u book...him?"), which also names no doctor — so it found
+    # nothing, resolved_match stayed None, and the model got zero doctor
+    # context, producing a generic "book it yourself online" answer instead of
+    # offering to show real slots. Must now see past the intermediate
+    # pronoun-only message to the one that actually named the doctor.
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["system_prompt"] = system_prompt
+        return "reply"
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+
+    history = [
+        _row("user", "hook me up with dr ahmed khan"),
+        _row(
+            "assistant",
+            "Dr. Ahmed Khan sees patients for cardiology Monday through Thursday "
+            "from 2:00 pm to 8:00 pm with 15-minute appointment slots.",
+        ),
+        _row("user", "can u book an appointment for me with him?"),
+        _row("assistant", "Did you mean Dr. Ahmed Khan in Cardiology?"),
+    ]
+    appointment_agent.run_appointment_agent(db, ctx, "yes", "en", history)
+
+    assert "RESOLVED DOCTOR" in captured["system_prompt"]
+    assert "Dr. Ahmed Khan" in captured["system_prompt"]
+    assert "Cardiology" in captured["system_prompt"]
+    assert "ask ONE direct confirming question" not in captured["system_prompt"]
+    # Told to proceed directly (e.g. actually call get_department_availability)
+    # rather than left with nothing to act on.
+    assert "proceed directly" in captured["system_prompt"]
+
+
 def test_run_appointment_agent_plain_yes_with_no_preceding_question_does_not_force_a_match(
     monkeypatch, db, ctx, doctor
 ):
@@ -2119,6 +2171,348 @@ def test_run_appointment_agent_pronoun_with_no_prior_named_doctor_does_not_force
     appointment_agent.run_appointment_agent(db, ctx, "show me his available slots on fri", "en", history)
 
     assert "RESOLVED DOCTOR" not in captured["system_prompt"]
+
+
+def test_run_appointment_agent_resolves_department_from_pronoun_referencing_prior_message(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: "i want to see a dentist" got a plain KB-prose reply naming
+    # the department as "General Dentistry" (prose text, not this clinic's real
+    # department name, "Dentistry") — then "is there any doctor available
+    # there?or just 1 doctor" referred back to it with "there", named no
+    # department directly and no doctor either. The LLM was left to guess a
+    # department_name from raw history and apparently echoed the KB prose's
+    # wrong name, which get_department_availability's exact-match lookup
+    # rejected ("I couldn't find a department called that"). Must now recover
+    # the REAL department name deterministically and answer with a real,
+    # current availability card — never routed through the LLM at all.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    dentistry = Department(clinic_id=clinic.id, name="Dentistry")
+    db.add(dentistry)
+    db.flush()
+    qureshi = Doctor(
+        clinic_id=clinic.id, department_id=dentistry.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Iqra Qureshi", is_active=True,
+    )
+    db.add(qureshi)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=qureshi.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be involved in resolving a department pronoun reference")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row("user", "i want to see a dentist"),
+        _row(
+            "assistant",
+            "You can book an appointment with Dr. Iqra Qureshi in the General Dentistry "
+            "department. She sees patients on Monday, Wednesday and Friday from 10 am to "
+            "6 pm, with 15-minute appointment slots.",
+        ),
+    ]
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "is there any doctor available there?or just 1 doctor", "en", history
+    )
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "Dentistry"
+    assert [d["doctor_name"] for d in payload["doctors"]] == ["Dr. Iqra Qureshi"]
+
+
+def test_run_appointment_agent_department_pronoun_with_no_prior_named_department_falls_through_normally(
+    monkeypatch, db, ctx, doctor
+):
+    # No department named anywhere in recent history — "there" must not
+    # spuriously resolve to an unrelated department.
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["system_prompt"] = system_prompt
+        return "reply"
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+
+    history = [
+        _row("user", "what are your opening hours"),
+        _row("assistant", "We're open 9am to 5pm, Monday through Saturday."),
+    ]
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "is there any doctor available there", "en", history
+    )
+
+    assert result == "reply"
+
+
+def test_run_appointment_agent_answers_a_doctor_count_question_referencing_this_dept(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # Reported live: "show me available slots for cardiology" showed a real
+    # two-doctor card, then "are there only 2 doctors in this dept?" — "this
+    # dept" is the same kind of back-reference as "there", just phrased
+    # differently, and named no specific doctor. Fell through to the LLM with
+    # only the (correct) previously-shown card as context; the system prompt
+    # already tells the model to answer a genuinely separate question like this
+    # via the card's own `note`, but it just re-showed the same card with no
+    # explicit answer. Must now attach a real, code-computed doctor-count
+    # answer, never routed through the LLM at all.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.slot import Slot
+
+    other = Doctor(
+        clinic_id=clinic.id, department_id=department.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Farhan Malik", is_active=True,
+    )
+    db.add(other)
+    db.flush()
+    db.add_all([
+        Slot(
+            clinic_id=clinic.id, doctor_id=doctor.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ),
+        Slot(
+            clinic_id=clinic.id, doctor_id=other.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ),
+    ])
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be involved in answering a doctor-count question")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [_row("user", "show me available slots for cardiology")]
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "are there only 2 doctors in this dept?", "en", history
+    )
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "Cardiology"
+    assert len(payload["doctors"]) == 2
+    assert payload["note"] == "There are currently 2 doctors in Cardiology:"
+
+
+def test_run_appointment_agent_pronoun_followup_stays_filtered_to_that_doctor_with_date(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # Reported live: "is dr farhan malik available on sat?" -> confirmed -> shown
+    # his real Saturday slots -> "is he available on mon?" — "he" correctly
+    # resolved back to Dr. Farhan Malik, but this message has no "only"/"just"
+    # narrowing word, so get_department_availability was called unfiltered for
+    # the whole department on Monday and the reply silently showed a DIFFERENT
+    # doctor's (Dr. Ahmed Farooq's) Monday slots instead of ever answering
+    # whether Dr. Farhan Malik himself is free. Must stay filtered to the one
+    # doctor "he" refers to, and clearly say he has nothing that day rather than
+    # substituting someone else's availability.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.slot import Slot
+
+    malik = Doctor(
+        clinic_id=clinic.id, department_id=department.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Farhan Malik", is_active=True,
+    )
+    db.add(malik)
+    db.flush()
+
+    forced_window = appointment_agent.resolve_bare_weekday_window("is he available on mon?")
+    monday_date = datetime.fromisoformat(forced_window[0]).replace(tzinfo=timezone.utc)
+
+    db.add_all([
+        # Dr. Farhan Malik: a Saturday slot (already shown), nothing on Monday,
+        # but a real slot further out so a "next available" answer is possible.
+        Slot(
+            clinic_id=clinic.id, doctor_id=malik.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ),
+        Slot(
+            clinic_id=clinic.id, doctor_id=malik.id,
+            start_utc=monday_date + timedelta(days=14),
+            end_utc=monday_date + timedelta(days=14, minutes=30),
+            status="open",
+        ),
+        # doctor (Dr. Ahmed Khan, from the fixture) DOES have a Monday slot —
+        # this must never be substituted in for Dr. Farhan Malik's answer.
+        Slot(
+            clinic_id=clinic.id, doctor_id=doctor.id,
+            start_utc=monday_date + timedelta(hours=9),
+            end_utc=monday_date + timedelta(hours=9, minutes=30),
+            status="open",
+        ),
+    ])
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("must not reach the LLM for a pronoun follow-up about an already-resolved doctor")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    card = json.dumps(
+        {"department_name": "Cardiology", "doctors": [{"doctor_name": "Dr. Farhan Malik", "specialization": None, "slots": []}]}
+    )
+    history = [
+        _row("user", "is dr farhan malik available on sat?"),
+        _row("assistant", "Did you mean Dr. Farhan Malik in Cardiology?"),
+        _row("user", "yes"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + card),
+    ]
+    result = appointment_agent.run_appointment_agent(db, ctx, "is he available on mon?", "en", history)
+
+    assert "Dr. Ahmed Khan" not in result
+    assert "Dr. Farhan Malik" in result
+    assert "doesn't have any open slots" in result
+
+
+def test_run_appointment_agent_answers_doctor_count_question_and_followup_shows_both(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # Reported live, full conversation: "how many cardiologist are there in this
+    # clinic??" -> answered from static KB prose ("There are two cardiologists")
+    # instead of real data -> "show me their information" -> only ONE doctor's
+    # info came back (the KB document didn't happen to mention the second one),
+    # with "No other cardiologists are mentioned in the available information."
+    # Both turns must now be answered deterministically from the real DB,
+    # showing BOTH doctors both times.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.slot import Slot
+
+    other = Doctor(
+        clinic_id=clinic.id, department_id=department.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Farhan Malik", is_active=True,
+    )
+    db.add(other)
+    db.flush()
+    db.add_all([
+        Slot(
+            clinic_id=clinic.id, doctor_id=doctor.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ),
+        Slot(
+            clinic_id=clinic.id, doctor_id=other.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ),
+    ])
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("must not reach the LLM for a real-DB doctor-count/listing question")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    # Turn 1.
+    turn1 = appointment_agent.run_appointment_agent(
+        db, ctx, "how many cardiologist are there in this clinic??", "en", []
+    )
+    assert turn1.startswith(DOCTOR_OPTIONS_MARKER)
+    payload1 = json.loads(turn1[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload1["department_name"] == "Cardiology"
+    assert {d["doctor_name"] for d in payload1["doctors"]} == {"Dr. Ahmed Khan", "Dr. Farhan Malik"}
+    assert payload1["note"] == "There are currently 2 doctors in Cardiology:"
+
+    # Turn 2: a pronoun follow-up ("their") to the real card turn 1 just showed.
+    history = [
+        _row("user", "how many cardiologist are there in this clinic??"),
+        _row("assistant", turn1),
+    ]
+    turn2 = appointment_agent.run_appointment_agent(db, ctx, "show me their information", "en", history)
+    assert turn2.startswith(DOCTOR_OPTIONS_MARKER)
+    payload2 = json.loads(turn2[len(DOCTOR_OPTIONS_MARKER):])
+    assert {d["doctor_name"] for d in payload2["doctors"]} == {"Dr. Ahmed Khan", "Dr. Farhan Malik"}
+
+
+def test_run_appointment_agent_narrows_shown_card_by_doctor_and_time_of_day(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # Reported live: "only show me available slots of dr farhan rehman after 12
+    # pm on monday" and its follow-up "show me his available slots after 12
+    # pm" both returned the same top-5-earliest-of-the-day slots (10:00 am
+    # onward) — the time-of-day request was silently ignored entirely, since
+    # there was no time-filtering mechanism anywhere in this deterministic
+    # short-circuit path at all.
+    from datetime import date, datetime, time, timedelta, timezone
+
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    rehman = Doctor(
+        clinic_id=clinic.id, department_id=department.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Farhan Rehman", is_active=True,
+    )
+    db.add(rehman)
+    db.flush()
+
+    forced_window = appointment_agent.resolve_bare_weekday_window(
+        "only show me available slots of dr farhan rehman after 12 pm on monday"
+    )
+    monday = date.fromisoformat(forced_window[0])
+
+    def _make_slot(start_utc):
+        slot = Slot(clinic_id=clinic.id, doctor_id=rehman.id, start_utc=start_utc, end_utc=start_utc + timedelta(minutes=30), status="open")
+        db.add(slot)
+        db.flush()
+        return slot
+
+    morning_slot = _make_slot(datetime.combine(monday, time(10, 0), tzinfo=timezone.utc))
+    afternoon_slot = _make_slot(datetime.combine(monday, time(13, 0), tzinfo=timezone.utc))
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("must not reach the LLM for a deterministic doctor+time-of-day filter")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    card = json.dumps(
+        {"department_name": "Cardiology", "doctors": [{"doctor_name": "Dr. Farhan Rehman", "specialization": None, "slots": []}]}
+    )
+    history = [_row("assistant", DOCTOR_OPTIONS_MARKER + card)]
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "only show me available slots of dr farhan rehman after 12 pm on monday", "en", history
+    )
+
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    slot_ids = {s["slot_id"] for s in payload["doctors"][0]["slots"]}
+    assert slot_ids == {str(afternoon_slot.id)}
+    assert str(morning_slot.id) not in slot_ids
+
+    # Follow-up: "show me his available slots after 12 pm" (pronoun, no date
+    # named) — must stay filtered to the afternoon slot regardless of phrasing.
+    history2 = [
+        _row("user", "only show me available slots of dr farhan rehman after 12 pm on monday"),
+        _row("assistant", result),
+    ]
+    result2 = appointment_agent.run_appointment_agent(
+        db, ctx, "show me his available slots after 12 pm", "en", history2
+    )
+    payload2 = json.loads(result2[len(DOCTOR_OPTIONS_MARKER):])
+    slot_ids2 = {s["slot_id"] for s in payload2["doctors"][0]["slots"]}
+    assert slot_ids2 == {str(afternoon_slot.id)}
 
 
 def test_run_appointment_agent_narrows_shown_card_to_one_named_doctor_on_request(

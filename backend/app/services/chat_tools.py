@@ -24,7 +24,7 @@ Design principles enforced throughout this module:
 import json
 import re
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
@@ -180,6 +180,58 @@ def resolve_bare_weekday_window(message: str) -> tuple[str, str] | None:
     resolved = today + timedelta(days=delta_days)
     iso = resolved.isoformat()
     return iso, iso
+
+
+# Reported live: "only show me available slots of dr farhan rehman after 12 pm
+# on monday" and its follow-up "show me his available slots after 12 pm" both
+# silently ignored the time-of-day request and returned the same top-5-
+# earliest-of-the-day slots — there was no time-of-day filtering mechanism
+# anywhere at all, only whole-day earliest_date/latest_date bounds. This is the
+# deterministic counterpart to resolve_bare_weekday_window above, for the
+# time-of-day half of the same class of request: an explicit clock time
+# ("after 12 pm", "before 5:30pm") or a named part of the day ("in the
+# evening", "in the morning"). Named phrases are checked first since they're
+# unambiguous; a bare clock time is only trusted as a filter when paired with
+# "after"/"before" (a clock time appearing for some other reason in the
+# message, with neither word, is left alone rather than guessed at).
+_TIME_OF_DAY_PHRASES: tuple[tuple[str, time, time], ...] = (
+    ("morning", time(0, 0), time(12, 0)),
+    ("afternoon", time(12, 0), time(17, 0)),
+    ("evening", time(17, 0), time(21, 0)),
+    ("night", time(21, 0), time(23, 59, 59)),
+)
+
+_AFTER_CLOCK_RE = re.compile(r"\bafter\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", re.IGNORECASE)
+_BEFORE_CLOCK_RE = re.compile(r"\bbefore\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", re.IGNORECASE)
+
+
+def _parse_12_hour_clock(hour_str: str, minute_str: str | None, meridiem: str) -> time:
+    hour = int(hour_str) % 12
+    if meridiem.lower() == "pm":
+        hour += 12
+    return time(hour, int(minute_str or 0))
+
+
+def resolve_time_of_day_window(message: str) -> tuple[time | None, time | None] | None:
+    """Returns (earliest_time, latest_time) — either may be None — in the
+    patient's own wording, or None when the message names no time-of-day
+    constraint at all. The caller resolves these against the CLINIC's local
+    timezone (see department_availability.get_department_availability's
+    earliest_time/latest_time), never UTC directly, since "12 pm" means
+    whatever local noon is for that clinic."""
+    after_match = _AFTER_CLOCK_RE.search(message)
+    before_match = _BEFORE_CLOCK_RE.search(message)
+    if after_match or before_match:
+        earliest = _parse_12_hour_clock(*after_match.groups()) if after_match else None
+        latest = _parse_12_hour_clock(*before_match.groups()) if before_match else None
+        return (earliest, latest)
+
+    lowered = message.lower()
+    for phrase, start, end in _TIME_OF_DAY_PHRASES:
+        if re.search(rf"\b{phrase}\b", lowered):
+            return (start, end)
+
+    return None
 
 
 def _parse_date_arg(value: str | None) -> date | None:
@@ -483,6 +535,8 @@ def _get_department_availability_impl(
     note: str | None = None,
     earliest_date: str | None = None,
     latest_date: str | None = None,
+    earliest_time: time | None = None,
+    latest_time: time | None = None,
 ) -> str:
     availability = get_department_availability(
         db,
@@ -490,6 +544,8 @@ def _get_department_availability_impl(
         department_name,
         earliest_date=_parse_date_arg(earliest_date),
         latest_date=_parse_date_arg(latest_date),
+        earliest_time=earliest_time,
+        latest_time=latest_time,
     )
     if not availability.found:
         return _department_not_found_message(availability)
@@ -583,6 +639,7 @@ def build_tools(
     reschedule_redirect_appointment_id: str | None = None,
     cancel_redirect_appointment_id: str | None = None,
     forced_date_window: tuple[str, str] | None = None,
+    forced_time_window: tuple[time | None, time | None] | None = None,
 ) -> list[StructuredTool]:
     """Builds the tools bound to this request's db session and verified
     ClinicContext via closures — clinic_id/patient_id are never parameters the model
@@ -624,6 +681,15 @@ def build_tools(
     answer. Same belt-and-suspenders reasoning as reschedule_redirect_appointment_id
     above — a correctness-critical argument gets a real guarantee, not just a
     prompt instruction to compute it correctly.
+
+    forced_time_window: set by the caller (via
+    app.services.chat_tools.resolve_time_of_day_window on the patient's raw
+    message) to an (earliest_time, latest_time) pair when the message names a
+    time-of-day constraint ("after 12 pm", "in the evening"). Reported live:
+    this had no equivalent mechanism at all — a time-of-day request was simply
+    never applied, silently returning whatever the top 5 earliest-of-the-day
+    slots happened to be regardless of what the patient actually asked for.
+    Same belt-and-suspenders reasoning as forced_date_window immediately above.
     """
 
     def _book(slot_id: str, reason: str | None = None) -> str:
@@ -650,7 +716,10 @@ def build_tools(
     ) -> str:
         if forced_date_window is not None:
             earliest_date, latest_date = forced_date_window
-        return _get_department_availability_impl(db, ctx, department_name, note, earliest_date, latest_date)
+        earliest_time, latest_time = forced_time_window if forced_time_window is not None else (None, None)
+        return _get_department_availability_impl(
+            db, ctx, department_name, note, earliest_date, latest_date, earliest_time, latest_time
+        )
 
     def _find_doctors_by_name(name_query: str) -> str:
         return _find_doctors_by_name_impl(db, ctx, name_query)

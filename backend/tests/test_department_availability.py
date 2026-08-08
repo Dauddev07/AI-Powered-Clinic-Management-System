@@ -302,6 +302,81 @@ def test_latest_date_window_with_no_slots_at_all_leaves_next_available_none(db, 
     assert result.next_available_when is None
 
 
+# --- earliest_time / latest_time (time-of-day filter) ---------------------------------
+# Reported live: "only show me available slots of dr farhan rehman after 12 pm on
+# monday" and "show me his available slots after 12 pm" both silently ignored the
+# time-of-day request and returned the same top-5-earliest-of-the-day slots — there
+# was no time-filtering mechanism anywhere at all.
+
+
+def test_earliest_time_filters_out_slots_before_that_local_time(db, clinic):
+    from datetime import time
+
+    dept = _department(db, clinic, name="Cardiology")
+    doctor = _doctor(db, clinic, dept)
+    # clinic fixture uses timezone="UTC", so local time-of-day == UTC time-of-day here.
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).date()
+    morning = _slot(db, clinic, doctor, datetime.combine(tomorrow, time(10, 0), tzinfo=timezone.utc))
+    afternoon = _slot(db, clinic, doctor, datetime.combine(tomorrow, time(14, 0), tzinfo=timezone.utc))
+
+    result = get_department_availability(db, clinic.id, "Cardiology", earliest_time=time(12, 0))
+
+    slot_ids = {s.slot_id for s in result.doctors[0].slots}
+    assert slot_ids == {afternoon.id}
+    assert morning.id not in slot_ids
+
+
+def test_latest_time_filters_out_slots_after_that_local_time(db, clinic):
+    from datetime import time
+
+    dept = _department(db, clinic, name="Cardiology")
+    doctor = _doctor(db, clinic, dept)
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).date()
+    morning = _slot(db, clinic, doctor, datetime.combine(tomorrow, time(10, 0), tzinfo=timezone.utc))
+    afternoon = _slot(db, clinic, doctor, datetime.combine(tomorrow, time(14, 0), tzinfo=timezone.utc))
+
+    result = get_department_availability(db, clinic.id, "Cardiology", latest_time=time(12, 0))
+
+    slot_ids = {s.slot_id for s in result.doctors[0].slots}
+    assert slot_ids == {morning.id}
+    assert afternoon.id not in slot_ids
+
+
+def test_time_of_day_filter_still_returns_up_to_max_slots_per_doctor(db, clinic):
+    from datetime import time
+
+    dept = _department(db, clinic, name="Cardiology")
+    doctor = _doctor(db, clinic, dept)
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).date()
+
+    # 3 slots before noon (filtered out), then MAX_SLOTS_PER_DOCTOR + 2 slots after
+    # noon — confirms the widened candidate pool finds real matches past the
+    # earliest, filtered-out ones, and still caps at MAX_SLOTS_PER_DOCTOR.
+    for hour in (8, 9, 10):
+        _slot(db, clinic, doctor, datetime.combine(tomorrow, time(hour, 0), tzinfo=timezone.utc))
+    afternoon_slots = [
+        _slot(db, clinic, doctor, datetime.combine(tomorrow, time(hour, 0), tzinfo=timezone.utc))
+        for hour in range(13, 13 + MAX_SLOTS_PER_DOCTOR + 2)
+    ]
+
+    result = get_department_availability(db, clinic.id, "Cardiology", earliest_time=time(12, 0))
+
+    assert len(result.doctors[0].slots) == MAX_SLOTS_PER_DOCTOR
+    returned_ids = {s.slot_id for s in result.doctors[0].slots}
+    assert returned_ids <= {s.id for s in afternoon_slots}
+
+
+def test_no_time_filter_behaves_exactly_as_before(db, clinic):
+    dept = _department(db, clinic, name="Cardiology")
+    doctor = _doctor(db, clinic, dept)
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).date()
+    slot = _slot(db, clinic, doctor, datetime.combine(tomorrow, datetime.min.time(), tzinfo=timezone.utc) + timedelta(hours=9))
+
+    result = get_department_availability(db, clinic.id, "Cardiology")
+
+    assert {s.slot_id for s in result.doctors[0].slots} == {slot.id}
+
+
 # --- find_doctors_by_name -------------------------------------------------------------
 
 

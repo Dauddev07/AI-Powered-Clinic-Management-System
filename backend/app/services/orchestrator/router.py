@@ -39,6 +39,7 @@ from app.services.message_classifier import (
     is_department_list_request,
     is_department_recommendation_request,
     is_department_scope_question,
+    is_doctor_count_or_listing_request,
     is_symptom_message,
     needs_booking_action_tools,
 )
@@ -203,6 +204,22 @@ def _rule_1_5_department_list_request(message, history, last_role, last_content)
     return None
 
 
+def _rule_1_6_doctor_count_or_listing_request(message, history, last_role, last_content):
+    """A "how many doctors/cardiologists are there" question about a specific
+    department or specialty. Reported live: "how many cardiologist are there in
+    this clinic??" contains no booking-action keyword and isn't a symptom, so it
+    fell through to general_info_agent, which answered from static KB prose
+    instead of the real, current doctor count — and its follow-up, "show me
+    their information", then got an incomplete answer since the KB document
+    didn't happen to mention the second doctor. appointment_agent has the real,
+    live per-department doctor lookup this needs (get_department_availability);
+    general_info_agent only has KB text search, which can't be guaranteed
+    complete or current for something admin-managed like the doctor roster."""
+    if is_doctor_count_or_listing_request(message):
+        return APPOINTMENT
+    return None
+
+
 def _rule_1_8_current_message_states_a_symptom(message, history, last_role, last_content):
     """The CURRENT message itself plainly describes a symptom. Reported live:
     General Medicine was resolved for dizziness/fainting, then small talk
@@ -279,6 +296,7 @@ _RULE_CASCADE = (
     ("0.6", _rule_0_6_department_scope_question),
     ("1", _rule_1_marker_continuity),
     ("1.5", _rule_1_5_department_list_request),
+    ("1.6", _rule_1_6_doctor_count_or_listing_request),
     ("1.8", _rule_1_8_current_message_states_a_symptom),
     ("2", _rule_2_screening_continuity),
     ("3", _rule_3_booking_action_signal),

@@ -60,6 +60,7 @@ action gets a real guarantee, not just a prompt instruction it might not follow.
 """
 import json
 import re
+from datetime import date
 
 from sqlalchemy.orm import Session
 
@@ -68,12 +69,15 @@ from app.models.conversation_memory import ConversationMemory
 from app.services import llm
 from app.services.chat_markers import DEPARTMENT_LIST_MARKER, DOCTOR_DISAMBIGUATION_MARKER, DOCTOR_OPTIONS_MARKER
 from app.services.chat_tools import (
+    _clinic_timezone,
     _doctor_options_payload,
+    _format_when,
     _no_slots_message,
     build_tools,
     cancel_appointment_now,
     list_upcoming_appointments,
     resolve_bare_weekday_window,
+    resolve_time_of_day_window,
 )
 from app.services.department_availability import (
     find_doctors_by_name,
@@ -83,6 +87,7 @@ from app.services.department_availability import (
 from app.services.message_classifier import (
     _CANCEL_ACTION_WORDS,
     _RESCHEDULE_ACTION_WORDS,
+    DEPARTMENT_TITLE_HINTS,
     _preceding_assistant_turn_looks_like_a_question,
 )
 from app.services.orchestrator.symptom_hints import departments_hinted_by_patient_symptom_words
@@ -402,28 +407,9 @@ _MISMATCH_WARNING_MARKER = "might be a better fit than"
 # app.services.orchestrator.symptom_hints), so it tolerates whatever a specific
 # clinic actually named the department ("Cardiology", "Cardiology Department",
 # etc.) rather than requiring one exact canonical string.
-_DEPARTMENT_TITLE_HINTS: tuple[tuple[str, str], ...] = (
-    ("cardiologist", "cardio"),
-    ("dermatologist", "derma"),
-    ("dentist", "dent"),
-    ("otolaryngologist", "otolaryn"),
-    ("neurologist", "neuro"),
-    ("psychiatrist", "psychiatr"),
-    ("orthopedist", "orthop"),
-    ("orthopedic surgeon", "orthop"),
-    ("pediatrician", "pediatr"),
-    ("paediatrician", "paediatr"),
-    ("gynecologist", "gynec"),
-    ("gynaecologist", "gynaecolog"),
-    ("ophthalmologist", "ophthalmolog"),
-    ("eye doctor", "ophthalmolog"),
-    ("eye specialist", "ophthalmolog"),
-    ("pulmonologist", "pulmonolog"),
-    ("lung specialist", "pulmonolog"),
-    ("general physician", "general medicine"),
-    ("general practitioner", "general medicine"),
-    ("family doctor", "family medicine"),
-)
+# Reuses message_classifier's own DEPARTMENT_TITLE_HINTS — see that module for
+# why this is shared rather than defined twice.
+_DEPARTMENT_TITLE_HINTS = DEPARTMENT_TITLE_HINTS
 
 
 def _departments_named_directly_in_message(message: str, department_names: list[str]) -> list[str]:
@@ -436,6 +422,96 @@ def _departments_named_directly_in_message(message: str, department_names: list[
             if re.search(rf"\b{re.escape(hint)}", name.lower()):
                 named.add(name)
     return list(named)
+
+
+# Reported live: "i want to see a dentist" got a plain KB-prose reply naming the
+# department as "General Dentistry" (prose text, not this clinic's real
+# department name, which is just "Dentistry") — then "is there any doctor
+# available there?" referred back to it with "there" instead of a name, and
+# named no doctor either. The LLM was left to guess a department_name from raw
+# history and apparently echoed the KB prose's wrong name, which
+# get_department_availability's exact-match lookup naturally rejected. This
+# recovers the REAL department name deterministically — via the same
+# title-hint matching used for a direct mention — from the patient's own
+# earlier message, same principle as _most_recently_named_doctor for a doctor
+# pronoun.
+_DEPARTMENT_REFERENCE_WORDS = frozenset({"there", "their", "them"})
+
+# Reported live (a second case of the same gap): "show me available slots for
+# cardiology" showed a real two-doctor card, then "are there only 2 doctors in
+# this dept?" — "this dept" is the same kind of back-reference as "there", just
+# phrased differently, and named no specific doctor either. This wasn't
+# recognized as a reference at all, so it fell through to the LLM with only the
+# (correct, this time) previously-shown card in context — the system prompt
+# already tells the model to answer a genuinely separate question like this one
+# via the card's own `note` field, but the model didn't reliably do so, just
+# re-showing the same card with no explicit answer. Recognizing the phrase lets
+# this resolve the same deterministic way "there" does, AND (see
+# _doctor_count_question_note below) attach a real, code-computed answer to the
+# specific "how many doctors" question instead of hoping the model's own note
+# covers it.
+_DEPARTMENT_REFERENCE_PHRASES = (
+    "this dept", "this department", "that dept", "that department",
+    "same dept", "same department",
+)
+
+
+def _message_references_a_department_by_pronoun(message: str) -> bool:
+    words = set(re.findall(r"[a-z0-9']+", message.lower()))
+    if words & _DEPARTMENT_REFERENCE_WORDS:
+        return True
+    lowered = message.lower()
+    return any(phrase in lowered for phrase in _DEPARTMENT_REFERENCE_PHRASES)
+
+
+# "doctor"/"doctors" plus every profession-title word ("cardiologist",
+# "dermatologist", ...) — a message naming the specialty directly ("how many
+# cardiologist are there") is asking about doctor count exactly as much as one
+# saying "doctor" literally, so both count as the same trigger word here.
+_DOCTOR_COUNT_TRIGGER_WORDS = frozenset({"doctor", "doctors", "specialist", "specialists"}) | frozenset(
+    title.split()[0] for title, _ in _DEPARTMENT_TITLE_HINTS
+)
+
+
+def _message_asks_about_doctor_count(message: str) -> bool:
+    """True for a question about HOW MANY doctors a department has ("are there
+    only 2 doctors", "how many cardiologist are there", "just 1 doctor?") —
+    deliberately narrow (requires a doctor/specialty word plus a counting word)
+    so this doesn't misfire on an unrelated message that merely contains
+    "only"."""
+    words = set(re.findall(r"[a-z0-9']+", message.lower()))
+    if not words & _DOCTOR_COUNT_TRIGGER_WORDS:
+        return False
+    if {"how", "many"} <= words:
+        return True
+    return bool(words & {"only", "just"})
+
+
+def _doctor_count_note(department_name: str, count: int) -> str:
+    """A real, code-computed answer to a "how many doctors" question — never
+    left to the model's own note-writing, which live testing showed doesn't
+    reliably answer this kind of follow-up even though the system prompt
+    already instructs it to."""
+    doctor_word = "doctor" if count == 1 else "doctors"
+    verb = "is" if count == 1 else "are"
+    return f"There {verb} currently {count} {doctor_word} in {department_name}:"
+
+
+_DEPARTMENT_REFERENCE_LOOKBACK_TURNS = 6
+
+
+def _most_recently_referenced_department(
+    history: list[ConversationMemory], department_names: list[str]
+) -> str | None:
+    """Recovers a department named a turn or two ago (directly, or via a
+    professional-title synonym like "dentist") when the patient's current
+    message only refers back to it with "there" — bounded lookback over user
+    turns only, mirroring _most_recently_named_doctor's own bounded scan."""
+    def matcher(content: str):
+        named = _departments_named_directly_in_message(content, department_names)
+        return named[0] if len(named) == 1 else None
+
+    return _scan_recent_user_messages(history, matcher, limit=_DEPARTMENT_REFERENCE_LOOKBACK_TURNS)
 
 
 def _already_warned_about_department_mismatch(history: list[ConversationMemory], named_department: str) -> bool:
@@ -745,6 +821,37 @@ def run_appointment_agent(
                     and not _already_warned_about_department_mismatch(history, named)
                 ):
                     return _department_mismatch_reply(named, hinted)
+            # Reported live: "how many cardiologist are there in this clinic??"
+            # names a real department directly (via the title-hint "cardiologist"
+            # -> "Cardiology") and has no symptom-mismatch issue, but nothing
+            # answered the actual "how many" question — it fell through to the
+            # LLM with no explicit RESOLVED DEPARTMENT guidance, leaving it to
+            # independently notice the real department name. Answered directly
+            # and deterministically instead, same principle as the pronoun path
+            # just below.
+            if len(named_departments) == 1 and _message_asks_about_doctor_count(message):
+                referenced_department = named_departments[0]
+                availability = get_department_availability(db, ctx.clinic_id, referenced_department)
+                if not availability.doctors:
+                    return _no_slots_message(referenced_department)
+                note = _doctor_count_note(referenced_department, len(availability.doctors))
+                return _doctor_options_payload(db, ctx.clinic_id, availability, note=note)
+        elif _message_references_a_department_by_pronoun(message):
+            # No department named directly in THIS message, just "there" — recover
+            # the real department from the patient's own earlier message and answer
+            # directly from the real DB, never leaving the LLM to guess a name from
+            # possibly-wrong prose in history.
+            referenced_department = _most_recently_referenced_department(history, department_names)
+            if referenced_department is not None:
+                availability = get_department_availability(db, ctx.clinic_id, referenced_department)
+                if not availability.doctors:
+                    return _no_slots_message(referenced_department)
+                note = (
+                    _doctor_count_note(referenced_department, len(availability.doctors))
+                    if _message_asks_about_doctor_count(message)
+                    else None
+                )
+                return _doctor_options_payload(db, ctx.clinic_id, availability, note=note)
 
     # Handoff step 1: deterministic ambiguity check against the real doctor table.
     # A message with no doctor-name reference at all (e.g. "cancel my appointment")
@@ -765,18 +872,30 @@ def run_appointment_agent(
             and _preceding_assistant_turn_looks_like_a_question(history)
         ):
             # A bare "yes" to the assistant's own confirming question names no
-            # doctor itself — re-resolve from the patient's own prior message
-            # (the one that actually named the doctor) instead of leaving the
-            # model with nothing and letting it re-ask from scratch.
-            prior_message = _most_recent_user_message(history)
-            if prior_message:
-                prior_matches = find_doctors_by_name(db, ctx.clinic_id, prior_message)
-                if len(prior_matches) == 1:
-                    resolved_match = prior_matches[0]
-                    # The patient's "yes" IS the confirmation — treat exactly like
-                    # an already-shown card so the model proceeds directly instead
-                    # of asking the same confirming question a second time.
-                    doctor_already_shown = True
+            # doctor itself — re-resolve from the patient's own prior message(s)
+            # instead of leaving the model with nothing and letting it re-ask
+            # from scratch.
+            #
+            # Reported live: "hook me up with dr ali raza" (KB prose, no card) ->
+            # "can u book an appointment for me with him?" (named no doctor
+            # itself, just the pronoun "him" — resolved via the pronoun path
+            # below from the FIRST message) -> "Did you mean Dr. Ali Raza in
+            # General Medicine?" -> "yes". The single-most-recent-message lookup
+            # this used to do only checked "can u book...him?" itself, which
+            # names no doctor either, so this recovery silently found nothing —
+            # resolved_match stayed None and the model got zero doctor context,
+            # producing a generic "book online yourself" answer instead of
+            # actually offering to show real slots. Reuses the same bounded
+            # lookback _most_recently_named_doctor already does for a pronoun
+            # reference, so it can see past an intermediate pronoun-only message
+            # to the one that actually named the doctor.
+            prior_match = _most_recently_named_doctor(db, ctx.clinic_id, history)
+            if prior_match is not None:
+                resolved_match = prior_match
+                # The patient's "yes" IS the confirmation — treat exactly like
+                # an already-shown card so the model proceeds directly instead
+                # of asking the same confirming question a second time.
+                doctor_already_shown = True
         if resolved_match is None and _message_references_a_doctor_by_pronoun(message):
             # "show me his available slots on fri" names no doctor of its own, just
             # a pronoun — recover the real doctor (and their real department_name,
@@ -794,17 +913,63 @@ def run_appointment_agent(
     # those doctors ("only show me Dr. X's slots") gets a real, filtered card built
     # directly from the DB — never routed through the LLM/tool-calling loop, which
     # has no way to filter get_department_availability's result at all.
+    #
+    # Reported live: "is dr farhan malik available on sat?" -> confirmed -> shown
+    # his real Saturday slots -> "is he available on mon?" — "he" was correctly
+    # resolved back to Dr. Farhan Malik (doctor_already_shown True), but this
+    # message has no "only"/"just" narrowing word, so the short-circuit below
+    # didn't fire and the LLM was left to call get_department_availability for
+    # the whole department on Monday — which has no doctor-filtering option at
+    # all, so it silently showed Dr. Ahmed Farooq's Monday slots instead of ever
+    # answering the actual question asked ("is HE available"). Once a message
+    # refers to a doctor only by pronoun, it can only be asking about that one
+    # doctor specifically — treated the same as an explicit narrowing word.
     if (
         resolved_match is not None
         and doctor_already_shown
         and resolved_appointment is None
-        and _message_or_pending_name_disambiguation_asks_to_narrow(message, history)
+        and (
+            _message_or_pending_name_disambiguation_asks_to_narrow(message, history)
+            or _message_references_a_doctor_by_pronoun(message)
+        )
     ):
+        # Reuses the same bare-weekday resolution the LLM tool path relies on
+        # (see resolve_bare_weekday_window's own docstring) — "is he available
+        # on mon?" must be checked against Monday specifically, not just
+        # whatever slots happen to be earliest.
+        forced_window = resolve_bare_weekday_window(message)
+        earliest_date = date.fromisoformat(forced_window[0]) if forced_window else None
+        latest_date = date.fromisoformat(forced_window[1]) if forced_window else None
+        # Reported live: "only show me available slots of dr farhan rehman
+        # after 12 pm on monday" and "show me his available slots after 12
+        # pm" both silently ignored the time-of-day request and returned the
+        # same top-5-earliest-of-the-day slots — this was never resolved or
+        # applied anywhere in this deterministic path at all.
+        time_window = resolve_time_of_day_window(message)
+        earliest_time, latest_time = time_window if time_window else (None, None)
         availability = get_department_availability(
-            db, ctx.clinic_id, resolved_match.department_name, doctor_id=resolved_match.doctor_id
+            db,
+            ctx.clinic_id,
+            resolved_match.department_name,
+            doctor_id=resolved_match.doctor_id,
+            earliest_date=earliest_date,
+            latest_date=latest_date,
+            earliest_time=earliest_time,
+            latest_time=latest_time,
         )
         if not availability.doctors:
-            return _no_slots_message(resolved_match.department_name)
+            if availability.next_available_when is not None:
+                # Named to the one doctor actually checked, not the whole
+                # department — reusing the department-wide "no one in X" wording
+                # here would misleadingly imply every doctor in the department
+                # was checked for this window, when only resolved_match was.
+                tz = _clinic_timezone(db, ctx.clinic_id)
+                return (
+                    f"{resolved_match.full_name} doesn't have any open slots in that window. "
+                    f"Their earliest available slot is {_format_when(availability.next_available_when, tz)}. "
+                    "Would you like me to book that instead, or check a different day?"
+                )
+            return f"{resolved_match.full_name} doesn't have any open slots right now. Please check back later."
         return _doctor_options_payload(db, ctx.clinic_id, availability)
 
     # Handoff step 2: recover the most recent card (if any) and render it into the
@@ -833,6 +998,7 @@ def run_appointment_agent(
     )
 
     forced_date_window = resolve_bare_weekday_window(message)
+    forced_time_window = resolve_time_of_day_window(message)
     tools = [
         t
         for t in build_tools(
@@ -841,6 +1007,7 @@ def run_appointment_agent(
             reschedule_redirect_appointment_id=reschedule_redirect_id,
             cancel_redirect_appointment_id=cancel_redirect_id,
             forced_date_window=forced_date_window,
+            forced_time_window=forced_time_window,
         )
         if t.name in _APPOINTMENT_AGENT_TOOL_NAMES
     ]

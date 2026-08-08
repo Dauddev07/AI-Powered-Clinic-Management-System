@@ -39,6 +39,7 @@ from app.services.chat_tools import (
     build_tools,
     combine_department_availability_results,
     resolve_bare_weekday_window,
+    resolve_time_of_day_window,
 )
 from app.services.department_availability import list_active_department_names
 from app.services.diagnosis_guard import violates_no_diagnosis_rule
@@ -386,9 +387,10 @@ def run_symptom_agent(
     system_prompt = _build_system_prompt(language_name, department_names, include_path2)
 
     forced_date_window = resolve_bare_weekday_window(message)
+    forced_time_window = resolve_time_of_day_window(message)
     tools = [
         t
-        for t in build_tools(db, ctx, forced_date_window=forced_date_window)
+        for t in build_tools(db, ctx, forced_date_window=forced_date_window, forced_time_window=forced_time_window)
         if t.name in _SYMPTOM_AGENT_TOOL_NAMES
     ]
 

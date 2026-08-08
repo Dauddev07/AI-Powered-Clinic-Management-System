@@ -370,6 +370,63 @@ def is_department_scope_question(message: str) -> bool:
     return bool(_DEPARTMENT_SCOPE_RE.search(message.strip()))
 
 
+# Professional-title synonyms patients use INSTEAD of a department's own real
+# name — shared between the router (deciding a "how many X are there" question
+# needs real per-department doctor data) and appointment_agent (resolving a
+# title like "cardiologist" to the real department name "Cardiology"). Each
+# entry is (title phrase, department-name hint prefix); the hint is checked as
+# a word-START match against the real department name so it tolerates whatever
+# a specific clinic actually named the department ("Cardiology", "Cardiology
+# Department", etc.) rather than requiring one exact canonical string. Used to
+# live as a private copy inside appointment_agent.py — moved here once the
+# router needed the same title vocabulary too, so there's only one list to
+# update if a new title synonym is ever reported missing.
+DEPARTMENT_TITLE_HINTS: tuple[tuple[str, str], ...] = (
+    ("cardiologist", "cardio"),
+    ("dermatologist", "derma"),
+    ("dentist", "dent"),
+    ("otolaryngologist", "otolaryn"),
+    ("neurologist", "neuro"),
+    ("psychiatrist", "psychiatr"),
+    ("orthopedist", "orthop"),
+    ("orthopedic surgeon", "orthop"),
+    ("pediatrician", "pediatr"),
+    ("paediatrician", "paediatr"),
+    ("gynecologist", "gynec"),
+    ("gynaecologist", "gynaecolog"),
+    ("ophthalmologist", "ophthalmolog"),
+    ("eye doctor", "ophthalmolog"),
+    ("eye specialist", "ophthalmolog"),
+    ("pulmonologist", "pulmonolog"),
+    ("lung specialist", "pulmonolog"),
+    ("general physician", "general medicine"),
+    ("general practitioner", "general medicine"),
+    ("family doctor", "family medicine"),
+)
+
+# The bare first word of every title above ("cardiologist", "dermatologist", ...),
+# plus generic "doctor(s)"/"specialist(s)" — a DB-free word list the router can
+# check against without needing to resolve a real department name first (that
+# resolution happens later, inside appointment_agent, against the real table).
+_PROFESSION_TITLE_WORDS = frozenset(title.split()[0] for title, _ in DEPARTMENT_TITLE_HINTS) | {
+    "doctor", "doctors", "specialist", "specialists",
+}
+
+
+def is_doctor_count_or_listing_request(message: str) -> bool:
+    """True for a "how many doctors/cardiologists/specialists are there"
+    question about a specific department or specialty. Reported live: "how many
+    cardiologist are there in this clinic??" fell through to general_info_agent
+    (no booking-action keyword, not a symptom), which answered from static KB
+    prose instead of the real, current doctor count — and a follow-up "show me
+    their information" then got an incomplete answer since the KB document
+    didn't happen to mention the second doctor at all. Deliberately requires
+    BOTH a counting cue ("how many") AND a doctor/specialty word, so this can't
+    misfire on an unrelated "how many" question about something else."""
+    words = set(re.findall(r"[a-z0-9']+", message.lower()))
+    return {"how", "many"} <= words and bool(words & _PROFESSION_TITLE_WORDS)
+
+
 def is_symptom_message(message: str) -> bool:
     """True when the message mentions a symptom/complaint — used by chat.py to route
     a turn to real department-list context (see app.services.department_availability)
