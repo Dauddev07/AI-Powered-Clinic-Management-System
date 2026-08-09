@@ -7,6 +7,7 @@ import EmptyState from "../components/EmptyState";
 import Skeleton from "../components/Skeleton";
 import StarIcon from "../components/StarIcon";
 import WelcomeBanner from "../components/WelcomeBanner";
+import { useCountUp } from "../hooks/useCountUp";
 import { useReveal, revealDelayClass } from "../hooks/useReveal";
 import { useTheme } from "../theme/ThemeContext";
 import styles from "./AdminHome.module.css";
@@ -219,6 +220,14 @@ export default function AdminHome() {
   // always today's booking-activity count — no separate query needed for it.
   const bookedToday = trend ? trend[trend.length - 1].count : null;
 
+  // Counting up from 0 (rather than the number just appearing the instant
+  // data loads) gives the numbers a small "live dashboard" feel — each hook
+  // call is a no-op (returns its target immediately) until its own value
+  // stops being null, and again for anyone with prefers-reduced-motion set.
+  const activeDoctorsAnimated = useCountUp(stats?.active_doctors_count ?? null);
+  const utilizationPercentAnimated = useCountUp(utilization?.percentage ?? null);
+  const bookedTodayAnimated = useCountUp(bookedToday);
+
   // Busiest-first per the backend's own ordering — fold anything past the
   // fixed 8-color palette into a single "Other" slice instead of cycling colors.
   const busiestDoctors = stats?.busiest_doctors_today || [];
@@ -237,6 +246,7 @@ export default function AdminHome() {
 
       {error && <p className={styles.errorText}>{error}</p>}
 
+      <div className={styles.sectionLabel}>Overview</div>
       <div className={styles.statsGrid}>
         <div className={`${styles.card} reveal`} ref={revealRef}>
           <div className={styles.cardTitleRow}>
@@ -251,7 +261,7 @@ export default function AdminHome() {
           {stats === null && !error && <Skeleton rows={1} />}
           {stats && (
             <>
-              <div className={styles.statValue}>{stats.active_doctors_count}</div>
+              <div className={styles.statValue}>{activeDoctorsAnimated}</div>
               <div className={styles.statLabel}>of {stats.total_doctors_count} total doctors</div>
             </>
           )}
@@ -273,7 +283,7 @@ export default function AdminHome() {
                 <span className={styles.utilizationFraction}>
                   {utilization.booked} of {utilization.total} booked
                 </span>
-                <span className={styles.utilizationPercent}>{utilization.percentage}%</span>
+                <span className={styles.utilizationPercent}>{utilizationPercentAnimated}%</span>
               </div>
               <div
                 className={styles.barTrack}
@@ -329,6 +339,8 @@ export default function AdminHome() {
         </div>
       </div>
 
+      <div className={styles.sectionLabel}>Insights</div>
+
       <div className={`${styles.card} reveal ${revealDelayClass(2)}`} ref={revealRef}>
         <div className={styles.cardTitleRow}>
           <span className={`${styles.titleIcon} ${styles.titleIcon_warning}`} aria-hidden="true">
@@ -366,7 +378,7 @@ export default function AdminHome() {
         {trend && (
           <>
             <div className={styles.utilizationSummary}>
-              <span className={styles.utilizationFraction}>{bookedToday} booked today</span>
+              <span className={styles.utilizationFraction}>{bookedTodayAnimated} booked today</span>
             </div>
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={trendData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>

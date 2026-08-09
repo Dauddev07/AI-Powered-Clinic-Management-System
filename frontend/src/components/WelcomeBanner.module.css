@@ -82,6 +82,43 @@
   max-width: 34rem;
 }
 
+/* Each line settles in on its own, staggered beat — separate from (and on
+   top of) the outer .banner's own scroll-triggered .reveal fade — so the
+   banner's first paint reads as a small composed entrance (eyebrow, then
+   heading, then tagline) rather than all three lines just appearing at
+   once. Runs once on mount; "both" holds the pre-animation state until it
+   starts and the post-animation state after, so nothing flashes unstyled.
+   Soft-focus-to-sharp (blur+scale) layered on top of the rise — safe here
+   in a way it wasn't on dashboard stat cards (see index.css's own .reveal
+   comment): three short text lines settling in read as an intentional
+   flourish, not a rendering glitch. */
+.eyebrow,
+.heading,
+.tagline {
+  animation: banner-text-in 800ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes banner-text-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.97);
+    filter: blur(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eyebrow,
+  .heading,
+  .tagline {
+    animation: none;
+  }
+}
+
 .eyebrow {
   display: inline-block;
   font-size: var(--font-size-label);
@@ -90,6 +127,7 @@
   text-transform: uppercase;
   color: var(--app-accent);
   margin-bottom: 0.5rem;
+  animation-delay: 60ms;
 }
 
 .heading {
@@ -100,15 +138,71 @@
   line-height: 1.15;
   margin: 0 0 0.5rem;
   overflow-wrap: anywhere;
+  animation-delay: 170ms;
 }
 
 /* A little glow on the patient's own name — the one word in the banner that
    is genuinely personal, so it gets the one bit of extra shine. Kept
    restrained (a soft color-matched shadow, not a bloom) so it reads as
-   polish rather than a gimmick. */
+   polish rather than a gimmick.
+
+   Reported live (1st report): the name sat visibly higher than the rest of
+   "Welcome," on the same line. Cause: `display: inline-block` +
+   `overflow: hidden` together trigger a CSS spec rule that a non-visible-
+   overflow inline-block uses its bottom margin edge as its baseline instead
+   of its text baseline, visibly lifting the glyphs. Swapped `overflow` for
+   `clip-path: inset(0)`, which doesn't trigger that rule — but also dropped
+   `display: inline-block` down to plain `inline` at the same time, which
+   turned out to be its own bug (2nd report): an absolutely-positioned child
+   (::after, the shimmer sweep below) inside a plain `inline` element clips
+   and positions unreliably across engines, and left a stray triangular
+   sliver of the shimmer permanently visible in the corner instead of
+   sweeping through and disappearing. `inline-block` reliably contains an
+   absolute-positioned child; `clip-path` (not `overflow`) is what avoids the
+   baseline bug — so both fixes now apply together instead of trading one
+   bug for the other. */
 .name {
+  position: relative;
+  display: inline-block;
+  clip-path: inset(0);
   color: var(--app-accent);
   text-shadow: 0 0 18px color-mix(in srgb, var(--app-accent) 55%, transparent);
+}
+
+/* A single soft light sweep across the name, once, shortly after it settles
+   in — a small gloss/shimmer detail rather than a looping effect, so it
+   reads as a one-time "polish" flourish and never becomes visual noise on a
+   dashboard someone leaves open for a while. */
+.name::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  left: -60%;
+  width: 45%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    color-mix(in srgb, white 65%, transparent) 50%,
+    transparent
+  );
+  transform: skewX(-18deg);
+  animation: banner-name-shimmer 1.4s cubic-bezier(0.4, 0, 0.2, 1) 850ms 1;
+}
+
+@keyframes banner-name-shimmer {
+  from {
+    left: -60%;
+  }
+  to {
+    left: 130%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .name::after {
+    animation: none;
+    display: none;
+  }
 }
 
 .tagline {
@@ -116,6 +210,7 @@
   color: var(--app-text-subtitle);
   margin: 0;
   overflow-wrap: anywhere;
+  animation-delay: 280ms;
 }
 
 @media (max-width: 640px) {

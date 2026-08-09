@@ -232,12 +232,6 @@ export default function AppHeader() {
             >
               About
             </Link>
-            <Link to="/login" className={styles.navLogin} onClick={closeMobileNav}>
-              Log in
-            </Link>
-            <Link to="/register" className={styles.navRegister} onClick={closeMobileNav}>
-              Register
-            </Link>
           </nav>
         </div>
       )}

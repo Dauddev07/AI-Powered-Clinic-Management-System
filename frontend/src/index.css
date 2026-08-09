@@ -181,12 +181,28 @@ p {
 
 /* Site-wide scroll-reveal (see src/hooks/useReveal.js) — a global, unscoped
    class so any page can use it without duplicating this block into every
-   CSS module. transform/opacity only — never width/height/margin — so
-   nothing here can trigger a layout reflow. */
+   CSS module. transform/opacity/filter only — never width/height/margin —
+   so nothing here can trigger a layout reflow.
+
+   Kept deliberately plain here — opacity + a short rise, nothing more. A
+   scale+blur "settle in" version was tried at this global level (so every
+   .reveal user got it for free) but reported live as looking bad specifically
+   on dashboard cards (AdminHome/PatientDashboard stat cards) — a blurred,
+   scaling rectangle with its own border/shadow reads as a rendering glitch,
+   not polish, in a way a blurred paragraph of marketing copy doesn't. The
+   extra flourish now lives ONLY in Landing.module.css's own modifier classes
+   (.revealBlur, .revealLeft/.revealRight), layered on top of this base for
+   that page specifically — dashboards and every other .reveal user keep this
+   safe version. The `filter` transition stays listed here (a no-op for
+   anything that never sets `filter`) so Landing's modifier doesn't need to
+   redeclare the whole `transition` shorthand just to add one property. */
 .reveal {
   opacity: 0;
-  transform: translateY(16px);
-  transition: opacity 600ms ease-out, transform 600ms ease-out;
+  transform: translateY(18px);
+  transition:
+    opacity 550ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 550ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 550ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .reveal.revealed {

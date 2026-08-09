@@ -8,6 +8,7 @@ import FloatingChatButton from "../../components/FloatingChatButton";
 import Skeleton from "../../components/Skeleton";
 import StatusBadge from "../../components/StatusBadge";
 import WelcomeBanner from "../../components/WelcomeBanner";
+import { useCountUp } from "../../hooks/useCountUp";
 import { useReveal } from "../../hooks/useReveal";
 import { useNow } from "../../hooks/useNow";
 import { isAppointmentInProgress } from "../../utils/appointmentStatus";
@@ -71,6 +72,23 @@ export default function PatientDashboard() {
       );
   }, []);
 
+  // Hoisted out of the render tree below — used both for the status badge
+  // and (new) the card's own left-edge accent color, so it's computed once
+  // rather than twice via a nested IIFE.
+  const nextAppointmentInProgress = summary?.next_appointment
+    ? isAppointmentInProgress(summary.next_appointment, now)
+    : false;
+  const nextCardAccentClass = !summary?.next_appointment
+    ? ""
+    : nextAppointmentInProgress
+      ? styles.card_accentWarning
+      : styles.card_accentInfo;
+
+  const inProgressCount = nextAppointmentInProgress ? 1 : 0;
+  const upcomingAnimated = useCountUp(summary ? summary.upcoming_count - inProgressCount : null);
+  const inProgressAnimated = useCountUp(summary ? inProgressCount : null);
+  const completedAnimated = useCountUp(summary ? summary.completed_count : null);
+
   return (
     <>
       <WelcomeBanner
@@ -78,8 +96,9 @@ export default function PatientDashboard() {
         tagline="Use the account menu to book an appointment or manage your visits."
       />
 
+      <div className={styles.sectionLabel}>Appointments</div>
       <div className={styles.grid}>
-        <div className={`${styles.card} reveal`} ref={revealRef}>
+        <div className={`${styles.card} ${nextCardAccentClass} reveal`} ref={revealRef}>
           <div className={styles.cardTitleRow}>
             <span className={`${styles.titleIcon} ${styles.titleIcon_info}`} aria-hidden="true">
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -94,19 +113,18 @@ export default function PatientDashboard() {
 
           {summary && summary.next_appointment && (
             <div className={styles.nextAppointment}>
-              {(() => {
-                const inProgress = isAppointmentInProgress(summary.next_appointment, now);
-                return (
-                  <div className={styles.nextStatusRow}>
-                    <StatusBadge tone={inProgress ? "warning" : "info"} label={inProgress ? "In progress" : "Upcoming"} pulse={inProgress} />
-                    {inProgress && (
-                      <span className={styles.nextEndsIn}>
-                        {formatMinutesRemaining(summary.next_appointment.end_utc, now)}
-                      </span>
-                    )}
-                  </div>
-                );
-              })()}
+              <div className={styles.nextStatusRow}>
+                <StatusBadge
+                  tone={nextAppointmentInProgress ? "warning" : "info"}
+                  label={nextAppointmentInProgress ? "In progress" : "Upcoming"}
+                  pulse={nextAppointmentInProgress}
+                />
+                {nextAppointmentInProgress && (
+                  <span className={styles.nextEndsIn}>
+                    {formatMinutesRemaining(summary.next_appointment.end_utc, now)}
+                  </span>
+                )}
+              </div>
               <span className={styles.nextWhen}>
                 {formatDateTime(summary.next_appointment.start_utc, summary.clinic_timezone)}
               </span>
@@ -157,33 +175,31 @@ export default function PatientDashboard() {
             />
           )}
 
-          {summary && (summary.upcoming_count > 0 || summary.completed_count > 0) && (() => {
-            // The next appointment (earliest confirmed, by start time) is the only
-            // one that can ever be "in progress" — auto-complete only fires once
-            // end_utc passes, so an ongoing appointment is still the soonest
-            // confirmed one. Split it out of upcoming_count so the three tiles
-            // stay mutually exclusive instead of double-counting it.
-            const inProgressCount = isAppointmentInProgress(summary.next_appointment, now) ? 1 : 0;
-            return (
-              <div className={styles.counts}>
-                <div className={styles.countItem}>
-                  <CountIcon kind="upcoming" />
-                  <span className={styles.countValue}>{summary.upcoming_count - inProgressCount}</span>
-                  <span className={styles.countLabel}>Upcoming</span>
-                </div>
-                <div className={styles.countItem}>
-                  <CountIcon kind="inProgress" />
-                  <span className={styles.countValue}>{inProgressCount}</span>
-                  <span className={styles.countLabel}>In progress</span>
-                </div>
-                <div className={styles.countItem}>
-                  <CountIcon kind="completed" />
-                  <span className={styles.countValue}>{summary.completed_count}</span>
-                  <span className={styles.countLabel}>Completed</span>
-                </div>
+          {/* The next appointment (earliest confirmed, by start time) is the only
+              one that can ever be "in progress" — auto-complete only fires once
+              end_utc passes, so an ongoing appointment is still the soonest
+              confirmed one. inProgressCount (hoisted above) is split out of
+              upcoming_count so the three tiles stay mutually exclusive instead
+              of double-counting it. */}
+          {summary && (summary.upcoming_count > 0 || summary.completed_count > 0) && (
+            <div className={styles.counts}>
+              <div className={styles.countItem}>
+                <CountIcon kind="upcoming" />
+                <span className={styles.countValue}>{upcomingAnimated}</span>
+                <span className={styles.countLabel}>Upcoming</span>
               </div>
-            );
-          })()}
+              <div className={styles.countItem}>
+                <CountIcon kind="inProgress" />
+                <span className={styles.countValue}>{inProgressAnimated}</span>
+                <span className={styles.countLabel}>In progress</span>
+              </div>
+              <div className={styles.countItem}>
+                <CountIcon kind="completed" />
+                <span className={styles.countValue}>{completedAnimated}</span>
+                <span className={styles.countLabel}>Completed</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

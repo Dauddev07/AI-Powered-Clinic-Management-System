@@ -2,315 +2,47 @@
   background: var(--app-bg-page);
 }
 
+/* Instructed live to match a specific reference layout: a two-column
+   composition (text left, a graphic "visual" right) instead of the
+   full-bleed atmospheric section this went through many earlier rounds of
+   (gradient wash, particle field, traveling pulse line). First built as an
+   elevated white/card panel (matching that reference exactly); reported
+   live afterward to drop the card chrome — .heroCard is now a plain layout
+   container (max-width + centering only, no background/border/shadow/
+   radius) so the content sits directly on the page background instead of
+   inside a boxed panel. No forced full-viewport min-height either; the
+   section is its own natural height. */
 .hero {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 3rem 1.5rem 2.5rem;
   box-sizing: border-box;
-  /* Fills the screen below the sticky header so the hero is the only thing
-     visible on load — departments (and everything else) only come into view
-     once the visitor scrolls. --app-header-height is set on :root by
-     AppHeader so this stays correct if the header's own height ever changes. */
-  min-height: calc(100vh - var(--app-header-height, 4.25rem));
-  min-height: calc(100dvh - var(--app-header-height, 4.25rem));
-  /* Base layer beneath .heroBg's own gradient/pulse composition below. */
+  padding: clamp(1.5rem, 4vw, 2.75rem) 1.5rem;
   background-color: var(--app-bg-page);
-  overflow: hidden;
 }
 
-/* Replaces the old static hero-bg.jpg photo, then a scattered gradient-blob
-   wash, then a tiled heartbeat-line pattern that read as busy/noisy
-   wallpaper, then floating clinic icons that were asked to be removed. This
-   is a single decent, considered shade instead: a diagonal accent wash
-   layered with one soft radial glow anchored top-right, matching the same
-   restrained gradient language used on the dashboard's WelcomeBanner card.
-   Lives on its own absolutely-positioned layer BEHIND .content (never
-   directly on .hero) so it stacks independently of the headline/logo/
-   tagline. z-index: 0 sits below .content's implicit stacking (a flex child
-   with no z-index of its own still paints after this, since it comes later
-   in DOM order) — no z-index needed on .content itself. */
-.heroBg {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  /* Four layers instead of two — a second glow (bottom-left, the info tone)
-     balances the composition and gives the wash real depth instead of a
-     single diagonal blend, and a wide multi-stop linear pass ties the two
-     glows together rather than leaving a flat middle. */
-  background:
-    radial-gradient(
-      ellipse 60% 55% at 82% 12%,
-      color-mix(in srgb, var(--app-accent) 24%, transparent),
-      transparent 70%
-    ),
-    radial-gradient(
-      ellipse 55% 50% at 8% 96%,
-      color-mix(in srgb, var(--app-info-text) 20%, transparent),
-      transparent 72%
-    ),
-    linear-gradient(
-      160deg,
-      color-mix(in srgb, var(--app-accent) 12%, transparent) 0%,
-      transparent 35%,
-      transparent 60%,
-      color-mix(in srgb, var(--app-info-text) 10%, transparent) 100%
-    );
+.heroCard {
+  box-sizing: border-box;
+  max-width: 1180px;
+  margin: 0 auto;
 }
 
-/* Very slow, barely-perceptible breathing on the radial glow — enough to
-   keep the shade from feeling like a flat static image, without competing
-   for attention the way the old multi-blob mesh did. */
-.heroBg::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(
-    ellipse 46% 42% at 82% 12%,
-    color-mix(in srgb, var(--app-accent) 16%, transparent),
-    transparent 72%
-  );
-  animation: hero-shade-breathe 16s ease-in-out infinite;
+.heroTop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 400px);
+  align-items: center;
+  gap: clamp(2rem, 5vw, 4rem);
 }
 
-@keyframes hero-shade-breathe {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .heroBg::after {
-    animation: none;
-  }
-}
-
-@property --hero-pulse-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-
-.content {
-  /* position + z-index required here, not just DOM order — a positioned
-     element (.heroBg, position: absolute) always paints above a non-positioned
-     one regardless of source order, so without this .heroBg would cover the
-     hero's actual text/logo content despite coming first in the markup. */
-  position: relative;
-  z-index: 1;
+.heroContent {
+  /* min-width: 0 — this is a grid item; without it, flex/grid items default
+     to min-width: auto (their content's own unshrinkable size), and the CTA
+     buttons below (white-space: nowrap by design) would inflate this column
+     past its track and overflow, same class of bug documented in more
+     detail on .heroCtaPrimary/.heroCtaSecondary further down. */
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
+  align-items: flex-start;
+  text-align: left;
   gap: 1rem;
-  max-width: 560px;
-  padding: 3rem 3.25rem 2.75rem;
-  box-sizing: border-box;
-  border: 3px solid transparent;
-  border-radius: 28px;
-  /* Reported live: the free-floating pulse-line used to run straight through
-     the section's vertical middle, but once this became an opaque glass
-     card sitting right on top of that midline, the card fully hid it — the
-     "moving" element was still animating, just invisible. Fixed by moving
-     the pulse onto the card's OWN edge instead of behind it: a clearly
-     visible always-on ring plus two brighter comet-like arcs, opposite each
-     other on the ring, continuously traveling around the card's border — the
-     same "traveling highlight over a dim static track" idea as before, just
-     traced along a perimeter that's always in the open rather than a
-     straight line that can be covered. A masked/blurred glow layer was tried
-     here first but a radial mask doesn't fit a wide rectangle's shape — it
-     washed a crescent of light straight over the headline instead of
-     hugging the edge. A single `background:` shorthand with mixed
-     padding-box/border-box layers was tried next but silently failed to
-     parse at all (a bare color as the final layer isn't valid there) and
-     produced no background whatsoever — replaced with explicit longhand
-     background-image/-origin/-clip below, which is unambiguous. Second bug,
-     found after fixing the first: background-clip: border-box clips to the
-     OUTER edge of the border, which includes the interior too, not just the
-     ring — the fill layer has to be genuinely opaque-ish to mask the conic
-     layer out of the interior, or the gradient bleeds through as a diagonal
-     wash over the whole card (confirmed live: at the previous 46% fill
-     alpha, exactly that happened). 88% keeps a thin frosted quality from the
-     backdrop-filter blur without letting the border gradient show through
-     where the text sits. */
-  background-image:
-    linear-gradient(
-      color-mix(in srgb, var(--app-bg-card) 88%, transparent),
-      color-mix(in srgb, var(--app-bg-card) 88%, transparent)
-    ),
-    conic-gradient(
-      from var(--hero-pulse-angle),
-      color-mix(in srgb, var(--app-accent) 35%, transparent) 0deg,
-      color-mix(in srgb, var(--app-accent) 35%, transparent) 76deg,
-      color-mix(in srgb, var(--app-accent) 80%, transparent) 100deg,
-      color-mix(in srgb, var(--app-accent) 100%, white 35%) 116deg,
-      color-mix(in srgb, var(--app-accent) 80%, transparent) 132deg,
-      color-mix(in srgb, var(--app-accent) 35%, transparent) 156deg,
-      color-mix(in srgb, var(--app-accent) 35%, transparent) 256deg,
-      color-mix(in srgb, var(--app-accent) 80%, transparent) 280deg,
-      color-mix(in srgb, var(--app-accent) 100%, white 35%) 296deg,
-      color-mix(in srgb, var(--app-accent) 80%, transparent) 312deg,
-      color-mix(in srgb, var(--app-accent) 35%, transparent) 336deg,
-      color-mix(in srgb, var(--app-accent) 35%, transparent) 360deg
-    );
-  background-origin: padding-box, border-box;
-  background-clip: padding-box, border-box;
-  backdrop-filter: blur(22px) saturate(150%);
-  -webkit-backdrop-filter: blur(22px) saturate(150%);
-  box-shadow: 0 18px 48px color-mix(in srgb, var(--app-shadow) 90%, transparent);
-  animation: hero-pulse-sweep 7s linear infinite;
-}
-
-@keyframes hero-pulse-sweep {
-  to {
-    --hero-pulse-angle: 360deg;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .content {
-    animation: none;
-  }
-}
-
-@media (max-width: 600px) {
-  .content {
-    padding: 2.25rem 1.75rem 2rem;
-    border-radius: 22px;
-  }
-}
-
-/* Scrolling tagline strip, directly above the headline */
-.tagline {
-  width: 100%;
-  max-width: 420px;
-  /* Its child track is one unbroken (white-space: nowrap) line, ~1100px wide
-     even after de-duplication. Flex items default to min-width: auto, which
-     lets that unbreakable width leak into .content's own sizing and blow it
-     out past the viewport on narrow screens — min-width: 0 opts back out. */
-  min-width: 0;
-  margin: 0 auto;
-  overflow: hidden;
-  -webkit-mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
-  mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
-}
-
-.taglineTrack {
-  display: flex;
-  align-items: center;
-  width: max-content;
-  white-space: nowrap;
-  animation: taglineScroll 24s linear infinite;
-  will-change: transform;
-}
-
-@keyframes taglineScroll {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(-50%);
-  }
-}
-
-.taglinePhrase {
-  font-size: var(--font-size-label);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--app-accent);
-}
-
-.taglineDot {
-  margin: 0 0.6rem;
-  color: var(--app-text-subtitle);
-}
-
-@media (max-width: 720px) {
-  .tagline {
-    max-width: 300px;
-  }
-
-  .taglinePhrase {
-    font-size: var(--font-size-caption);
-  }
-
-  .taglineDot {
-    margin: 0 0.5rem;
-  }
-}
-
-@media (max-width: 480px) {
-  .tagline {
-    /* A percentage max-width is indeterminate for the purposes of an
-       ancestor's own intrinsic-size calculation (the exact circular case
-       here: .content's width depends on this, so "100%" resolves against an
-       unresolved size and is effectively ignored) — a viewport-relative
-       value avoids that and reliably caps the track's contribution. */
-    max-width: calc(100vw - 3rem);
-    -webkit-mask-image: linear-gradient(to right, transparent, black 6%, black 94%, transparent);
-    mask-image: linear-gradient(to right, transparent, black 6%, black 94%, transparent);
-  }
-
-  .taglinePhrase {
-    font-size: calc(var(--font-size-caption) * 0.85);
-  }
-
-  .taglineDot {
-    margin: 0 0.4rem;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .taglineTrack {
-    animation: none;
-    transform: translateX(0);
-  }
-
-  .taglineTrack > *:not(:first-child) {
-    display: none;
-  }
-}
-
-.headline {
-  margin: 0.5rem 0 0;
-  font-size: calc(var(--font-size-title) * 1.15);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-  color: var(--app-text-title);
-}
-
-.accentWord {
-  color: var(--app-accent);
-}
-
-.description {
-  margin: 0;
-  color: var(--app-text-subtitle);
-  font-size: var(--font-size-body);
-  line-height: 1.5;
-}
-
-.backToDashboardBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 0.5rem;
-  padding: 0.65rem 1.4rem;
-  border-radius: 14px;
-  background: var(--app-accent);
-  color: var(--app-accent-text);
-  font-size: var(--font-size-label);
-  font-weight: 600;
-  text-decoration: none;
-  white-space: nowrap;
-  transition: background-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
-}
-
-.backToDashboardBtn:hover {
-  background: var(--app-accent-hover);
-  transform: translateY(-1px);
 }
 
 /* Full-width red banner, first thing on the page (above the hero) — the app's own
@@ -358,6 +90,440 @@
 
   .emergencyBanner svg {
     margin-top: 0.15em;
+  }
+}
+
+.headline {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, calc(var(--font-size-title) * 1.35));
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--app-text-title);
+}
+
+.accentWord {
+  color: var(--app-accent);
+}
+
+.description {
+  margin: 0;
+  max-width: 32rem;
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-body);
+  line-height: 1.6;
+}
+
+/* The hero's primary conversion moment — see the JSX call site's own
+   comment. Primary is deliberately the biggest, boldest thing in the hero
+   after the headline itself (larger padding/font than .backToDashboardBtn,
+   plus a glow-shadow, not just a flat fill) since its whole job is to get
+   clicked; secondary stays a quiet outline so it never competes with it. */
+.heroCtaRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.85rem;
+  margin-top: 0.35rem;
+  min-width: 0;
+}
+
+.heroCtaPrimary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.85rem 1.9rem;
+  border-radius: 14px;
+  background: var(--app-accent);
+  color: var(--app-accent-text);
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--app-accent) 38%, transparent);
+  transition: background-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+
+.heroCtaPrimary:hover {
+  background: var(--app-accent-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--app-accent) 48%, transparent);
+}
+
+.heroCtaSecondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.85rem 1.9rem;
+  border-radius: 14px;
+  border: 1.5px solid var(--app-border);
+  background: transparent;
+  color: var(--app-text-title);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease;
+}
+
+.heroCtaSecondary:hover {
+  border-color: var(--app-accent);
+  background: color-mix(in srgb, var(--app-accent) 8%, transparent);
+  transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heroCtaPrimary:hover,
+  .heroCtaSecondary:hover {
+    transform: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .heroCtaRow {
+    flex-direction: column;
+    align-self: stretch;
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Reported live: even with width: 100% set, these still rendered at their
+     full nowrap-text intrinsic width and overflowed off the right edge of
+     narrow phones. Cause: as flex items of .heroCtaRow, they default to
+     min-width: auto (their content's own unshrinkable size) — width: 100%
+     sets the target size, but the flex algorithm still won't shrink a flex
+     item below that auto-minimum unless min-width: 0 opts back out of it,
+     same fix as .content itself needed above. box-sizing: border-box keeps
+     the horizontal padding inside that 100%, rather than added on top of it. */
+  .heroCtaPrimary,
+  .heroCtaSecondary {
+    min-width: 0;
+    box-sizing: border-box;
+    width: 100%;
+  }
+}
+
+.backToDashboardBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.5rem;
+  padding: 0.65rem 1.4rem;
+  border-radius: 14px;
+  background: var(--app-accent);
+  color: var(--app-accent-text);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+
+.backToDashboardBtn:hover {
+  background: var(--app-accent-hover);
+  transform: translateY(-1px);
+}
+
+/* The hero's graphic side — no real photography is used (nothing to
+   license/fabricate), so this is a line-art panel in the app's own brand
+   language instead: a circle in the brand accent tone with a large
+   stethoscope glyph, orbited by four small floating badges (see
+   HERO_VISUAL_BADGES in Landing.jsx) that mirror the app's real
+   capabilities rather than being decoration for decoration's sake. */
+.heroVisual {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+}
+
+/* A quiet dot-grid in the card's top-right corner — the one purely
+   decorative texture element, kept small/faint enough to read as a material
+   detail (like dot-grid paper) rather than a pattern competing for attention. */
+.heroVisualDots {
+  position: absolute;
+  top: -6%;
+  right: -4%;
+  width: 130px;
+  height: 130px;
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--app-accent) 45%, transparent) 1.6px,
+    transparent 1.6px
+  );
+  background-size: 16px 16px;
+  opacity: 0.5;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.heroVisualCircle {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(300px, 78vw);
+  height: min(300px, 78vw);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 32% 28%,
+    color-mix(in srgb, var(--app-accent) 22%, var(--app-bg-card)),
+    color-mix(in srgb, var(--app-accent) 6%, var(--app-bg-card)) 72%
+  );
+  border: 1px solid var(--app-border);
+  color: var(--app-accent);
+  box-shadow: 0 24px 48px color-mix(in srgb, var(--app-accent) 18%, transparent);
+}
+
+.stethoscopeSvg {
+  max-width: 78%;
+  max-height: 78%;
+}
+
+/* Gradient stops — see the JSX call site's own comment for why this is a
+   shaded illustration rather than a photo or the earlier thin-line icon.
+   `stop-color`/`stop-opacity` are real, styleable SVG presentation
+   properties in CSS, so these can pull from the app's own accent token
+   (color-mix, theme-aware) the same way any other element here does,
+   instead of being hardcoded per theme. */
+.stethTubeStart {
+  stop-color: var(--app-accent);
+  stop-opacity: 0.95;
+}
+
+.stethTubeEnd {
+  stop-color: var(--app-accent);
+  stop-opacity: 0.55;
+}
+
+.stethChestStart {
+  stop-color: color-mix(in srgb, white 70%, var(--app-bg-card));
+  stop-opacity: 1;
+}
+
+.stethChestMid {
+  stop-color: var(--app-accent);
+  stop-opacity: 0.4;
+}
+
+.stethChestEnd {
+  stop-color: var(--app-accent);
+  stop-opacity: 0.18;
+}
+
+.stethShadow {
+  fill: var(--app-shadow);
+  opacity: 0.5;
+}
+
+.stethTube {
+  stroke: url(#stethTubeGrad);
+  stroke-width: 9;
+  stroke-linecap: round;
+}
+
+.stethTubeHighlight {
+  stroke: color-mix(in srgb, white 55%, var(--app-accent));
+  stroke-opacity: 0.5;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.stethMetal {
+  fill: color-mix(in srgb, var(--app-text-subtitle) 55%, var(--app-bg-card));
+}
+
+.stethStem {
+  stroke: color-mix(in srgb, var(--app-text-subtitle) 55%, var(--app-bg-card));
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+
+.stethChestRing {
+  stroke: var(--app-accent);
+  stroke-width: 2;
+}
+
+.stethChestInner {
+  stroke: var(--app-accent);
+  stroke-width: 1.5;
+  opacity: 0.55;
+}
+
+.stethChestSheen {
+  fill: white;
+  opacity: 0.55;
+}
+
+.heroVisualBadge {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 50%;
+  background: var(--app-bg-card);
+  border: 1px solid var(--app-border);
+  color: var(--app-accent);
+  box-shadow: 0 10px 24px var(--app-shadow);
+  /* A slow, individually-offset float — enough to read as "alive" without
+     asking for attention the way the field/particle experiments earlier did. */
+  animation: hero-badge-float 4.5s ease-in-out infinite;
+}
+
+.heroVisualBadge_fill {
+  background: var(--app-accent);
+  border-color: var(--app-accent);
+  color: var(--app-accent-text);
+}
+
+.heroVisualBadge_care {
+  top: -2%;
+  right: 8%;
+}
+
+.heroVisualBadge_schedule {
+  top: 20%;
+  left: -4%;
+  animation-delay: 0.5s;
+}
+
+.heroVisualBadge_patients {
+  top: 54%;
+  left: -8%;
+  animation-delay: 1s;
+}
+
+.heroVisualBadge_trust {
+  bottom: 4%;
+  left: 14%;
+  animation-delay: 1.5s;
+}
+
+@keyframes hero-badge-float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heroVisualBadge {
+    animation: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .heroTop {
+    grid-template-columns: 1fr;
+  }
+
+  .heroContent {
+    align-items: center;
+    text-align: center;
+  }
+
+  .heroCtaRow {
+    justify-content: center;
+  }
+
+  /* Reported live: badges drifted away from the circle and clipped off the
+     card's edge once .heroTop collapsed to one column. Cause: badge
+     position percentages (top/left/right on .heroVisualBadge_*) are relative
+     to .heroVisual's own box — at the two-column desktop width that box is
+     ~400px, close to the circle's own size, so a percentage like "left: -4%"
+     reads as a small, sensible offset from the circle's edge. Once
+     .heroVisual becomes a full-width single-column row (previously 700px+),
+     the same percentage computes against that much wider box and pushes the
+     badges far past the now-much-narrower centered circle. Capping the
+     width back down to the circle's own desktop column size keeps the
+     percentages meaning the same thing regardless of layout mode. */
+  .heroVisual {
+    max-width: 400px;
+    margin: 0 auto;
+    min-height: 260px;
+  }
+}
+
+@media (max-width: 480px) {
+  .heroVisualDots {
+    display: none;
+  }
+}
+
+/* The "more filled" info row — see HERO_HIGHLIGHTS in Landing.jsx for why
+   these four specific facts. A full-width strip below the two-column top
+   section, divided by thin vertical rules (not the earlier centered 2x2
+   grid) so it reads as a considered footer stat-bar the way the reference
+   layout's own bottom strip does.
+
+   A 4-column grid with equal-width tracks (minmax(0, 1fr)), not flex-wrap —
+   reported live: flex-wrap's break point depends on however each label
+   happens to measure at a given width, and produced a ragged 3-then-1 wrap
+   well before the explicit breakpoint below kicked in. Equal grid tracks
+   instead force every item the same width and let its own text wrap inside
+   that cell if it must, so there's no in-between state where the row can
+   break unevenly. */
+.heroHighlights {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  margin: clamp(1.75rem, 4vw, 2.5rem) 0 0;
+  padding: 1.4rem 0 0;
+  border-top: 1px solid var(--app-border);
+  list-style: none;
+}
+
+.heroHighlight {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  gap: 0.5rem;
+  padding: 0.4rem 1rem;
+  border-left: 1px solid var(--app-border);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  color: var(--app-text-subtitle);
+}
+
+.heroHighlight:first-child {
+  border-left: none;
+}
+
+.heroHighlight svg {
+  flex-shrink: 0;
+  color: var(--app-accent);
+}
+
+/* Matches .heroTop's own single-column collapse — both changes land
+   together instead of the highlights row switching at a different width
+   than the two-column content above it. */
+@media (max-width: 900px) {
+  .heroHighlights {
+    grid-template-columns: repeat(2, auto);
+    justify-content: center;
+    gap: 0.75rem 2rem;
+  }
+
+  .heroHighlight {
+    padding: 0;
+    border-left: none;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 420px) {
+  .heroHighlights {
+    grid-template-columns: auto;
+    justify-items: center;
   }
 }
 
@@ -467,16 +633,75 @@
   scroll-margin-top: 5.5rem;
 }
 
+/* Draws in from 0 width once the heading itself scrolls into view (the same
+   .revealed toggle useReveal already applies to it) instead of just sitting
+   there fully formed — a small "cool" detail that ties the underline to the
+   reveal moment rather than the reveal only ever touching the text. */
 .sectionTitle::after {
   content: "";
   position: absolute;
   bottom: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: 3rem;
+  width: 0;
   height: 3px;
   border-radius: 999px;
   background: var(--app-accent);
+  transition: width 700ms cubic-bezier(0.22, 1, 0.36, 1) 150ms;
+}
+
+.sectionTitle:global(.revealed)::after {
+  width: 3rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sectionTitle::after {
+    width: 3rem;
+    transition: none;
+  }
+}
+
+/* Directional reveal variants — alternated across the "why us" cards and
+   "how it works" steps so the page doesn't read as one uniform slide-up
+   repeated forever. Combined with the global .reveal class (see index.css)
+   via a two-class selector so this reliably overrides its base transform
+   regardless of CSS injection order between the two stylesheets. Landing
+   specifically also opts into a scale settle — the global default dropped
+   scale/blur after it looked bad on dashboard cards elsewhere, but a slight
+   scale on a slide-in text block/feature card here still reads as intended
+   polish, not a glitch. */
+:global(.reveal).revealLeft {
+  transform: translateX(-30px) scale(0.965);
+}
+
+:global(.reveal.revealed).revealLeft {
+  transform: translateX(0) scale(1);
+}
+
+:global(.reveal).revealRight {
+  transform: translateX(30px) scale(0.965);
+}
+
+:global(.reveal.revealed).revealRight {
+  transform: translateX(0) scale(1);
+}
+
+/* Soft-focus-to-sharp settle, Landing-only (see index.css's .reveal comment
+   for why this isn't the shared global default) — layered onto department
+   cards, doctor cards, and section copy for the "more cool scroll reveal
+   animation" this page specifically asked for. */
+:global(.reveal).revealBlur {
+  filter: blur(4px);
+}
+
+:global(.reveal.revealed).revealBlur {
+  filter: blur(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :global(.reveal).revealBlur {
+    filter: none;
+  }
 }
 
 /* Departments grid */

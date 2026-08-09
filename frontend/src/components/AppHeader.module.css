@@ -177,54 +177,13 @@
   border-bottom-color: var(--app-accent);
 }
 
-.navLogin,
-.navRegister {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.5rem 1.15rem;
-  border-radius: 14px;
-  font-size: var(--font-size-label);
-  font-weight: 600;
-  text-decoration: none;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background-color 180ms ease, color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
-}
-
-.navLogin {
-  background: var(--app-accent);
-  color: var(--app-accent-text);
-  border: none;
-}
-
-.navLogin:hover {
-  background: var(--app-accent-hover);
-  transform: translateY(-1px);
-}
-
-/* var(--app-border) reads as barely-there against this theme's dark
-   background, so Register (the landing page's other primary call-to-action
-   besides Log in) gets its own clearly-visible accent-colored outline instead
-   of blending in. */
-.navRegister {
-  background: none;
-  border: 1.5px solid var(--app-accent);
-  color: var(--app-accent);
-}
-
-.navRegister:hover {
-  background: var(--app-accent);
-  color: var(--app-accent-text);
-}
-
 /* Below this width, the public landing nav collapses behind a hamburger
    toggle into a dropdown panel. Reported live: at 1024px this collapse
-   itself was clean, but the FULL nav (logo + all links + toggle + Log in +
-   Register) doesn't actually fit in one row until ~1090px — anywhere in the
-   1025-1089px gap wrapped into a second row and truncated the brand text
-   ("Quick Chi..."). Raised past that whole gap so the header is never
-   caught wrapping mid-collapse. */
+   itself was clean, but the FULL nav (logo + all links + toggle) doesn't
+   actually fit in one row until ~1090px — anywhere in the 1025-1089px gap
+   wrapped into a second row and truncated the brand text ("Quick Chi...").
+   Raised past that whole gap so the header is never caught wrapping
+   mid-collapse. */
 @media (max-width: 1094px) {
   .navToggle {
     display: inline-flex;
@@ -265,9 +224,7 @@
     cursor: default;
   }
 
-  .navAnchor,
-  .navLogin,
-  .navRegister {
+  .navAnchor {
     width: 100%;
     padding: 0.6rem 0.25rem;
     justify-content: flex-start;
