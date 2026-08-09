@@ -151,11 +151,11 @@ export default function AppHeader() {
               className={homeSpinning ? styles.homeIconSpin : ""}
               onAnimationEnd={() => setHomeSpinning(false)}
               viewBox="0 0 24 24"
-              width="30"
-              height="30"
+              width="22"
+              height="22"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2.4"
+              strokeWidth="2.2"
               strokeLinecap="round"
               strokeLinejoin="round"
               aria-hidden="true"

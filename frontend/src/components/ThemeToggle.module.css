@@ -12,15 +12,23 @@
   border: 1px solid var(--app-border);
   cursor: pointer;
   overflow: visible;
+  /* Resting depth so the button reads as a raised control even before any
+     hover/focus interaction, rather than sitting perfectly flush with the
+     header. */
+  box-shadow: 0 1px 3px var(--app-shadow);
   transition: border-color 220ms ease, transform 180ms ease, box-shadow 220ms ease;
 }
 
+/* Base lift matches homeBtn/bellBtn's own hover motion exactly — the glow
+   ring and border-color shift below are this control's own extra badge
+   flourish, layered on top of the same shared motion, not a replacement
+   for it. */
 .toggleBtn:hover {
-  transform: translateY(-1px) scale(1.05);
+  transform: translateY(-1px);
 }
 
 .toggleBtn:active {
-  transform: translateY(0) scale(0.9);
+  transform: translateY(0) scale(0.92);
 }
 
 .toggleBtn:focus-visible {
@@ -111,9 +119,112 @@
   }
 }
 
+/* Moon's counterpart to sun-breathe above — the two decorative stars twinkle
+   on their own gentle, offset cycle instead of sitting static, so the idle
+   state feels equally alive in both themes rather than only in light mode. */
+.moonStarBig {
+  transform-origin: center;
+  animation: moon-twinkle 2.6s ease-in-out infinite;
+}
+
+.moonStarSmall {
+  transform-origin: center;
+  animation: moon-twinkle 2.6s ease-in-out infinite 1.1s;
+}
+
+@keyframes moon-twinkle {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(0.75);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+/* Direction-specific toggle burst — a handful of small elements arranged
+   radially via the --i custom property (each instance's index), animating
+   outward-and-fade once per click. Rendered only while `spinning` is true (see
+   ThemeToggle.jsx), so it never lingers as a static shape after the burst
+   finishes. */
+.burstWrap {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.sunRay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 6px;
+  margin: -3px 0 0 -1px;
+  border-radius: 2px;
+  background: linear-gradient(to bottom, #ffcf5c, transparent);
+  transform: rotate(calc(var(--i) * 45deg)) translateY(-11px);
+  opacity: 0;
+  animation: sun-ray-burst 520ms ease-out;
+  animation-delay: calc(var(--i) * 12ms);
+}
+
+@keyframes sun-ray-burst {
+  0% {
+    opacity: 0;
+    transform: rotate(calc(var(--i) * 45deg)) translateY(-9px) scaleY(0.4);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(calc(var(--i) * 45deg)) translateY(-16px) scaleY(1);
+  }
+}
+
+.moonSpark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  border-radius: 50%;
+  background: #a8b3f5;
+  opacity: 0;
+  animation: moon-spark-burst 620ms ease-out;
+  animation-delay: calc(var(--i) * 45ms);
+  /* Each spark travels along its own angle (evenly spaced by --i) via a
+     per-instance rotation wrapper baked into the transform itself, since a
+     plain radial translate alone would send every spark along the same axis. */
+  transform: rotate(calc(var(--i) * 60deg)) translate(10px, 0);
+}
+
+@keyframes moon-spark-burst {
+  0% {
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(calc(var(--i) * 60deg)) translate(15px, 0) scale(0.4);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .iconSpin,
-  .toggleBtn_sun .iconWrap {
+  .toggleBtn_sun .iconWrap,
+  .moonStarBig,
+  .moonStarSmall,
+  .sunRay,
+  .moonSpark {
     animation: none;
+  }
+  .burstWrap {
+    display: none;
   }
 }

@@ -48,7 +48,10 @@ from app.services.message_classifier import (
     is_symptom_message,
     needs_path2_screening,
 )
-from app.services.orchestrator.symptom_hints import departments_hinted_by_patient_symptom_words
+from app.services.orchestrator.symptom_hints import (
+    departments_hinted_by_patient_symptom_words,
+    unsupported_symptom_labels,
+)
 
 _SYMPTOM_AGENT_TOOL_NAMES = {"get_department_availability", "find_doctors_by_name"}
 
@@ -305,6 +308,33 @@ def run_symptom_agent(
     history: list[ConversationMemory],
 ) -> str:
     department_names = list_active_department_names(db, ctx.clinic_id)
+
+    # Instructed live: a symptom this clinic genuinely has no matching specialist
+    # for (e.g. a growth/height concern with no Endocrinology department, or a
+    # urinary/testicular complaint with no Urology department) used to silently
+    # fall back to General Medicine just because SOME department existed — that's
+    # misleading, since General Medicine isn't actually equipped for it. Checked
+    # before anything else, so it applies whether the patient described the
+    # symptom plainly or asked for a recommendation, and answered with an honest,
+    # gentle apology instead — never a wrong-department card. Only fires when
+    # NOTHING real is hinted at all for the whole conversation so far: a compound
+    # complaint that also names something this clinic DOES treat (e.g. "urinary
+    # pain and chest pain") still gets that real department normally; the
+    # unsupported part simply isn't separately called out in that case.
+    unsupported = unsupported_symptom_labels(message, history, department_names)
+    if unsupported and not departments_hinted_by_patient_symptom_words(message, history, department_names, set()):
+        labels_text = " or ".join(unsupported)
+        return (
+            f"I'm sorry, this clinic doesn't have a specialist department for {labels_text}. "
+            "I'd recommend reaching out to a specialist clinic for this. Is there anything else "
+            "I can help you with?"
+            if language != "ur"
+            else (
+                f"معذرت، اس کلینک میں {labels_text} کے لیے کوئی مخصوص شعبہ دستیاب نہیں ہے۔ "
+                "براہ کرم اس کے لیے کسی متعلقہ ماہر سے رجوع کریں۔ کیا میں کسی اور معاملے میں "
+                "آپ کی مدد کر سکتا ہوں؟"
+            )
+        )
 
     # Reported live: "isn't neurologist a better idea?" / "what do you think based on
     # my symptoms" got either a blind department switch with no reasoning, or a

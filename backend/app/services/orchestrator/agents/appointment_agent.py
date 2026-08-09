@@ -861,11 +861,20 @@ def run_appointment_agent(
     # own separate RESOLVED DOCTOR confirmation question.
     resolved_match = None
     doctor_already_shown = False
+    # True only when THIS message itself names exactly one real doctor (not a
+    # pronoun/"yes" recovered from an earlier turn) — see the narrowing
+    # short-circuit below for why this alone is enough to narrow even without an
+    # explicit "only"/"just" word.
+    direct_name_match_this_turn = False
+    # True only when a bare "yes" this turn is the confirmation of a doctor
+    # resolved from an earlier message — see the narrowing short-circuit below.
+    confirmed_via_affirmative = False
     if resolved_appointment is None:
         matches = find_doctors_by_name(db, ctx.clinic_id, message)
         if len(matches) > 1:
             return _disambiguation_marker_reply(matches)
         resolved_match = matches[0] if matches else None
+        direct_name_match_this_turn = resolved_match is not None
         if (
             resolved_match is None
             and _is_short_affirmative_reply(message)
@@ -896,6 +905,7 @@ def run_appointment_agent(
                 # an already-shown card so the model proceeds directly instead
                 # of asking the same confirming question a second time.
                 doctor_already_shown = True
+                confirmed_via_affirmative = True
         if resolved_match is None and _message_references_a_doctor_by_pronoun(message):
             # "show me his available slots on fri" names no doctor of its own, just
             # a pronoun — recover the real doctor (and their real department_name,
@@ -924,6 +934,28 @@ def run_appointment_agent(
     # answering the actual question asked ("is HE available"). Once a message
     # refers to a doctor only by pronoun, it can only be asking about that one
     # doctor specifically — treated the same as an explicit narrowing word.
+    #
+    # Reported live (2nd report): "show me available slots for dr farhan rehman"
+    # after a two-doctor card had already shown him named no narrowing word at
+    # all ("only"/"just"), so this short-circuit didn't fire even though a single
+    # real doctor was directly, unambiguously named — the LLM was left to call
+    # get_department_availability for the whole department again. Naming one
+    # specific doctor by name and asking about their availability always means
+    # just that doctor, never "and everyone else in their department too" — so a
+    # direct name match this turn is now treated the same as an explicit
+    # narrowing word (direct_name_match_this_turn).
+    #
+    # Reported live (3rd report): the far more common two-turn shape — "show me
+    # available slots for dr farhan rehman" (first mention, unconfirmed) -> "Did
+    # you mean Dr. Farhan Rehman in Family Medicine?" -> "yes" — fell through
+    # this same gap from the other direction: "yes" names no doctor and has no
+    # narrowing word of its own, so even after doctor_already_shown correctly
+    # became True via the bare-affirmative recovery above, this short-circuit
+    # still didn't fire, and the LLM's own get_department_availability call
+    # showed the entire department again. The whole reason that confirming
+    # question exists is to check availability for THAT one doctor — the "yes"
+    # confirming it is never a request to broaden back out to the department, so
+    # confirmed_via_affirmative is now treated the same way.
     if (
         resolved_match is not None
         and doctor_already_shown
@@ -931,6 +963,8 @@ def run_appointment_agent(
         and (
             _message_or_pending_name_disambiguation_asks_to_narrow(message, history)
             or _message_references_a_doctor_by_pronoun(message)
+            or direct_name_match_this_turn
+            or confirmed_via_affirmative
         )
     ):
         # Reuses the same bare-weekday resolution the LLM tool path relies on

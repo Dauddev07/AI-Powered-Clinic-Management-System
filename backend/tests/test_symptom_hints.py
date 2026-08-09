@@ -1,6 +1,9 @@
 import pytest
 
-from app.services.orchestrator.symptom_hints import departments_hinted_by_patient_symptom_words
+from app.services.orchestrator.symptom_hints import (
+    departments_hinted_by_patient_symptom_words,
+    unsupported_symptom_labels,
+)
 
 DEPARTMENTS = [
     "Cardiology", "Dentistry", "Dermatology", "ENT", "General Medicine", "Gynecology",
@@ -29,13 +32,17 @@ DEPARTMENTS = [
         ("my shoulder and back hurt", "General Medicine"),
         ("my wrist and elbow are sore", "General Medicine"),
         ("my leg is swollen after I fell", "Orthopedics"),  # limb pain + injury signal
+        ("back pain while bending", "Orthopedics"),  # back pain + bending/movement signal
+        ("my back hurts", "General Medicine"),  # bare back pain, no movement/injury signal
+        ("i am having difficulty in walking properly", "General Medicine"),  # bare gait complaint
+        ("i fell and now i am having difficulty walking", "Orthopedics"),  # gait complaint + injury signal
+        ("i am having a bit difficulty in breething", "Pulmonology"),  # "breething" typo regression
         ("my hand hurts a lot", "General Medicine"),  # previously-missing "hand" keyword
         ("I have a headache", "General Medicine"),
         ("I get migraines often", "General Medicine"),
         ("I have chest pain and palpitations", "Cardiology"),
         ("I have hypertension", "Cardiology"),
         ("my stomach hurts and I have diarrhea", "General Medicine"),
-        ("I have kidney pain and blood in my urine", "General Medicine"),
         ("I feel sad and hopeless lately", "Psychiatry"),
         ("I've been having panic attacks", "Psychiatry"),
         ("I have insomnia", "Psychiatry"),
@@ -55,14 +62,57 @@ DEPARTMENTS = [
         ("I feel lightheaded and the room keeps spinning", "ENT"),  # lightheaded + vertigo signal
         ("I feel dizzy and numb", "Neurology"),  # dizziness + a real neuro red flag
         ("pain in my chest and in testies as well", "Cardiology"),
-        ("pain in my chest and in testies as well", "General Medicine"),
-        ("I have testicular pain", "General Medicine"),
-        ("there's pain in my groin", "General Medicine"),
     ],
 )
 def test_symptom_words_hint_the_expected_department(message, expected_department):
     hinted = departments_hinted_by_patient_symptom_words(message, [], DEPARTMENTS, set())
     assert expected_department in hinted
+
+
+@pytest.mark.parametrize(
+    "message, expected_label",
+    [
+        ("my height is not increasing", "growth/height concerns"),
+        ("I have kidney pain and blood in my urine", "urinary symptoms"),
+        ("I have testicular pain", "groin/testicular symptoms"),
+        ("there's pain in my groin", "groin/testicular symptoms"),
+    ],
+)
+def test_orphan_symptom_categories_hint_no_department_at_a_clinic_with_no_matching_specialty(
+    message, expected_label
+):
+    # Instructed live: a symptom this clinic genuinely has no matching specialist
+    # for (no Urology, no Endocrinology/growth clinic) must never be silently
+    # rerouted to General Medicine just because SOME department exists — General
+    # Medicine isn't actually equipped for it. See unsupported_symptom_labels,
+    # which is what turns this into a gentle apology instead (tested in
+    # test_orchestrator.py against the full symptom_agent flow).
+    assert departments_hinted_by_patient_symptom_words(message, [], DEPARTMENTS, set()) == {}
+    assert unsupported_symptom_labels(message, [], DEPARTMENTS) == [expected_label]
+
+
+def test_orphan_symptom_category_hints_real_department_when_clinic_has_one():
+    departments_with_urology = DEPARTMENTS + ["Urology"]
+    hinted = departments_hinted_by_patient_symptom_words(
+        "I have testicular pain", [], departments_with_urology, set()
+    )
+    assert hinted == {"Urology": "groin/testicular symptoms"}
+    assert unsupported_symptom_labels("I have testicular pain", [], departments_with_urology) == []
+
+
+def test_orphan_symptom_category_does_not_fire_when_something_real_is_also_hinted():
+    # A compound complaint that also names something this clinic DOES treat still
+    # gets that real department — the unsupported part just isn't separately
+    # hinted (it's still reported by unsupported_symptom_labels itself; whether to
+    # mention it alongside a real card is the caller's decision, see
+    # symptom_agent.run_symptom_agent).
+    hinted = departments_hinted_by_patient_symptom_words(
+        "pain in my chest and in testies as well", [], DEPARTMENTS, set()
+    )
+    assert hinted == {"Cardiology": "chest pain"}
+    assert unsupported_symptom_labels(
+        "pain in my chest and in testies as well", [], DEPARTMENTS
+    ) == ["groin/testicular symptoms"]
 
 
 def test_pediatrics_is_never_hinted_by_symptom_words():
@@ -187,16 +237,16 @@ def test_neck_and_eye_pain_still_hints_both_orthopedics_and_ophthalmology():
     assert hinted == {"Orthopedics": "neck/joint pain", "Ophthalmology": "eye symptoms"}
 
 
-def test_plain_swelling_alone_does_not_hint_orthopedics():
-    # Reported live: "swelling on hand" alone still routed to Orthopedics, but
-    # plain swelling isn't specific to injury (infection, allergic reaction, edema
-    # can all cause it) — it should fall back to General Medicine like any other
-    # bare limb symptom unless an actual injury/trauma word is also present.
+def test_swelling_on_a_limb_hints_orthopedics_not_general_medicine():
+    # Reported live (8th report): explicit instruction that swelling on a limb,
+    # alongside limb pain, should route to Orthopedics rather than the bare-limb
+    # General Medicine default — reverses the earlier "swelling alone is too
+    # generic" stance from the 4th report.
     hinted = departments_hinted_by_patient_symptom_words(
         "swelling on hand and leg", [], DEPARTMENTS, set()
     )
-    assert hinted == {"General Medicine": "limb/joint pain"}
-    assert "Orthopedics" not in hinted
+    assert hinted == {"Orthopedics": "limb/joint injury symptoms"}
+    assert "General Medicine" not in hinted
 
 
 def test_swelling_with_a_real_injury_word_still_hints_orthopedics():
@@ -204,6 +254,41 @@ def test_swelling_with_a_real_injury_word_still_hints_orthopedics():
         "my hand is swollen and bruised", [], DEPARTMENTS, set()
     )
     assert "Orthopedics" in hinted
+
+
+def test_leg_pain_after_moving_hints_orthopedics_not_general_medicine():
+    # Reported live (8th report): "leg pain after moving my leg" should route to
+    # Orthopedics ALONE, not the bare-limb General Medicine default — pain
+    # specifically triggered by movement is a concrete orthopedic red flag.
+    hinted = departments_hinted_by_patient_symptom_words(
+        "i have leg pain after moving my leg", [], DEPARTMENTS, set()
+    )
+    assert hinted == {"Orthopedics": "limb/joint injury symptoms"}
+
+
+def test_bare_leg_pain_with_no_other_signal_still_hints_general_medicine():
+    # The plain, symptom-free case still defaults to General Medicine — only an
+    # actual injury/movement/swelling signal escalates to Orthopedics.
+    hinted = departments_hinted_by_patient_symptom_words(
+        "i have pain in my leg", [], DEPARTMENTS, set()
+    )
+    assert hinted == {"General Medicine": "limb/joint pain"}
+
+
+def test_hand_pain_while_moving_hints_orthopedics_not_general_medicine():
+    # Same movement-triggered escalation as leg pain — applies to the whole
+    # shared limb/joint word family, not leg-specific.
+    hinted = departments_hinted_by_patient_symptom_words(
+        "i have pain in my hand while moving it", [], DEPARTMENTS, set()
+    )
+    assert hinted == {"Orthopedics": "limb/joint injury symptoms"}
+
+
+def test_bare_hand_pain_with_no_other_signal_still_hints_general_medicine():
+    hinted = departments_hinted_by_patient_symptom_words(
+        "i have pain in my hand", [], DEPARTMENTS, set()
+    )
+    assert hinted == {"General Medicine": "limb/joint pain"}
 
 
 def test_inability_to_bear_weight_hints_orthopedics_only():

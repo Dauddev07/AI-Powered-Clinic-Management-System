@@ -142,6 +142,26 @@ def test_router_classifies_diziness_typo_as_symptom():
     assert _heuristic_classify("I am feeling diziness") == SYMPTOM_GENERAL
 
 
+def test_router_classifies_difficulty_walking_as_symptom():
+    # Reported live: "i am having difficulty in walking properly" matched no
+    # symptom keyword at all — mobility/gait complaints had zero coverage
+    # anywhere, so this fell through every symptom/booking rule to a generic
+    # signal-free-short-statement default (GENERAL_INFO), getting a free-text
+    # reply with no screening question and no real department routing at all.
+    assert _heuristic_classify("i am having difficulty in walking properly") == SYMPTOM_GENERAL
+
+
+def test_router_classifies_breething_typo_as_symptom():
+    # Reported live: "i am having a bit difficulty in breething" (a common
+    # typo for "breathing") matched no symptom keyword at all — same shape as
+    # the "diziness" typo already covered — so it fell through to
+    # GENERAL_INFO, and the follow-up booking request then reached
+    # appointment_agent (no symptom awareness) with no recorded symptom to
+    # work from, eventually tripping the no-diagnosis guard's generic
+    # redirect instead of ever actually triaging the complaint.
+    assert _heuristic_classify("i am having a bit difficulty in breething") == SYMPTOM_GENERAL
+
+
 @pytest.mark.parametrize(
     "message", ["I want to book an appointment", "please cancel my appointment", "can I reschedule my visit"]
 )
@@ -171,6 +191,11 @@ def test_router_classifies_plain_info_and_smalltalk_messages(message):
         # "best fit" rather than "better", which wasn't covered at all.
         "i think cardiologist can be a best fit for it?",
         "would this be a good fit?",
+        # Reported live: "show me available dept according to my describes
+        # symptoms" used "according to" rather than "based on", which wasn't
+        # covered at all — fell through to a plain screening question with no
+        # grounded symptom-to-department reasoning behind it.
+        "show me available dept according to my describes symptoms",
     ],
 )
 def test_router_rule0_5_recommendation_request_overrides_marker_continuity(message):
@@ -1140,6 +1165,41 @@ def test_run_symptom_agent_recommendation_request_names_ent_for_lightheadedness_
     assert "ENT" in result
 
 
+def test_run_symptom_agent_recommendation_request_apologizes_for_height_growth_concerns_not_general_medicine(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: "my height is not increasing i want to book an appointment"
+    # had no keyword coverage in symptom_hints.py at all — "based on my symptoms
+    # show me available dept that treats them" then fell all the way through to
+    # the LLM with nothing grounded to reach for. This clinic has no dedicated
+    # Endocrinology/growth department, so the LLM was left to guess and
+    # apparently named one that doesn't exist here, producing a dead-end
+    # "I couldn't find a department called that" instead of ever routing the
+    # patient anywhere. A General Medicine fallback was tried next, then
+    # instructed live to be removed too: General Medicine isn't actually
+    # equipped for a growth/height concern either — a symptom with no genuine
+    # matching specialty here must get an honest, gentle apology instead of
+    # being rerouted to ANY department, real or not.
+    _make_dept_with_slot(db, clinic, "General Medicine")
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for an unsupported symptom category")
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row("user", "my height is not increasing i want to book an appointment"),
+        _row("assistant", "I'm happy to help you schedule a visit. Could you let me know which department..."),
+    ]
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "based on my symptoms show me available dept that treats them", "en", history
+    )
+
+    assert "General Medicine" not in result
+    assert "sorry" in result.lower()
+    assert "growth/height concerns" in result
+
+
 def test_run_symptom_agent_recommendation_request_falls_through_when_nothing_hinted_yet(monkeypatch, db, ctx):
     # No real symptom has been described yet this session — nothing to base a
     # recommendation on, so this must fall through to the normal triage flow
@@ -1756,8 +1816,16 @@ def test_run_symptom_agent_recovers_when_the_model_fakes_a_tool_payload_instead_
     # chest-pain->Cardiology hint entirely). This reply contains no diagnostic
     # phrasing at all ("a General Medicine appointment would be appropriate" isn't
     # "you have X"), so the existing diagnosis-violation recovery net never fired —
-    # confirms the new faked-payload detector catches this case too and rebuilds
-    # real cards for BOTH hinted departments.
+    # confirms the new faked-payload detector catches this case too and rebuilds a
+    # real card for the hinted department.
+    #
+    # This clinic has no Urology department, so — per the later "never reroute an
+    # unsupported symptom to General Medicine just because it exists" fix — the
+    # testicular-pain half of this complaint is no longer grounded to General
+    # Medicine at all; only the genuine Cardiology hint (from the chest pain) gets
+    # rebuilt into a real card here. The recovery mechanism only ever reconstructs
+    # cards from real, grounded hints (never the model's own faked department
+    # name), so this is the correct, narrower outcome, not a regression.
     from app.models.department import Department
     from app.models.doctor import Doctor
     from app.models.slot import Slot
@@ -1818,9 +1886,9 @@ def test_run_symptom_agent_recovers_when_the_model_fakes_a_tool_payload_instead_
     # The fake, hand-typed JSON fragment must never reach the patient verbatim.
     assert "Note: This is for a routine follow-up" not in result
     assert "Cardiology" in result
-    assert "General Medicine" in result
     assert "Dr. Ahmed Farooq" in result
-    assert "Dr. Ali Raza" in result
+    assert "General Medicine" not in result
+    assert "Dr. Ali Raza" not in result
 
 
 def test_run_symptom_agent_recovers_neurology_when_the_model_diagnosed_a_brain_tumor(monkeypatch, db, ctx, clinic):
@@ -2086,19 +2154,33 @@ def test_doctor_already_shown_false_with_empty_history():
 
 
 def test_run_appointment_agent_skips_confirmation_when_doctor_already_shown_in_history(
-    monkeypatch, db, ctx, doctor
+    monkeypatch, db, ctx, clinic, department, doctor
 ):
     # Reported live: the assistant re-asked "did you mean Dr. Ahmed Khan in
     # Cardiology?" for a doctor it had itself already listed in a card two turns
     # earlier — reads as not having listened. Once the same doctor+department
     # already appeared in a real card in history, no confirming question is needed.
-    captured = {}
+    # Reported live (2nd report): once no confirming question was needed, the next
+    # step still fell through to the LLM, which called get_department_availability
+    # for the whole department instead of just this one already-identified doctor
+    # — naming one specific doctor by name always means just that doctor. Must now
+    # return a real, filtered, single-doctor card built directly from the DB.
+    from datetime import datetime, timedelta, timezone
 
-    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
-        captured["system_prompt"] = system_prompt
-        return "reply"
+    from app.models.slot import Slot
 
-    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be involved once a single doctor is already resolved")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
 
     history = [
         _row(
@@ -2107,15 +2189,15 @@ def test_run_appointment_agent_skips_confirmation_when_doctor_already_shown_in_h
             + json.dumps({"departments": [{"department_name": "Cardiology", "doctors": [{"doctor_name": "Dr. Ahmed Khan"}]}]}),
         ),
     ]
-    appointment_agent.run_appointment_agent(db, ctx, "Book with Dr. Ahmed Khan", "en", history)
+    result = appointment_agent.run_appointment_agent(db, ctx, "Book with Dr. Ahmed Khan", "en", history)
 
-    assert "RESOLVED DOCTOR" in captured["system_prompt"]
-    assert "already shown to the patient earlier this conversation" in captured["system_prompt"]
-    assert "ask ONE direct confirming question" not in captured["system_prompt"]
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert [d["doctor_name"] for d in payload["doctors"]] == ["Dr. Ahmed Khan"]
 
 
 def test_run_appointment_agent_resolves_doctor_from_a_plain_yes_confirming_a_prior_question(
-    monkeypatch, db, ctx, doctor
+    monkeypatch, db, ctx, clinic, department, doctor
 ):
     # Reported live: "book with dr raza ali" -> "Did you mean Dr. Ali Raza in
     # General Medicine?" -> patient replies "yes" -> the next reply asked "which
@@ -2123,29 +2205,42 @@ def test_run_appointment_agent_resolves_doctor_from_a_plain_yes_confirming_a_pri
     # happened. "yes" names no doctor itself, so the deterministic name-match on
     # the CURRENT message alone finds nothing — this confirms the fallback
     # recovers the doctor from the patient's own PRIOR message instead.
-    captured = {}
+    # Reported live (2nd report): even once recovered, the "yes" still fell
+    # through to the LLM, which called get_department_availability for the whole
+    # department — the entire reason that confirming question exists is to check
+    # THAT doctor's availability, so confirming it is never a request to broaden
+    # back out to the department. Must now return a real, filtered, single-doctor
+    # card built directly from the DB, never routed through the LLM at all.
+    from datetime import datetime, timedelta, timezone
 
-    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
-        captured["system_prompt"] = system_prompt
-        return "reply"
+    from app.models.slot import Slot
 
-    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be involved once a single doctor is confirmed")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
 
     history = [
         _row("user", "i wants to book an appointment with dr ahmed khan"),
         _row("assistant", "Did you mean Dr. Ahmed Khan in Cardiology?"),
     ]
-    appointment_agent.run_appointment_agent(db, ctx, "yes", "en", history)
+    result = appointment_agent.run_appointment_agent(db, ctx, "yes", "en", history)
 
-    assert "RESOLVED DOCTOR" in captured["system_prompt"]
-    assert "Dr. Ahmed Khan" in captured["system_prompt"]
-    assert "Cardiology" in captured["system_prompt"]
-    # The "yes" itself IS the confirmation — must not ask the same question again.
-    assert "ask ONE direct confirming question" not in captured["system_prompt"]
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert [d["doctor_name"] for d in payload["doctors"]] == ["Dr. Ahmed Khan"]
 
 
 def test_run_appointment_agent_resolves_doctor_from_yes_through_an_intermediate_pronoun_message(
-    monkeypatch, db, ctx, doctor
+    monkeypatch, db, ctx, clinic, department, doctor
 ):
     # Reported live: "hook me up with dr ali raza" (plain KB-prose reply, no
     # card) -> "can u book an appointment for me with him?" (named no doctor
@@ -2156,14 +2251,24 @@ def test_run_appointment_agent_resolves_doctor_from_yes_through_an_intermediate_
     # nothing, resolved_match stayed None, and the model got zero doctor
     # context, producing a generic "book it yourself online" answer instead of
     # offering to show real slots. Must now see past the intermediate
-    # pronoun-only message to the one that actually named the doctor.
-    captured = {}
+    # pronoun-only message to the one that actually named the doctor, and return
+    # a real, filtered, single-doctor card — never the whole department.
+    from datetime import datetime, timedelta, timezone
 
-    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
-        captured["system_prompt"] = system_prompt
-        return "reply"
+    from app.models.slot import Slot
 
-    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be involved once a single doctor is confirmed")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
 
     history = [
         _row("user", "hook me up with dr ahmed khan"),
@@ -2175,15 +2280,11 @@ def test_run_appointment_agent_resolves_doctor_from_yes_through_an_intermediate_
         _row("user", "can u book an appointment for me with him?"),
         _row("assistant", "Did you mean Dr. Ahmed Khan in Cardiology?"),
     ]
-    appointment_agent.run_appointment_agent(db, ctx, "yes", "en", history)
+    result = appointment_agent.run_appointment_agent(db, ctx, "yes", "en", history)
 
-    assert "RESOLVED DOCTOR" in captured["system_prompt"]
-    assert "Dr. Ahmed Khan" in captured["system_prompt"]
-    assert "Cardiology" in captured["system_prompt"]
-    assert "ask ONE direct confirming question" not in captured["system_prompt"]
-    # Told to proceed directly (e.g. actually call get_department_availability)
-    # rather than left with nothing to act on.
-    assert "proceed directly" in captured["system_prompt"]
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert [d["doctor_name"] for d in payload["doctors"]] == ["Dr. Ahmed Khan"]
 
 
 def test_run_appointment_agent_plain_yes_with_no_preceding_question_does_not_force_a_match(
@@ -3467,6 +3568,53 @@ def test_run_general_info_agent_department_list_request_says_so_when_none_config
     result = general_info_agent.run_general_info_agent(db, ctx, "show me available departments", "en", [])
 
     assert result == "There are no departments configured at this clinic right now."
+
+
+def test_run_general_info_agent_department_list_with_explanation_answers_both_halves(
+    monkeypatch, db, ctx, department
+):
+    # Reported live: "show me list of depts in this clinic, and also explanation of
+    # each dept that which symptoms does they treat in detail" got ONLY the bare
+    # department list back — the second half of the same message (what each
+    # department treats) was silently dropped, since the department-list
+    # short-circuit always returned immediately regardless of what else was asked.
+    # Must now answer both halves in one deterministic reply, built from the same
+    # real, vetted symptom_hints table used to route a patient's own symptoms,
+    # never an LLM freehanding department descriptions.
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be called for a department-list request")
+
+    monkeypatch.setattr(general_info_agent.llm, "run_plain_reply", _fail_if_called)
+    monkeypatch.setattr(
+        general_info_agent, "retrieve", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not retrieve"))
+    )
+
+    result = general_info_agent.run_general_info_agent(
+        db,
+        ctx,
+        "show me list of depts in this clinic,and also explanation of each dept that "
+        "which symptoms does they treat in detail",
+        "en",
+        [],
+    )
+
+    assert department.name in result
+    assert "chest pain" in result  # Cardiology's real, vetted symptom label
+
+
+def test_run_general_info_agent_department_list_without_explanation_stays_bare(
+    monkeypatch, db, ctx, department
+):
+    # Companion to the test above: a plain list request (no "explain"/"symptoms"/
+    # "treat" wording) must still get exactly the original bare list, unchanged.
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be called for a department-list request")
+
+    monkeypatch.setattr(general_info_agent.llm, "run_plain_reply", _fail_if_called)
+
+    result = general_info_agent.run_general_info_agent(db, ctx, "show me list of depts", "en", [])
+
+    assert result == f"Here are the departments available at this clinic: {department.name}."
 
 
 def test_run_general_info_agent_answers_personal_recall_question_via_the_llm(monkeypatch, db, ctx):

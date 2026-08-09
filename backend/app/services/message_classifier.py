@@ -136,7 +136,12 @@ _SYMPTOM_KEYWORDS = frozenset({
     "numb", "numbness", "tingling", "weak", "weakness", "fatigue", "faint", "fainted",
     "stiff", "stiffness",
     # Respiratory/circulatory
-    "breathless", "wheeze", "wheezing", "palpitations", "chills", "sweating",
+    # "breething" reported live: same typo shape as "diziness" above — this
+    # misspelling of "breathing" matched no keyword at all, so "difficulty in
+    # breething" fell through to GENERAL_INFO instead of symptom_agent's
+    # triage flow, and the follow-up booking request reached appointment_agent
+    # (no symptom awareness at all) with no recorded symptom to work from.
+    "breathless", "breething", "wheeze", "wheezing", "palpitations", "chills", "sweating",
     # Digestive
     "diarrhea", "diarrhoea", "constipation", "cramp", "cramps", "bloating",
     # Skin/infection
@@ -177,17 +182,25 @@ _SYMPTOM_KEYWORDS = frozenset({
     "back", "boil", "boils", "bone", "brain", "breathing", "bruising", "calf",
     "cardiac", "chest", "chew", "chewing", "crying", "dental", "depressed",
     "depression", "digestive", "ear", "eczema", "elbow", "elbows", "eye", "eyes",
-    "fell", "groin", "hand", "hands", "headaches", "heart", "hip", "hips",
+    "fell", "groin", "growing", "growth", "hand", "hands", "headaches", "heart",
+    "height", "hip", "hips",
     "hives", "hoarse", "hoarseness", "hopeless", "hopelessness", "hurting",
-    "hypertension", "insomnia", "jaw", "joint", "joints", "kidney", "kidneys",
-    "knee", "leg", "legs", "lightheaded", "lightheadedness", "lung", "malaise",
+    "gait", "hypertension", "insomnia", "jaw", "joint", "joints", "kidney", "kidneys",
+    "knee", "leg", "legs", "lightheaded", "lightheadedness", "limp", "limping",
+    "lung", "malaise",
     "menstrual", "menstruation", "migraines", "mole", "moles", "nasal", "neck",
     "necks", "nose",
+    # Reported live: "i am having difficulty in walking properly" matched no
+    # keyword at all — mobility/gait complaints had zero coverage anywhere in
+    # this list, so the message never registered as symptom-shaped and fell
+    # through to a generic conversational routing rule instead of reaching
+    # symptom_agent's triage flow at all.
+    "walk", "walking",
     "panic", "paralysis", "paralyzed", "pelvic", "period", "periods", "pimple",
     "pimples", "pregnancy", "pregnant", "redness", "respiratory", "sad",
     "sadness", "scrotal", "scrotum", "seizure", "seizures", "shoulder",
     "shoulders", "sinus", "sinusitis", "skin", "spine", "stomach", "stress",
-    "stressed", "sugar", "teeth", "teeths", "testicle", "testicles",
+    "stressed", "stunted", "sugar", "teeth", "teeths", "testicle", "testicles",
     "testicular", "testies", "thigh", "thirst", "thirsty", "throat", "tooth",
     "tremor", "tremors", "urinary", "urinate", "urinating", "urination",
     "urine", "vaginal", "vertigo", "wart", "warts", "wrist", "wrists",
@@ -302,6 +315,31 @@ def is_department_list_request(message: str) -> bool:
     return bool(_DEPARTMENT_LIST_RE.search(message.strip()))
 
 
+# Reported live: "show me list of depts in this clinic, and also explanation of each
+# dept that which symptoms does they treat in detail" got ONLY the bare department
+# list back — the second half of the same message (asking what each department
+# actually treats) was silently dropped entirely. Root cause: general_info_agent's
+# department-list short-circuit answers deterministically and returns immediately,
+# never reaching the LLM/KB retrieval that could have addressed the rest of the
+# message, and never even checking whether the message asked for anything more than
+# just the names. This detects that second half so the caller can still answer both
+# halves in one deterministic pass (see symptom_hints.department_symptom_labels)
+# rather than silently dropping it.
+_DEPARTMENT_EXPLANATION_RE = re.compile(
+    r"\b(explain|explanation|explained|detail|details|symptom|symptoms|treat|treats|"
+    r"treatment|treatments|specializ|specialty|specialties|handles?|deals?\s+with)\b",
+    re.IGNORECASE,
+)
+
+
+def is_department_list_explanation_request(message: str) -> bool:
+    """True when a department-list request also asks what each department actually
+    treats/handles — see _DEPARTMENT_EXPLANATION_RE's docstring above. Only ever
+    meaningful alongside is_department_list_request; callers should check that
+    first."""
+    return bool(_DEPARTMENT_EXPLANATION_RE.search(message.strip()))
+
+
 # Reported live: a patient described fever + body aches (routed correctly to
 # General Medicine), then asked "isn't neurologist a better idea?" and "what do you
 # think based on my symptoms" — these got shown Neurology's availability directly (no
@@ -324,6 +362,11 @@ _RECOMMENDATION_RE = re.compile(
     # fit" rather than "better", which the pattern above didn't cover at all.
     r"|\b(?:best|good|better) fit\b"
     r"|based on my symptoms"
+    # Reported live: "show me available dept according to my describes symptoms"
+    # used "according to" rather than "based on", which the pattern above didn't
+    # cover — allows 0-2 filler words between "my" and "symptoms" so a typo/
+    # grammar slip like "describes" (meant "described") still matches.
+    r"|according to (?:my|the)(?:\s+\w+){0,2}\s+symptoms"
     # Reported live: "find me a suitable dept" (after already describing a real
     # symptom) matched none of the above, so it fell through to the router's
     # generic fallback and landed on general_info_agent — which has no tool bound

@@ -33,7 +33,15 @@
 }
 
 .avatarBtn:active {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.92);
+}
+
+/* Matches every other header icon control's focus ring (home, notification
+   bell, theme toggle) — previously missing here, the account launcher fell
+   back to each browser's own default outline. */
+.avatarBtn:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
 }
 
 .backdrop {

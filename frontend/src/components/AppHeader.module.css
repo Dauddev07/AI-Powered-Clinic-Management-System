@@ -71,6 +71,16 @@
   transform: translateY(0) scale(0.92);
 }
 
+/* Shared focus ring across every header icon control (home, notification bell,
+   theme toggle, account launcher) — previously only the theme toggle defined
+   one explicitly, so keyboard focus elsewhere in the header fell back to each
+   browser's own default outline instead of the app's accent color. */
+.homeBtn:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
 /* Plays once per click (see AppHeader.jsx) — a full spin reads as "reloading"
    rather than just a button press, matching the refresh-like behavior of
    clicking Home while already on the dashboard. */
@@ -209,8 +219,13 @@
 }
 
 /* Below this width, the public landing nav collapses behind a hamburger
-   toggle into a dropdown panel. */
-@media (max-width: 1024px) {
+   toggle into a dropdown panel. Reported live: at 1024px this collapse
+   itself was clean, but the FULL nav (logo + all links + toggle + Log in +
+   Register) doesn't actually fit in one row until ~1090px — anywhere in the
+   1025-1089px gap wrapped into a second row and truncated the brand text
+   ("Quick Chi..."). Raised past that whole gap so the header is never
+   caught wrapping mid-collapse. */
+@media (max-width: 1094px) {
   .navToggle {
     display: inline-flex;
   }

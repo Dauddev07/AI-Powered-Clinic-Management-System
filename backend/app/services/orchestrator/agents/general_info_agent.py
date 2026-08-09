@@ -27,7 +27,8 @@ from app.models.conversation_memory import ConversationMemory
 from app.rag.retrieval import retrieve
 from app.services import llm
 from app.services.department_availability import list_active_department_names
-from app.services.message_classifier import is_department_list_request
+from app.services.message_classifier import is_department_list_explanation_request, is_department_list_request
+from app.services.orchestrator.symptom_hints import department_symptom_labels
 from app.services.query_rewrite import rewrite_query
 
 
@@ -40,18 +41,41 @@ def run_general_info_agent(
 ) -> str:
     if is_department_list_request(message):
         department_names = list_active_department_names(db, ctx.clinic_id)
-        if department_names:
-            names_text = ", ".join(department_names)
+        if not department_names:
+            return (
+                "There are no departments configured at this clinic right now."
+                if language != "ur"
+                else "اس وقت اس کلینک میں کوئی شعبہ دستیاب نہیں ہے۔"
+            )
+        names_text = ", ".join(department_names)
+        # Reported live: "show me list of depts... and also explanation of each dept
+        # that which symptoms does they treat in detail" got ONLY the bare list back
+        # — the second half of the same message was silently dropped, since this
+        # short-circuit used to always return immediately regardless of what else
+        # the message asked. Answered from the same real, vetted routing table this
+        # module uses elsewhere (see department_symptom_labels' own docstring),
+        # never an LLM freehanding descriptions of departments it wasn't shown.
+        if not is_department_list_explanation_request(message):
             return (
                 f"Here are the departments available at this clinic: {names_text}."
                 if language != "ur"
                 else f"اس کلینک میں دستیاب شعبے یہ ہیں: {names_text}۔"
             )
-        return (
-            "There are no departments configured at this clinic right now."
+        labels_by_department = department_symptom_labels(department_names)
+        lines = [
+            f"- {name}: {', '.join(labels_by_department[name])}"
+            if labels_by_department[name]
+            else f"- {name}: general consultations in this specialty"
+            for name in department_names
+        ]
+        body = "\n".join(lines)
+        intro = (
+            "Here are the departments available at this clinic, along with the kinds "
+            "of symptoms each typically treats:"
             if language != "ur"
-            else "اس وقت اس کلینک میں کوئی شعبہ دستیاب نہیں ہے۔"
+            else "اس کلینک میں دستیاب شعبے، اور ہر شعبہ عام طور پر جن علامات کا علاج کرتا ہے:"
         )
+        return f"{intro}\n\n{body}"
 
     # Same raw-first, rewrite-as-rescue retrieval pattern as the original
     # single-pipeline chat.py — a clean standalone question must never be touched

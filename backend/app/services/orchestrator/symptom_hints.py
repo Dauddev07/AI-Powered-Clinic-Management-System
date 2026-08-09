@@ -105,23 +105,32 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
         # sharing "urination"/"urinate" there is specifically about frequency/thirst
         # (the diabetes triad), not pain or blood in urine, so this needs its own
         # label to synthesize an accurate note.
+        #
+        # Reported live: this used to ALSO hint General/internal medicine as a
+        # fallback whenever no real Urology department existed at the clinic —
+        # instructed to stop: a clinic with no urology specialist shouldn't have a
+        # patient's urinary complaint silently rerouted to a department that isn't
+        # actually equipped for it. Only a genuine Urology match ("urolog") is
+        # hinted here now; when no real Urology department exists, this correctly
+        # hints nothing at all, and _ORPHAN_SYMPTOM_CATEGORIES below is what turns
+        # that into an honest apology instead of a wrong-department card.
         frozenset({"kidney", "kidneys", "urinary", "urine"}),
-        ("internal medicine", "general medicine"),
+        ("urolog",),
         "urinary symptoms",
     ),
     (
         # Reported live: "pain in my chest and in testies as well" only ever got a
         # single General Medicine card with no reasoning attached — testicular/groin
-        # pain had NO entry anywhere in this table, so once the chest-pain fallback
-        # (Cardiology) was added there was still nothing to hint General Medicine
-        # for the testicular complaint specifically. This clinic has no dedicated
-        # Urology department, so General/internal/family medicine are the real hint
-        # targets today; "urolog" is included too so this keeps working unchanged
-        # if a Urology department is ever added.
+        # pain had NO entry anywhere in this table. A General/internal/family
+        # medicine fallback was added for it at the time, on the reasoning that this
+        # clinic has no dedicated Urology department — instructed to stop: same as
+        # the urinary entry above, a symptom with no real matching specialty here
+        # should get an honest apology, never rerouted to a department that isn't
+        # actually equipped for it. Only a genuine Urology match is hinted now.
         frozenset({
             "testicle", "testicles", "testicular", "testies", "groin", "scrotum", "scrotal",
         }),
-        ("general medicine", "internal medicine", "family medicine", "urolog"),
+        ("urolog",),
         "groin/testicular symptoms",
     ),
     (
@@ -153,7 +162,10 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
         # not co-occurrence-aware, so adding them would falsely hint Pulmonology
         # on unrelated injuries anywhere else in the body.
         frozenset({
-            "breathless", "breathing", "wheeze", "wheezing", "lung", "respiratory",
+            # "breething" — same typo shape as "diziness" elsewhere in this
+            # module: a common misspelling of "breathing" that matched no
+            # keyword here at all.
+            "breathless", "breathing", "breething", "wheeze", "wheezing", "lung", "respiratory",
             "asthma",
         }),
         ("pulmon", "respiratory"),
@@ -252,10 +264,24 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
 # unambiguous orthopedic red flags there is. Added here; only fires alongside a
 # limb/joint word already (same co-occurrence gate as every other word in this
 # set), so the false-positive surface stays narrow.
+# Reported live (6th report): "back pain while bending" / "my back hurts when i
+# bend" still only got General Medicine — pain specifically triggered or
+# worsened by bending/movement is a classic mechanical/structural back
+# complaint (disc, muscular-skeletal), not a vague ache, so it belongs with the
+# other movement-triggered red flags here rather than the bare-backache default.
+# Reported live (7th report): "i am having difficulty in walking properly" had
+# no coverage anywhere in this module — a bare mobility/gait complaint is the
+# same "vague ache, safe primary-care default" shape as bare leg/arm pain: it
+# could be orthopedic (joint/leg) or neurological (balance/nerve), so it
+# defaults to General Medicine here, same as any other bare limb-family word,
+# and still escalates to Orthopedics with a real injury/weight-bearing signal
+# below, or to Neurology independently via the existing numbness/weakness
+# trigger if that's also present.
 _LIMB_JOINT_WORDS = frozenset({
     "leg", "legs", "knee", "ankle", "thigh", "calf",
     "back", "backache", "spine", "shoulder", "shoulders", "arm", "arms",
     "hand", "hands", "hip", "hips", "wrist", "wrists", "elbow", "elbows",
+    "walk", "walking", "gait", "limp", "limping",
 })
 # "neck"/"necks" deliberately NOT in this set — it gets its own dedicated
 # co-occurrence branch below (_NECK_NEUROLOGICAL_SIGNAL_WORDS) rather than
@@ -264,7 +290,17 @@ _LIMB_JOINT_WORDS = frozenset({
 # neck pain means Neurology, not Orthopedics, regardless of any injury word.
 _LIMB_JOINT_INJURY_SIGNAL_WORDS = frozenset({
     "redness", "bruising", "bruised", "twisted", "injury", "injured", "fell",
-    "stiff", "stiffness", "weight",
+    "stiff", "stiffness", "weight", "bend", "bending", "bent",
+    # Reported live (8th report): "leg pain after moving my leg" and "swelling
+    # on my leg" should both route to Orthopedics ALONE, not the bare-limb
+    # General Medicine default — pain specifically triggered by movement and
+    # visible swelling are both concrete orthopedic red flags, not vague
+    # aches. This reverses the earlier (4th report) removal of swelling from
+    # this set: that removal was about swelling with NOTHING else present
+    # being too nonspecific (infection/allergy/edema), but explicit
+    # instruction now is that swelling on a limb, alongside limb pain, should
+    # route to Orthopedics rather than General Medicine.
+    "swelling", "swollen", "moving", "moved", "move",
 })
 
 # Companion to the "low mood" table entry above: passing mood adjectives ("sad",
@@ -398,3 +434,93 @@ def departments_hinted_by_patient_symptom_words(
                 missing[name] = label
                 break
     return missing
+
+
+# Symptom categories with NO reliable specific-specialty department at a typical
+# clinic using this system (no Urology, no Endocrinology/growth clinic) — kept
+# entirely separate from SYMPTOM_DEPARTMENT_HINTS above rather than given a
+# General/internal/family medicine fallback there. Instructed live: silently
+# rerouting a symptom like this to General Medicine just because SOME department
+# exists is misleading — General Medicine isn't actually equipped for it, so the
+# patient should get an honest, gentle apology instead of a wrong-department card.
+# Each entry's `real_hint` is the genuine specialty substring to check for first
+# (e.g. "urolog") — if a clinic DOES have that real department, this category is
+# never "orphaned" there and departments_hinted_by_patient_symptom_words above
+# already routes it correctly; `real_hint=None` means no clinic in this system
+# has ever had a matching specialty for it (growth/height), so it's always
+# unsupported.
+_ORPHAN_SYMPTOM_CATEGORIES: tuple[tuple[frozenset[str], str, str | None], ...] = (
+    (frozenset({"height", "growth", "growing", "stunted"}), "growth/height concerns", None),
+    (frozenset({"kidney", "kidneys", "urinary", "urine"}), "urinary symptoms", "urolog"),
+    (
+        frozenset({"testicle", "testicles", "testicular", "testies", "groin", "scrotum", "scrotal"}),
+        "groin/testicular symptoms",
+        "urolog",
+    ),
+)
+
+
+def unsupported_symptom_labels(
+    message: str, history: list[ConversationMemory], department_names: list[str]
+) -> list[str]:
+    """Returns the human-readable label(s) for every ORPHAN symptom category (see
+    _ORPHAN_SYMPTOM_CATEGORIES above) the PATIENT has described (this message
+    and/or their own earlier turns) that this clinic genuinely has no matching
+    real department for. Used to answer with a gentle, honest apology instead of
+    ever silently rerouting to a department that isn't actually equipped for it."""
+    patient_texts = [message] + [
+        getattr(row, "content", "") or "" for row in history if getattr(row, "role", None) == "user"
+    ]
+    words = set(re.findall(r"[a-z0-9]+", " ".join(patient_texts).lower()))
+    lowered_department_names = [name.lower() for name in department_names]
+    labels = []
+    for keywords, label, real_hint in _ORPHAN_SYMPTOM_CATEGORIES:
+        if not (words & keywords):
+            continue
+        if real_hint is not None and any(
+            re.search(rf"\b{re.escape(real_hint)}", name) for name in lowered_department_names
+        ):
+            continue
+        labels.append(label)
+    return labels
+
+
+# Every (hint substrings, label) pairing this module uses to route a PATIENT's own
+# described symptom to a department, reused here for the reverse question — "what
+# symptoms does department X treat" — so that answer is built from the exact same
+# vetted table, never left for an LLM to freehand and risk inventing a department
+# that doesn't exist or omitting/misdescribing a real one. Mirrors every
+# hinted_substrings.setdefault(...) call inside departments_hinted_by_patient_symptom_words
+# above (the flat table entries, then each conditional co-occurrence branch) —
+# kept as a flat list of (hints, label) tuples so a new routing rule added to
+# either place doesn't silently drift out of sync with the other without a
+# reviewer noticing the parallel structure.
+_ALL_HINT_LABEL_PAIRS: tuple[tuple[tuple[str, ...], str], ...] = tuple(
+    (hints, label) for _keywords, hints, label in SYMPTOM_DEPARTMENT_HINTS
+) + (
+    (("ortho",), "limb/joint injury symptoms"),
+    (("general medicine", "internal medicine", "family medicine"), "limb/joint pain"),
+    (("psych",), "low mood"),
+    (("general medicine", "internal medicine", "family medicine"), "head pain"),
+    (("ortho",), "neck/joint pain"),
+    (("general medicine", "internal medicine", "family medicine"), "lightheadedness"),
+    (("ent", "otolaryn"), "lightheadedness with vertigo/ear symptoms"),
+)
+
+
+def department_symptom_labels(department_names: list[str]) -> dict[str, list[str]]:
+    """Returns {department_name: [symptom_label, ...]} — every symptom category this
+    module's own routing table maps to each real, active department, in the table's
+    own declaration order with duplicates removed. Used to answer "what symptoms
+    does each department treat" from the same real, vetted data this module already
+    uses to route a patient's own symptoms, rather than letting an LLM compose that
+    list freehand and risk inventing or omitting a department."""
+    labels: dict[str, list[str]] = {name: [] for name in department_names}
+    for hints, label in _ALL_HINT_LABEL_PAIRS:
+        for name in department_names:
+            lowered_name = name.lower()
+            if label in labels[name]:
+                continue
+            if any(re.search(rf"\b{re.escape(hint)}", lowered_name) for hint in hints):
+                labels[name].append(label)
+    return labels

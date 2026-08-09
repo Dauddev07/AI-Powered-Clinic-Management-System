@@ -167,6 +167,8 @@ export default function Landing() {
       </p>
 
       <section className={styles.hero}>
+        {/* A single decent shade — diagonal accent wash plus one soft radial
+            glow, see .heroBg in Landing.module.css. */}
         <div className={styles.heroBg} aria-hidden="true" />
         <div className={styles.content}>
           <Logo size="lg" />

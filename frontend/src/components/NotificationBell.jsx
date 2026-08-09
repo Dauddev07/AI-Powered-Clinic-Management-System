@@ -227,11 +227,11 @@ export default function NotificationBell() {
         <svg
           className={unreadCount > 0 ? styles.bellIconRing : ""}
           viewBox="0 0 24 24"
-          width="24"
-          height="24"
+          width="22"
+          height="22"
           fill="none"
           stroke="currentColor"
-          strokeWidth="2.4"
+          strokeWidth="2.2"
           strokeLinecap="round"
           strokeLinejoin="round"
           aria-hidden="true"

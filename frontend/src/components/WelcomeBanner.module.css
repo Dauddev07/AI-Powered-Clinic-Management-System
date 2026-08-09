@@ -1,46 +1,83 @@
-.banner {
-  position: relative;
-  overflow: hidden;
-  box-sizing: border-box;
-  padding: 2rem 2.25rem;
-  margin-bottom: 1.75rem;
-  background: var(--app-bg-card);
-  border: 1px solid var(--app-border);
-  border-radius: 24px;
-  box-shadow: 0 4px 24px var(--app-shadow);
+@property --banner-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
 }
 
-/* Soft accent-tinted glow in the corner — entirely built from the existing
-   --app-accent variable (no new color), just a radial fade so it reads as
-   ambient light rather than a flat colored shape. */
-.glow {
+.banner {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 1.75rem;
+  padding: 2.25rem 2.5rem;
+  margin-bottom: 1.75rem;
+  border: 1.5px solid transparent;
+  border-radius: 24px;
+  /* Three layers: a second radial glow (bottom-left, the info tone) plus the
+     original diagonal accent wash — both clipped to padding-box so they only
+     fill the card's interior — sitting over a slow-rotating conic gradient
+     clipped to border-box. Since the interior layers are opaque, the conic
+     only shows through the 1.5px transparent border itself: a continuously
+     shifting gradient ring around the whole card instead of the old flat
+     top-only accent bar. */
+  background:
+    radial-gradient(
+      ellipse 70% 60% at 2% 100%,
+      color-mix(in srgb, var(--app-info-text) 16%, transparent),
+      transparent 72%
+    ) padding-box,
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--app-accent) 13%, var(--app-bg-card)),
+      var(--app-bg-card) 62%
+    ) padding-box,
+    conic-gradient(
+      from var(--banner-angle),
+      color-mix(in srgb, var(--app-accent) 70%, transparent),
+      color-mix(in srgb, var(--app-info-text) 55%, transparent),
+      color-mix(in srgb, var(--app-accent) 70%, transparent)
+    ) border-box;
+  box-shadow: 0 10px 32px var(--app-shadow);
+  animation: banner-border-spin 12s linear infinite;
+}
+
+@keyframes banner-border-spin {
+  to {
+    --banner-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .banner {
+    animation: none;
+  }
+}
+
+/* The corner glow — sits behind .text (z-index below), bleeding off the
+   card's own edge so it reads as depth rather than a pasted-on shape. */
+.banner::after {
+  content: "";
   position: absolute;
-  top: -60%;
-  right: -10%;
+  top: -35%;
+  right: -12%;
   width: 22rem;
   height: 22rem;
   border-radius: 50%;
-  background: radial-gradient(circle, var(--app-accent) 0%, transparent 70%);
-  opacity: 0.16;
-  pointer-events: none;
-}
-
-/* Oversized, faint brand pulse glyph (the same path as the wordmark icon in
-   Logo.jsx) as a purely decorative watermark — reinforces the brand mark
-   without competing with the actual heading text for attention. */
-.motif {
-  position: absolute;
-  right: 1rem;
-  bottom: -1.5rem;
-  width: 11rem;
-  height: 11rem;
-  color: var(--app-accent);
-  opacity: 0.1;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--app-accent) 30%, transparent),
+    transparent 72%
+  );
+  z-index: 0;
   pointer-events: none;
 }
 
 .text {
   position: relative;
+  z-index: 1;
   min-width: 0;
   max-width: 34rem;
 }
@@ -58,15 +95,20 @@
 .heading {
   font-size: clamp(1.75rem, 4.5vw, 2.75rem);
   font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--app-text-title);
   line-height: 1.15;
   margin: 0 0 0.5rem;
   overflow-wrap: anywhere;
 }
 
+/* A little glow on the patient's own name — the one word in the banner that
+   is genuinely personal, so it gets the one bit of extra shine. Kept
+   restrained (a soft color-matched shadow, not a bloom) so it reads as
+   polish rather than a gimmick. */
 .name {
   color: var(--app-accent);
-  text-shadow: 0 0 28px var(--app-accent);
+  text-shadow: 0 0 18px color-mix(in srgb, var(--app-accent) 55%, transparent);
 }
 
 .tagline {
@@ -79,13 +121,13 @@
 @media (max-width: 640px) {
   .banner {
     padding: 1.5rem;
+    gap: 1rem;
     border-radius: 20px;
   }
 
-  .motif {
-    width: 8rem;
-    height: 8rem;
-    opacity: 0.08;
+  .banner::after {
+    width: 14rem;
+    height: 14rem;
   }
 
   .heading {
