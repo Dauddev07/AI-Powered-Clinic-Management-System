@@ -8,6 +8,7 @@ import {
   fetchSlots,
 } from "../../api/patientBooking";
 import { ApiError } from "../../api/client";
+import DateInput from "../../components/DateInput";
 import DoctorRatingBadge from "../../components/DoctorRatingBadge";
 import StatusBadge from "../../components/StatusBadge";
 import EmptyState from "../../components/EmptyState";
@@ -473,8 +474,7 @@ export default function BookAppointment() {
               onChange={handleDateFilterChange}
             />
             {dateFilter === "custom" && (
-              <input
-                type="date"
+              <DateInput
                 className={styles.select}
                 value={customDate}
                 onChange={handleCustomDateChange}

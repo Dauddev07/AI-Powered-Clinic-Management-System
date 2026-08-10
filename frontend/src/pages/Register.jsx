@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { fetchPublicClinics, register } from "../api/auth";
 import { ApiError } from "../api/client";
+import DateInput from "../components/DateInput";
 import PasswordInput from "../components/PasswordInput";
 import PhoneInput, { isPhoneDigitsComplete, toE164 } from "../components/PhoneInput";
 import SuccessCheck from "../components/SuccessCheck";
@@ -223,9 +224,8 @@ export default function Register() {
                 <label htmlFor="dob">
                   Date of birth<span className={styles.requiredMark}>*</span>
                 </label>
-                <input
+                <DateInput
                   id="dob"
-                  type="date"
                   required
                   min={minDobStr()}
                   max={todayStr()}

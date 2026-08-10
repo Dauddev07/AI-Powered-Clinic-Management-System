@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchMyProfile, updateMyProfile } from "../../api/auth";
 import { ApiError } from "../../api/client";
+import DateInput from "../../components/DateInput";
 import SuccessCheck from "../../components/SuccessCheck";
 import Skeleton from "../../components/Skeleton";
 import { useReveal } from "../../hooks/useReveal";
@@ -111,7 +112,7 @@ export default function ViewProfile() {
                   <label htmlFor="dob">
                     Date of birth<span className={dashStyles.requiredMark}>*</span>
                   </label>
-                  <input id="dob" type="date" required value={form.dob} onChange={setField("dob")} />
+                  <DateInput id="dob" required value={form.dob} onChange={setField("dob")} />
                   <span className={dashStyles.fieldHint}>Format: YYYY-MM-DD.</span>
                   {fieldErrors.dob && <span className={dashStyles.fieldError}>{fieldErrors.dob}</span>}
                 </div>
