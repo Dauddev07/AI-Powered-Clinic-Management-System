@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { fetchPublicClinics, register } from "../api/auth";
 import { ApiError } from "../api/client";
+import PasswordInput from "../components/PasswordInput";
 import PhoneInput, { isPhoneDigitsComplete, toE164 } from "../components/PhoneInput";
 import SuccessCheck from "../components/SuccessCheck";
 import Logo from "../components/Logo";
@@ -207,9 +208,8 @@ export default function Register() {
                 <label htmlFor="password">
                   Password<span className={styles.requiredMark}>*</span>
                 </label>
-                <input
+                <PasswordInput
                   id="password"
-                  type="password"
                   required
                   value={form.password}
                   onChange={setField("password")}

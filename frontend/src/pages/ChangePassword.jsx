@@ -2,6 +2,7 @@ import { useState } from "react";
 import { changePassword } from "../api/auth";
 import { ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import PasswordInput from "../components/PasswordInput";
 import { useReveal } from "../hooks/useReveal";
 import styles from "./Login.module.css";
 
@@ -63,9 +64,8 @@ export default function ChangePassword() {
             <label htmlFor="oldPassword">
               Current password<span className={styles.requiredMark}>*</span>
             </label>
-            <input
+            <PasswordInput
               id="oldPassword"
-              type="password"
               required
               value={oldPassword}
               onChange={(e) => setOldPassword(e.target.value)}
@@ -76,9 +76,8 @@ export default function ChangePassword() {
             <label htmlFor="newPassword">
               New password<span className={styles.requiredMark}>*</span>
             </label>
-            <input
+            <PasswordInput
               id="newPassword"
-              type="password"
               required
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
@@ -90,9 +89,8 @@ export default function ChangePassword() {
             <label htmlFor="confirmPassword">
               Confirm new password<span className={styles.requiredMark}>*</span>
             </label>
-            <input
+            <PasswordInput
               id="confirmPassword"
-              type="password"
               required
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}

@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import { ApiError } from "../api/client";
 import { decodeJwtPayload } from "../auth/jwt";
 import Logo from "../components/Logo";
+import PasswordInput from "../components/PasswordInput";
 import { useReveal } from "../hooks/useReveal";
 import styles from "./Login.module.css";
 
@@ -81,9 +82,8 @@ export default function Login() {
               <label htmlFor="password">
                 Password<span className={styles.requiredMark}>*</span>
               </label>
-              <input
+              <PasswordInput
                 id="password"
-                type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
