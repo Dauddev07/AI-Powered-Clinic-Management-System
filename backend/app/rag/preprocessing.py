@@ -10,7 +10,16 @@ aggressive normalization pipeline, just enough cleanup for consistent embeddings
 """
 import re
 
+import nltk
 from nltk.stem import WordNetLemmatizer
+
+# Render's filesystem is ephemeral, so the wordnet corpus isn't present on a fresh
+# deploy the way it might be on a dev machine that's downloaded it before — fetch it
+# on first import if missing, rather than requiring a separate provisioning step.
+try:
+    nltk.data.find("corpora/wordnet")
+except LookupError:
+    nltk.download("wordnet", quiet=True)
 
 _lemmatizer = WordNetLemmatizer()
 _WORD_RE = re.compile(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?")
