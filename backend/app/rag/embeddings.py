@@ -13,7 +13,7 @@ from langchain_core.embeddings import Embeddings
 from app.core.config import settings
 
 EXPECTED_DIMENSION = 768
-_INFERENCE_URL = "https://router.huggingface.co/hf-inference/pipeline/feature-extraction/{model}"
+_INFERENCE_URL = "https://router.huggingface.co/hf-inference/models/{model}"
 
 _dimension_checked = False
 

@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     CHROMA_PATH: str = "./chroma_data"
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8001
-    EMBEDDING_MODEL: str = "sentence-transformers/msmarco-distilbert-base-tas-b"
+    EMBEDDING_MODEL: str = "BAAI/bge-base-en-v1.5"
     # Hugging Face Inference API token for hosted embeddings (app/rag/embeddings.py).
     # Works unauthenticated too, just with lower rate limits — get a free one at
     # huggingface.co/settings/tokens if you hit rate limiting.
