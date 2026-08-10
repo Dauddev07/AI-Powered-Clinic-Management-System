@@ -1,6 +1,3 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-torch
-
 fastapi
 uvicorn[standard]
 sqlalchemy>=2.0
@@ -16,7 +13,7 @@ python-multipart
 email-validator
 chromadb-client
 apscheduler
-sentence-transformers
+httpx
 pypdf
 python-docx
 nltk

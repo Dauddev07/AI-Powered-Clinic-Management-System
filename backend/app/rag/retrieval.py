@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.rag.chroma_client import get_chroma_client, get_hospital_info_collection
-from app.rag.embeddings import LocalEmbeddings, embed_query
+from app.rag.embeddings import HostedEmbeddings, embed_query
 from app.rag.preprocessing import preprocess_query
 
 FALLBACK_MESSAGE = (
@@ -146,7 +146,7 @@ def _build_hybrid_retriever(collection) -> EnsembleRetriever | None:
     vectorstore = Chroma(
         client=get_chroma_client(),
         collection_name=collection.name,
-        embedding_function=LocalEmbeddings(),
+        embedding_function=HostedEmbeddings(),
     )
     dense_retriever = vectorstore.as_retriever(search_kwargs={"k": RETRIEVER_K})
     bm25_retriever = BM25Retriever.from_documents(corpus, k=RETRIEVER_K)

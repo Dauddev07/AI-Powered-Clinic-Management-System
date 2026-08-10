@@ -41,7 +41,11 @@ class Settings(BaseSettings):
     CHROMA_PATH: str = "./chroma_data"
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8001
-    EMBEDDING_MODEL: str = "all-mpnet-base-v2"
+    EMBEDDING_MODEL: str = "sentence-transformers/msmarco-distilbert-base-tas-b"
+    # Hugging Face Inference API token for hosted embeddings (app/rag/embeddings.py).
+    # Works unauthenticated too, just with lower rate limits — get a free one at
+    # huggingface.co/settings/tokens if you hit rate limiting.
+    HF_TOKEN: str = ""
 
     DEFAULT_SLOT_MINUTES: int = 30
     RETRIEVAL_SIMILARITY_THRESHOLD: float = 0.5

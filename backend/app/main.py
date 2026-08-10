@@ -17,8 +17,8 @@ os.environ["LANGSMITH_API_KEY"] = settings.LANGSMITH_API_KEY
 os.environ["LANGSMITH_PROJECT"] = settings.LANGSMITH_PROJECT
 
 # A dedicated, non-propagating logger — not logging.basicConfig(level=INFO), which
-# would also crank every third-party library's logger (httpx, sentence_transformers,
-# ...) up to INFO and flood the startup log with unrelated noise.
+# would also crank every third-party library's logger (httpx, langchain, ...) up to
+# INFO and flood the startup log with unrelated noise.
 _startup_logger = logging.getLogger("app.startup")
 _startup_logger.setLevel(logging.INFO)
 _startup_logger.propagate = False
