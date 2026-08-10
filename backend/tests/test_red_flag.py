@@ -269,7 +269,15 @@ def test_combined_severe_symptoms_in_one_message_fires():
     )
 
 
-# --- foreign object in the nose + non-native "difficulty to breathe" phrasing --------
+# --- foreign object in the nose/throat: emergency only WITH a distress signal -------
+#
+# Product decision: something merely resting in the nose or throat (a seed, bead,
+# piece of food) is common and, on its own, not an emergency — it should fall
+# through to normal department routing (ENT). It only becomes an emergency
+# alongside an actual distress signal: can't breathe, can't swallow, choking, or
+# turning blue. The eye is deliberately NOT given this same carve-out — see the
+# eye-specific section further down, where any foreign object in the eye stays an
+# unconditional red flag regardless of other symptoms.
 
 
 def test_nasal_foreign_object_with_breathing_difficulty_fires():
@@ -301,14 +309,35 @@ def test_breathing_difficulty_with_connector_word_fires(message):
 @pytest.mark.parametrize(
     "message",
     [
+        "something stuck in my throat and i can't swallow",
+        "food stuck in my throat, i am choking",
+        "a bead is stuck in my nose and i am having trouble breathing",
+        "something is lodged in my throat and my lips are turning blue",
+    ],
+)
+def test_nose_or_throat_foreign_object_WITH_distress_signal_fires(message):
+    assert detect_red_flag(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "something got stuck in my nose",
+        "a seed is stuck in my nose",
         "a bead got stuck in my nose",
         "she pushed a button into her nose",
         "my son inserted a small toy into his nostril",
         "there's something lodged in my nose",
+        "something is stuck in my throat",
+        "a small piece of food got stuck in my throat",
+        "there's an object lodged in my nose",
     ],
 )
-def test_nasal_foreign_object_patterns_fire(message):
-    assert detect_red_flag(message)
+def test_nose_or_throat_foreign_object_ALONE_does_not_auto_fire(message):
+    # No distress signal stated — meant to route to ENT via ordinary department
+    # matching (see app.services.orchestrator.symptom_hints, which already hints ENT
+    # for "nose"/"throat"), not auto-fire the emergency redirect here.
+    assert not detect_red_flag(message)
 
 
 @pytest.mark.parametrize(
@@ -322,9 +351,45 @@ def test_nasal_foreign_object_patterns_fire(message):
 )
 def test_ordinary_blocked_or_stuffy_nose_does_not_false_fire(message):
     # A blocked/stuffy nose from an ordinary cold is one of the most common ENT
-    # complaints there is — the new nasal-foreign-object patterns are scoped to
-    # explicit insertion verbs (stuck/lodged/stuffed/pushed/inserted) specifically so
-    # this everyday complaint doesn't get swept in alongside it.
+    # complaints there is, nowhere close to an emergency, and shares no vocabulary
+    # with the foreign-object-insertion wording above.
+    assert not detect_red_flag(message)
+
+
+# --- foreign object in the eye stays an unconditional red flag ----------------------
+#
+# Unlike the nose/throat carve-out above, the eye keeps the original behavior: ANY
+# foreign object in the eye is a red flag on its own, with or without additional
+# symptoms — eye trauma is time-critical (risk of permanent vision loss) regardless
+# of how the patient describes the rest of it.
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # Object + explicitly stated additional symptoms — still fires (the extra
+        # symptoms don't change anything; the object alone is already sufficient).
+        "a piece of glass got in my eye and now it's red and watering a lot",
+        "something went into my eye and my vision is blurry and it hurts badly",
+        "there is metal stuck in my eye and I can't open it now",
+    ],
+)
+def test_eye_foreign_object_with_additional_symptoms_fires(message):
+    assert detect_red_flag(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # Ordinary eye symptoms, no foreign object mentioned at all — routes to
+        # Ophthalmology via normal symptom/department matching, not an emergency.
+        "my eyes have been itchy and red for a few days",
+        "I have blurry vision on and off",
+        "my eye feels dry and irritated",
+        "I've had watery eyes since yesterday, nothing hit it",
+    ],
+)
+def test_ordinary_eye_symptoms_without_foreign_object_do_not_fire(message):
     assert not detect_red_flag(message)
 
 

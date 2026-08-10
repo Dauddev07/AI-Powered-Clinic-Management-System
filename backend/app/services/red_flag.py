@@ -104,33 +104,28 @@ _RED_FLAG_PATTERNS = [
     # knife, screw, splinter, or similar object stuck/lodged/embedded/piercing the
     # head, skull, neck, chest, abdomen, back, or any other body part is exactly as
     # much an emergency as one in the eye (arguably more so for the head/chest/
-    # abdomen), so this is not eye-specific. Includes the nose/nostril(s) — previously
-    # missing from this list entirely (see the standalone nose patterns below for why
-    # that specific gap mattered).
+    # abdomen), so this is not eye-specific.
+    #
+    # Deliberately excludes the nose and throat, unlike every other body part here —
+    # product decision: something merely resting in the nose or throat (a seed, bead,
+    # piece of food) is common and not itself an emergency; it only becomes one
+    # alongside an actual distress signal (can't breathe, can't swallow, choking,
+    # turning blue — all matched by their own separate patterns below/above
+    # regardless of whether an object is mentioned at all). A bare "X stuck in my
+    # nose/throat" with no distress signal is meant to fall through to normal
+    # department routing (ENT, via app.services.orchestrator.symptom_hints), not
+    # auto-fire here. The eye is NOT given this same carve-out — any foreign object
+    # in the eye specifically stays an unconditional red flag below.
     r"\b(nail|glass|metal|splinter|screw|knife|shard|needle|object|something (?:sharp|pointy))\b"
     r".{0,20}\b(stuck|lodged|embedded|piercing|penetrat\w*|went (?:in|into)|sticking (?:in|into|out))\b"
-    r".{0,20}\b(head|skull|brain|neck|throat|chest|abdomen|stomach|back|face|eyes?|ears?|nose|nostrils?|body)\b",
-    r"\b(head|skull|brain|neck|throat|chest|abdomen|stomach|back|face|eyes?|ears?|nose|nostrils?)\b.{0,20}"
+    r".{0,20}\b(head|skull|brain|neck|chest|abdomen|stomach|back|face|eyes?|ears?|body)\b",
+    r"\b(head|skull|brain|neck|chest|abdomen|stomach|back|face|eyes?|ears?)\b.{0,20}"
     r"\b(stuck|lodged|embedded|piercing|penetrat\w*)\b",
     r"\b(stuck|lodged|embedded|piercing|penetrat\w*)\b.{0,20}\b(in|into)\b.{0,10}"
-    r"\b(head|skull|brain|neck|throat|chest|abdomen|stomach|back|face|eyes?|ears?|nose|nostrils?)\b",
-    r"\bforeign (object|body)\b.{0,15}\b(eyes?|head|skull|neck|chest|abdomen|nose|nostrils?|body)\b",
+    r"\b(head|skull|brain|neck|chest|abdomen|stomach|back|face|eyes?|ears?)\b",
+    r"\bforeign (object|body)\b.{0,15}\b(eyes?|head|skull|neck|chest|abdomen|body)\b",
     r"\b(something|object|nail|knife|glass|metal)\b.{0,10}\bin (my|his|her|the) "
-    r"(eyes?|head|skull|neck|chest|abdomen|stomach|back|throat|nose|nostrils?)\b",
-    # Object inserted/stuck/lodged in the nose specifically — deliberately NOT scoped
-    # to a fixed list of object nouns like the patterns above (a seed, bead, bean,
-    # button, toy, or coin lodged in the nose is a common real scenario, especially in
-    # children, and the specific object isn't enumerable) so this fires on "stuck in
-    # my nose"/"lodged in my nose" regardless of what word immediately precedes it.
-    # Reported live: "seed of date got stuck in my nose and i am having difficulty to
-    # breath now" matched none of the patterns above (the object word "seed" wasn't in
-    # any enumerated list, and "nose" wasn't in the body-part list at all).
-    # Deliberately no "nose is blocked" pattern here — a blocked/stuffy nose from an
-    # ordinary cold is one of the most common ENT complaints there is, not remotely an
-    # emergency, so this stays scoped to explicit foreign-object-insertion verbs only.
-    r"\b(stuck|lodged|stuffed|pushed|inserted)\b.{0,20}\b(in|into)\b.{0,10}\b(my|his|her|the)\b.{0,5}"
-    r"\b(nose|nostrils?)\b",
-    r"\b(nose|nostrils?)\b.{0,20}\b(stuck|lodged)\b",
+    r"(eyes?|head|skull|neck|chest|abdomen|stomach|back)\b",
     # Chemical exposure to the eyes or skin (splashed/sprayed/got in) — distinct from
     # the ingestion/poisoning patterns above, since exposure rather than swallowing is
     # its own recognized emergency (chemical burns, blindness risk).
@@ -165,10 +160,13 @@ _RED_FLAG_PATTERNS = [
     r"\bcrush(ed|ing)\b.{0,20}\b(leg|arm|hand|foot|limb|chest|head)\b",
     r"\b(leg|arm|hand|foot|limb|chest|head)\b.{0,20}\bcrush(ed|ing)\b",
     r"\bimpaled\b",
-    # Choking / airway obstruction
+    # Choking / airway obstruction. Deliberately no bare "X stuck in my throat"
+    # pattern here — product decision (see the foreign-object section above): that
+    # alone, with no distress signal, is meant to fall through to ENT department
+    # routing rather than auto-firing. These patterns are exactly the distress
+    # signals that make a throat/nose object into a genuine emergency instead.
     r"\bchoking\b",
     r"\bchoked on\b",
-    r"\b(something|food|it)\b.{0,15}\bstuck in (my|his|her|the) throat\b",
     r"\bcan'?t swallow\b",
     r"\bturning blue\b",
     r"\b(lips|skin|face)\b.{0,10}\b(turning|is|are|went)\b.{0,10}\bblue\b",

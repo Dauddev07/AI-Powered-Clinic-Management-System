@@ -79,6 +79,42 @@
   background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 16%, transparent), transparent 70%);
 }
 
+/* The same accent-tinted-transparent glows read as much fainter against the
+   light theme's near-white page than the dark theme's near-black one (equal
+   opacity, very different contrast) — reported live as "not visible in
+   light mode". Boosted here rather than raising the shared dark-mode values,
+   since those already looked right. */
+:global(html[data-theme="light"]) .heroGlow1 {
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 38%, transparent), transparent 70%);
+}
+
+:global(html[data-theme="light"]) .heroGlow2 {
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 30%, transparent), transparent 70%);
+}
+
+/* A third, larger and much softer glow centered behind the whole section —
+   ties the two corner blobs together into one continuous ambient wash
+   instead of two isolated spots, without adding any new visual weight
+   (very low opacity, wide blur). */
+.heroGlow3 {
+  position: absolute;
+  z-index: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  top: 46%;
+  left: 50%;
+  width: min(70vw, 860px);
+  height: min(70vw, 860px);
+  transform: translate(-50%, -50%);
+  filter: blur(100px);
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 24%, transparent), transparent 70%);
+  opacity: 0.8;
+}
+
+:global(html[data-theme="light"]) .heroGlow3 {
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 42%, transparent), transparent 70%);
+}
+
 /* A perspective grid "floor" pinned to the hero's bottom edge — the actual
    3D background treatment (a first pass used small floating gradient
    spheres, rejected live as "3D shapes, not a 3D theme"). Two repeating
@@ -493,12 +529,6 @@
   stroke-width: 2.5;
 }
 
-/* A small offset highlight dot on each ring — reads as a metal spiral
-   catching light, instead of a flat uniform grey loop. */
-.propCalendarRingShine {
-  fill: color-mix(in srgb, white 65%, transparent);
-}
-
 .propCalendarHead {
   fill: var(--app-accent);
 }
@@ -507,30 +537,6 @@
   fill: var(--app-bg-card);
   stroke: var(--app-border);
   stroke-width: 1.5;
-}
-
-/* A small row of colored "weekday" dots printed between the header and the
-   date grid — real desk calendars carry a printed weekday band there; this
-   is the equivalent bit of designed detail, in the same accent family
-   already used by the hero's float cards, rather than being all-neutral. */
-.propCalendarWeekdayDot_a {
-  fill: var(--app-accent);
-}
-
-.propCalendarWeekdayDot_b {
-  fill: #4f8ff0;
-}
-
-.propCalendarWeekdayDot_c {
-  fill: #e0637d;
-}
-
-.propCalendarWeekdayDot_d {
-  fill: #c9972e;
-}
-
-.propCalendarWeekdayDot_e {
-  fill: color-mix(in srgb, var(--app-accent) 55%, #4fb0a8);
 }
 
 .propCalendarGridLine {
@@ -722,9 +728,16 @@
   color: var(--app-text-title);
 }
 
-.phoneSlotSelected svg {
-  color: var(--app-accent);
+.phoneSlotCheck {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--app-accent);
+  color: var(--app-accent-text);
 }
 
 .phoneConfirmBtn {

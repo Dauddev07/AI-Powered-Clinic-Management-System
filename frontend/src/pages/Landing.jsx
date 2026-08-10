@@ -180,6 +180,7 @@ export default function Landing() {
             depth behind the same content layout, not a new interactive
             concept. */}
         <div className={styles.heroBgPattern} aria-hidden="true" />
+        <div className={styles.heroGlow3} aria-hidden="true" />
         <div className={styles.heroGlow1} aria-hidden="true" />
         <div className={styles.heroGlow2} aria-hidden="true" />
 
@@ -295,46 +296,27 @@ export default function Landing() {
               <span className={styles.heroVisualRingFull} />
               <span className={styles.heroVisualDots} />
 
-              {/* Desk calendar prop, redrawn as one SVG object (spiral rings
-                  + a real grid, not flat colored tiles) — instructed live
-                  that the earlier DOM-grid version didn't read as an actual
-                  calendar. The easel stand it originally leaned on was
-                  instructed live to be removed outright (its terracotta
-                  color wasn't wanted), rather than re-colored again. */}
-              <svg className={styles.propCalendar} viewBox="0 0 120 106" fill="none">
-                {[14, 36, 58, 80, 102].map((cx) => (
+              {/* Desk calendar prop — instructed live to simplify: down to
+                  three spiral rings, one neutral header band, a plain grid,
+                  and a single highlighted date, instead of the busier
+                  five-ring / multi-colored-dot version. */}
+              <svg className={styles.propCalendar} viewBox="0 0 120 86" fill="none">
+                {[24, 60, 96].map((cx) => (
                   <g key={cx}>
-                    <line className={styles.propCalendarRingLink} x1={cx} y1="10" x2={cx} y2="20" />
+                    <line className={styles.propCalendarRingLink} x1={cx} y1="10" x2={cx} y2="18" />
                     <circle className={styles.propCalendarRing} cx={cx} cy="9" r="4.5" />
-                    <circle className={styles.propCalendarRingShine} cx={cx - 1.3} cy="7.3" r="1.4" />
                   </g>
                 ))}
-                <path className={styles.propCalendarHead} d="M16 14h88a6 6 0 0 1 6 6v10H10V20a6 6 0 0 1 6-6Z" />
-                <path className={styles.propCalendarBody} d="M10 24h100v70a6 6 0 0 1-6 6H16a6 6 0 0 1-6-6Z" />
-                {/* A row of small colored weekday dots — the "more designed"
-                    desk-calendar detail real ones have (a printed weekday
-                    band above the date grid), reusing the same accent
-                    family already used across the hero's float cards. */}
-                {[
-                  { x: 20, color: "a" }, { x: 38.5, color: "b" }, { x: 57, color: "c" },
-                  { x: 75.5, color: "d" }, { x: 94, color: "e" },
-                ].map((dot) => (
-                  <circle
-                    key={dot.x}
-                    className={`${styles.propCalendarWeekdayDot} ${styles[`propCalendarWeekdayDot_${dot.color}`]}`}
-                    cx={dot.x}
-                    cy="31"
-                    r="2.6"
-                  />
+                <path className={styles.propCalendarHead} d="M16 14h88a6 6 0 0 1 6 6v8H10v-8a6 6 0 0 1 6-6Z" />
+                <path className={styles.propCalendarBody} d="M10 22h100v52a6 6 0 0 1-6 6H16a6 6 0 0 1-6-6Z" />
+                {[43, 67, 91].map((x) => (
+                  <line key={x} className={styles.propCalendarGridLine} x1={x} y1="34" x2={x} y2="74" />
                 ))}
-                {[36.5, 59, 81.5].map((x) => (
-                  <line key={x} className={styles.propCalendarGridLine} x1={x} y1="38" x2={x} y2="94" />
-                ))}
-                {[52, 68, 84].map((y) => (
+                {[50, 66] .map((y) => (
                   <line key={y} className={styles.propCalendarGridLine} x1="14" y1={y} x2="106" y2={y} />
                 ))}
-                <rect className={styles.propCalendarCellActive} x="60" y="53" width="20.5" height="14" rx="3" />
-                <path className={styles.propCalendarCheck} d="M65.5 60.2l3.6 3.6 7-7.4" />
+                <rect className={styles.propCalendarCellActive} x="65" y="41" width="24" height="18" rx="3" />
+                <path className={styles.propCalendarCheck} d="M70.5 49.5l4 4 8-9" />
               </svg>
 
               {/* Potted plant prop — gradient-shaded leaves (per-leaf tone,
@@ -389,9 +371,11 @@ export default function Landing() {
                     <span className={styles.phoneSlot}>10:00 AM</span>
                     <span className={`${styles.phoneSlot} ${styles.phoneSlotSelected}`}>
                       11:30 AM
-                      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M5 13l4 4L19 7" />
-                      </svg>
+                      <span className={styles.phoneSlotCheck}>
+                        <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M5 13l4 4L19 7" />
+                        </svg>
+                      </span>
                     </span>
                     <span className={styles.phoneSlot}>2:00 PM</span>
                   </div>
@@ -432,7 +416,7 @@ export default function Landing() {
                 </span>
                 <span className={styles.floatCardText}>
                   <span className={styles.floatCardTitle}>Patient First</span>
-                  <span className={styles.floatCardDesc}>Every doctor is rated by real patients.</span>
+                  <span className={styles.floatCardDesc}>Every doctor is rated by patients.</span>
                 </span>
               </div>
             </div>
