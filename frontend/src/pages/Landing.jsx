@@ -435,55 +435,79 @@ export default function Landing() {
             Departments
           </h2>
           <div className={styles.deptGrid}>
-            {DEPARTMENTS.map((dept, i) => (
-              // The reveal fade/slide lives on this wrapper rather than .deptCard
-              // itself — .deptCard already declares its own `transition` shorthand
-              // for the hover lift/shadow, and a second `transition` rule on the
-              // same element would replace that list outright instead of merging
-              // with it, silently breaking either the hover effect or the reveal.
-              <div
-                key={dept.name}
-                className={`reveal ${styles.revealBlur} ${revealDelayClass(i % 6)}`}
-                ref={register}
-              >
-                {/* Booking requires an account — the useful next step from any department
-                    card for a signed-out visitor is creating one. (A signed-in visitor can
-                    also reach this page now, via the header's clinic-name link — see the
-                    "Back to Dashboard" button above — but still has no account-scoped
-                    department browsing here to link to instead, so this stays as-is.) */}
-                <Link
-                  to="/register"
-                  className={styles.deptCard}
-                  title={dept.description}
-                  aria-label={`See doctors in ${dept.name} — register to book`}
+            {DEPARTMENTS.map((dept, i) => {
+              // Booking requires a patient account — the useful next step from any
+              // department card for a signed-out visitor is creating one. A signed-in
+              // patient instead jumps straight to Book Appointment pre-filtered to
+              // this department (matched by name against the real backend department
+              // list — see BookAppointment.jsx's ?department= handling). A signed-in
+              // admin has no booking flow of their own, so the card is deliberately
+              // not a link at all for them — hover still shows (same .deptCard styles),
+              // it just goes nowhere on click, and the "clickable link" arrow hint
+              // (.deptArrow) is dropped since it isn't one for that role.
+              const isAdmin = isAuthenticated && user?.role === "admin";
+              const isPatient = isAuthenticated && user?.role === "patient";
+              const cardIcon = (
+                <span className={styles.deptIcon} aria-hidden="true">
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="22"
+                    height="22"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d={dept.icon} />
+                  </svg>
+                </span>
+              );
+              const cardName = <span className={styles.deptName}>{dept.name}</span>;
+
+              return (
+                // The reveal fade/slide lives on this wrapper rather than .deptCard
+                // itself — .deptCard already declares its own `transition` shorthand
+                // for the hover lift/shadow, and a second `transition` rule on the
+                // same element would replace that list outright instead of merging
+                // with it, silently breaking either the hover effect or the reveal.
+                <div
+                  key={dept.name}
+                  className={`reveal ${styles.revealBlur} ${revealDelayClass(i % 6)}`}
+                  ref={register}
                 >
-                  <span className={styles.deptIcon} aria-hidden="true">
-                    <svg
-                      viewBox="0 0 24 24"
-                      width="22"
-                      height="22"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
+                  {isAdmin ? (
+                    <div className={styles.deptCard} title={dept.description} aria-label={dept.name}>
+                      {cardIcon}
+                      {cardName}
+                    </div>
+                  ) : (
+                    <Link
+                      to={isPatient ? `/patient/book?department=${encodeURIComponent(dept.name)}` : "/register"}
+                      className={styles.deptCard}
+                      title={dept.description}
+                      aria-label={
+                        isPatient
+                          ? `See available slots in ${dept.name}`
+                          : `See doctors in ${dept.name} — register to book`
+                      }
                     >
-                      <path d={dept.icon} />
-                    </svg>
-                  </span>
-                  <span className={styles.deptName}>{dept.name}</span>
-                  {/* Only appears on hover/focus (see .deptArrow) — signals the
-                      card is a clickable link rather than a static tile,
-                      without adding a permanently-visible second element to
-                      every one of the 12 cards. */}
-                  <span className={styles.deptArrow} aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M5 12h14M13 6l6 6-6 6" />
-                    </svg>
-                  </span>
-                </Link>
-              </div>
-            ))}
+                      {cardIcon}
+                      {cardName}
+                      {/* Only appears on hover/focus (see .deptArrow) — signals the
+                          card is a clickable link rather than a static tile,
+                          without adding a permanently-visible second element to
+                          every one of the 12 cards. */}
+                      <span className={styles.deptArrow} aria-hidden="true">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M5 12h14M13 6l6 6-6 6" />
+                        </svg>
+                      </span>
+                    </Link>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
       </div>

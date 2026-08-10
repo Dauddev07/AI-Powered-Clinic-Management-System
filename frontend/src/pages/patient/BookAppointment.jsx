@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   bookAppointment,
   fetchDepartmentsWithSlots,
@@ -214,6 +214,7 @@ function FilterDropdown({ id, label, value, options, onChange, searchable = fals
 
 export default function BookAppointment() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const revealRef = useReveal();
   const [departments, setDepartments] = useState([]);
   const [departmentId, setDepartmentId] = useState("");
@@ -298,11 +299,33 @@ export default function BookAppointment() {
   };
 
   useEffect(() => {
-    fetchDepartmentsWithSlots()
-      .then(setDepartments)
-      .catch(() => {});
-    loadSlots({ departmentId: "", doctorId: "", dateFilter: "", customDate: "", timeOfDay: "", page: 1 });
-    loadDoctorOptions("", "", "");
+    // Landing page's department cards deep-link here as ?department=<name> for a
+    // signed-in patient — resolved against the real backend department list
+    // (matched by name, case-insensitively) since the card only knows the
+    // clinic's static marketing name, never a department_id. No param is by far
+    // the common case (direct navigation to this page), so that path keeps firing
+    // both fetches in parallel exactly as before; only a present param waits on
+    // the department list first, since it's needed to resolve the id.
+    const deptNameFromUrl = searchParams.get("department");
+    const departmentsPromise = fetchDepartmentsWithSlots()
+      .then((depts) => {
+        setDepartments(depts);
+        return depts;
+      })
+      .catch(() => []);
+
+    if (deptNameFromUrl) {
+      departmentsPromise.then((depts) => {
+        const match = depts.find((d) => d.name.toLowerCase() === deptNameFromUrl.toLowerCase());
+        const initialId = match ? match.id : "";
+        setDepartmentId(initialId);
+        loadSlots({ departmentId: initialId, doctorId: "", dateFilter: "", customDate: "", timeOfDay: "", page: 1 });
+        loadDoctorOptions(initialId, "", "");
+      });
+    } else {
+      loadSlots({ departmentId: "", doctorId: "", dateFilter: "", customDate: "", timeOfDay: "", page: 1 });
+      loadDoctorOptions("", "", "");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
