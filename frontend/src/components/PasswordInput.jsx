@@ -33,14 +33,14 @@ export default function PasswordInput({ id, value, onChange, autoComplete, requi
       >
         {visible ? (
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M3 3l18 18" />
-            <path d="M10.58 10.58a2 2 0 0 0 2.83 2.83" />
-            <path d="M9.88 5.09A9.77 9.77 0 0 1 12 5c5 0 9 4.5 10 7-.36.92-1.02 2-1.94 3M6.1 6.1C4.16 7.42 2.68 9.34 2 12c1 2.5 5 7 10 7 1.19 0 2.3-.25 3.31-.68" />
+            <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z" />
+            <circle cx="12" cy="12" r="3" />
           </svg>
         ) : (
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z" />
-            <circle cx="12" cy="12" r="3" />
+            <path d="M3 3l18 18" />
+            <path d="M10.58 10.58a2 2 0 0 0 2.83 2.83" />
+            <path d="M9.88 5.09A9.77 9.77 0 0 1 12 5c5 0 9 4.5 10 7-.36.92-1.02 2-1.94 3M6.1 6.1C4.16 7.42 2.68 9.34 2 12c1 2.5 5 7 10 7 1.19 0 2.3-.25 3.31-.68" />
           </svg>
         )}
       </button>
