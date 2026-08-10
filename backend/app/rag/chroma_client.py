@@ -23,7 +23,9 @@ _client: chromadb.HttpClient | None = None
 def get_chroma_client() -> chromadb.HttpClient:
     global _client
     if _client is None:
-        _client = chromadb.HttpClient(host=settings.CHROMA_HOST, port=settings.CHROMA_PORT)
+        _client = chromadb.HttpClient(
+            host=settings.CHROMA_HOST, port=settings.CHROMA_PORT, ssl=settings.CHROMA_SSL
+        )
     return _client
 
 

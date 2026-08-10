@@ -76,7 +76,7 @@ def main() -> None:
     medical_kb_name = f"{slug}__medical-kb"
     hospital_info_name = f"{slug}__hospital-info"
 
-    chroma = chromadb.HttpClient(host=settings.CHROMA_HOST, port=settings.CHROMA_PORT)
+    chroma = chromadb.HttpClient(host=settings.CHROMA_HOST, port=settings.CHROMA_PORT, ssl=settings.CHROMA_SSL)
     chroma.get_or_create_collection(medical_kb_name)
     chroma.get_or_create_collection(hospital_info_name)
 
