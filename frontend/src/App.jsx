@@ -99,7 +99,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </div>
-      <Footer />
+      {location.pathname !== "/patient/chat" && <Footer />}
       </AuthProvider>
     </ToastProvider>
   );
