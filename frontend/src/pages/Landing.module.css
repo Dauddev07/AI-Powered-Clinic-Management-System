@@ -14,7 +14,16 @@
    section is its own natural height. */
 .hero {
   box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: clamp(1.5rem, 4vw, 2.75rem) 1.5rem;
+  /* Instructed live: the hero should fill the whole screen on first load —
+     nothing from the next section should peek in until the visitor
+     scrolls. --app-header-height is set on :root by AppHeader so this
+     stays correct if the header's own height ever changes. */
+  min-height: calc(100vh - var(--app-header-height, 4.25rem));
+  min-height: calc(100dvh - var(--app-header-height, 4.25rem));
   background-color: var(--app-bg-page);
 }
 
@@ -454,6 +463,21 @@
 
 @media (max-width: 480px) {
   .heroVisualDots {
+    display: none;
+  }
+}
+
+/* Instructed live: hide the visual entirely below this width — the
+   stethoscope illustration + its floating badges take up real vertical
+   space (300px+) that's worth handing back to the actual pitch/CTA once the
+   screen is this narrow, rather than shrinking it further. Placed after the
+   base .heroVisual rule (and the other .heroVisual media blocks above) so
+   this display: none reliably wins the cascade — an identical rule placed
+   earlier in the file was silently overridden by the base rule's own
+   `display: flex`, since equal-specificity rules resolve by source order,
+   not by which one is wrapped in a media query. */
+@media (max-width: 420px) {
+  .heroVisual {
     display: none;
   }
 }
