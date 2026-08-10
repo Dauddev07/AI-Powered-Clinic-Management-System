@@ -16,10 +16,21 @@ from nltk.stem import WordNetLemmatizer
 # Render's filesystem is ephemeral, so the wordnet corpus isn't present on a fresh
 # deploy the way it might be on a dev machine that's downloaded it before — fetch it
 # on first import if missing, rather than requiring a separate provisioning step.
+# Downloaded into /tmp explicitly: nltk's default search paths (site-packages-adjacent,
+# /usr/share/...) aren't guaranteed writable in a deployed container, and nltk.download()
+# swallows write/network failures into a return value instead of raising, so a silent
+# failure there would otherwise surface later as a confusing LookupError deep inside
+# WordNetLemmatizer instead of a clear error here.
+_NLTK_DATA_DIR = "/tmp/nltk_data"
+nltk.data.path.insert(0, _NLTK_DATA_DIR)
 try:
     nltk.data.find("corpora/wordnet")
 except LookupError:
-    nltk.download("wordnet", quiet=True)
+    if not nltk.download("wordnet", download_dir=_NLTK_DATA_DIR, quiet=True):
+        raise RuntimeError(
+            "Failed to download the NLTK wordnet corpus into "
+            f"{_NLTK_DATA_DIR} — check outbound network access and disk space."
+        )
 
 _lemmatizer = WordNetLemmatizer()
 _WORD_RE = re.compile(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?")
