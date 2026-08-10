@@ -1,29 +1,50 @@
 .wrapper {
   position: relative;
+  display: block;
   width: 100%;
   min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .wrapper input {
+  display: block;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Chrome/Edge/desktop Safari already draw their own picker icon inside the
+   input — left alone it doubles up with .icon below. Hidden everywhere so
+   there's exactly one icon, in one consistent style, on every browser
+   (including iOS Safari, which never drew a native one to begin with). */
+.wrapper input[type="date"]::-webkit-calendar-picker-indicator {
+  display: none;
+  -webkit-appearance: none;
 }
 
 .icon {
   position: absolute;
   top: 50%;
-  right: 0.55rem;
+  right: 0.6rem;
   transform: translateY(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.2rem;
+  width: 1.7rem;
+  height: 1.7rem;
   border: none;
   background: none;
   color: var(--app-text-subtitle);
   cursor: pointer;
   border-radius: 6px;
+  pointer-events: none;
 }
 
-.icon:hover {
-  color: var(--app-text-body);
+@media (hover: hover) {
+  .icon:hover {
+    color: var(--app-text-body);
+    background: var(--app-accent-bg);
+  }
 }
