@@ -27,9 +27,29 @@ from app.models.conversation_memory import ConversationMemory
 from app.rag.retrieval import retrieve
 from app.services import llm
 from app.services.department_availability import list_active_department_names
-from app.services.message_classifier import is_department_list_explanation_request, is_department_list_request
+from app.services.message_classifier import (
+    is_department_list_explanation_request,
+    is_department_list_followup_request,
+    is_department_list_request,
+)
 from app.services.orchestrator.symptom_hints import department_symptom_labels
 from app.services.query_rewrite import rewrite_query
+
+# Marker substring unique to this agent's own department-list replies below — lets
+# _is_department_list_reply recognize "that was a department list" without a false
+# match against some other assistant turn that happens to mention "departments" in
+# passing (e.g. quoting a KB chunk).
+_DEPARTMENT_LIST_REPLY_SIGNATURE = "departments available at this clinic"
+
+
+def _is_department_list_reply(history: list[ConversationMemory]) -> bool:
+    """True when the immediately preceding turn was this agent's own department-list
+    short-circuit reply — see is_department_list_followup_request's docstring for why
+    a bare "name them" is only ever trusted as a continuation of that specific reply."""
+    if not history:
+        return False
+    last = history[-1]
+    return last.role == "assistant" and _DEPARTMENT_LIST_REPLY_SIGNATURE in last.content
 
 
 def run_general_info_agent(
@@ -39,7 +59,9 @@ def run_general_info_agent(
     language: str,
     history: list[ConversationMemory],
 ) -> str:
-    if is_department_list_request(message):
+    if is_department_list_request(message) or (
+        is_department_list_followup_request(message) and _is_department_list_reply(history)
+    ):
         department_names = list_active_department_names(db, ctx.clinic_id)
         if not department_names:
             return (

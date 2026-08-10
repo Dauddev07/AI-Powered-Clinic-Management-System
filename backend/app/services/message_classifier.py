@@ -303,7 +303,26 @@ _DEPARTMENT_LIST_RE = re.compile(
     rf"|list\s+(?:of\s+)?(?:the\s+)?(?:available\s+)?{_DEPT_WORD}\b"
     rf"|(?:all|every)\s+{_DEPT_WORD_ANY}\b"
     rf"|available\s+{_DEPT_WORD}\b"
+    # Reported live: "how many total depts are there in this clinic?" matched none of
+    # the patterns above (it's asking for a count, not literally saying "list"/"show"/
+    # "available"), so it fell through to the ungrounded LLM+RAG path and hallucinated
+    # a number — same failure mode this whole short-circuit exists to prevent.
+    rf"|how\s+many\s+(?:total\s+)?{_DEPT_WORD}\b"
     rf")",
+    re.IGNORECASE,
+)
+
+# Reported live: after the department list, "name them" (a bare pronoun follow-up)
+# didn't match _DEPARTMENT_LIST_RE at all — no "department"/"dept" word in it — so it
+# fell through to the same ungrounded LLM+RAG path and hallucinated a garbled list.
+# Deliberately narrow (short, unambiguous list/name-recall phrasings only) since this
+# fires without the word "department" anywhere in the message; run_general_info_agent
+# only treats it as a department-list follow-up when the immediately preceding
+# assistant turn was itself a department-list reply — see _is_department_list_reply.
+_DEPARTMENT_LIST_FOLLOWUP_RE = re.compile(
+    r"^(?:name|list)\s+(?:them|those)\W*$"
+    r"|^what\s+are\s+(?:they|those)\W*$"
+    r"|^which\s+ones\W*$",
     re.IGNORECASE,
 )
 
@@ -313,6 +332,14 @@ def is_department_list_request(message: str) -> bool:
     has, not asking about one specific named department/doctor. See the module-level
     comment above _DEPARTMENT_LIST_RE for why plural is required."""
     return bool(_DEPARTMENT_LIST_RE.search(message.strip()))
+
+
+def is_department_list_followup_request(message: str) -> bool:
+    """True for a bare pronoun follow-up ("name them", "what are they") that only
+    makes sense as a continuation of a prior department-list reply — see
+    _DEPARTMENT_LIST_FOLLOWUP_RE's docstring. Callers must also confirm the previous
+    assistant turn was actually a department-list reply before trusting this."""
+    return bool(_DEPARTMENT_LIST_FOLLOWUP_RE.search(message.strip()))
 
 
 # Reported live: "show me list of depts in this clinic, and also explanation of each
