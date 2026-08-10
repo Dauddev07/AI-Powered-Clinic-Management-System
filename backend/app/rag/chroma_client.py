@@ -6,6 +6,8 @@ never from client input — so a clinic can only ever read or write its own coll
 Naming matches app/scripts/seed_clinic.py exactly (which already creates these collections
 empty when a clinic is onboarded): '<slug>__medical-kb' and '<slug>__hospital-info'.
 """
+from __future__ import annotations
+
 import uuid
 
 import chromadb
