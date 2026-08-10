@@ -66,12 +66,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AI-Powered Clinic Management System", lifespan=lifespan)
 
+# Vite auto-increments to the next free port (5174, 5175, ...) whenever 5173 is
+# already taken by another running dev server, so more than one of these can be a
+# legitimate local frontend rather than a stray process. CORS_ORIGINS lets deployed
+# environments add their real frontend domain without a code change.
+_default_origins = "http://localhost:5173,http://localhost:5174,http://localhost:5175"
+_allowed_origins = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ORIGINS", _default_origins).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    # Vite auto-increments to the next free port (5174, 5175, ...) whenever 5173
-    # is already taken by another running dev server, so more than one of these
-    # can be a legitimate local frontend rather than a stray process.
-    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:5175"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
