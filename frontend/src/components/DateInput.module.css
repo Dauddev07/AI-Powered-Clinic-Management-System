@@ -24,16 +24,26 @@
   -webkit-appearance: none;
 }
 
+/* The visible date text renders through this shadow part, which ignores the
+   input's own `padding` on iOS/WebKit entirely — the inline paddingRight set in
+   DateInput.jsx has no effect on it. Reserving real space here (not just
+   text-align) is what actually keeps the text from running underneath .icon;
+   without it the last 1-2 characters of the date sit directly under the icon. */
+.wrapper input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+  margin-right: 2rem;
+}
+
 .icon {
   position: absolute;
   top: 50%;
-  right: 0.6rem;
+  right: 0.5rem;
   transform: translateY(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.7rem;
-  height: 1.7rem;
+  width: 1.6rem;
+  height: 1.6rem;
   border: none;
   background: none;
   color: var(--app-text-subtitle);

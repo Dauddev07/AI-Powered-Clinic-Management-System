@@ -104,17 +104,6 @@
   text-overflow: ellipsis;
 }
 
-/* Mobile WebKit (iOS Safari/Chrome) renders a date input's visible value through
-   an internal ::-webkit-date-and-time-value shadow part that doesn't inherit this
-   box's padding/vertical-centering the way plain text does — left unset, it can
-   render noticeably off-center/misaligned next to the plain-text and select
-   fields sharing this same grid row. Pinning it explicitly keeps the date field
-   visually lined up with its siblings instead of left to each browser's default. */
-.field input[type="date"]::-webkit-date-and-time-value {
-  text-align: left;
-  margin: 0;
-}
-
 .field input::placeholder {
   color: var(--app-input-placeholder);
 }
