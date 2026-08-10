@@ -269,6 +269,65 @@ def test_combined_severe_symptoms_in_one_message_fires():
     )
 
 
+# --- foreign object in the nose + non-native "difficulty to breathe" phrasing --------
+
+
+def test_nasal_foreign_object_with_breathing_difficulty_fires():
+    # Reported live: this exact message fell through both layers entirely. Two
+    # separate gaps combined to miss it — "nose" wasn't in the foreign-object
+    # body-part list at all (only eyes/head/neck/chest/etc.), and "difficulty to
+    # breath" (a common non-native-English construction) didn't match the breathing
+    # pattern, which required "difficulty" to sit directly against "breath" with only
+    # whitespace between them.
+    assert detect_red_flag(
+        "seed of date got stuck in my nose and i am having difficulty to breath now"
+    )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "difficulty to breath now",
+        "having trouble to breathe",
+        "he is struggling to breath",
+    ],
+)
+def test_breathing_difficulty_with_connector_word_fires(message):
+    # The "X to breath(e)" construction specifically — previously missed because the
+    # pattern required the trigger word directly against "breath".
+    assert detect_red_flag(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "a bead got stuck in my nose",
+        "she pushed a button into her nose",
+        "my son inserted a small toy into his nostril",
+        "there's something lodged in my nose",
+    ],
+)
+def test_nasal_foreign_object_patterns_fire(message):
+    assert detect_red_flag(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "my nose is blocked",
+        "I have a stuffy nose",
+        "he has a cold and a blocked nose",
+        "her nose is runny and congested",
+    ],
+)
+def test_ordinary_blocked_or_stuffy_nose_does_not_false_fire(message):
+    # A blocked/stuffy nose from an ordinary cold is one of the most common ENT
+    # complaints there is — the new nasal-foreign-object patterns are scoped to
+    # explicit insertion verbs (stuck/lodged/stuffed/pushed/inserted) specifically so
+    # this everyday complaint doesn't get swept in alongside it.
+    assert not detect_red_flag(message)
+
+
 # --- vehicle accidents / high-energy trauma mechanism --------------------------------
 
 

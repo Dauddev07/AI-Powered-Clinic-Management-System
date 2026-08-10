@@ -31,9 +31,11 @@ from fastapi import HTTPException
 from langchain_core.tools import StructuredTool
 from langsmith import traceable
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.tenancy import ClinicContext
+from app.models.appointment_feedback import AppointmentFeedback
 from app.models.clinic import Clinic
 from app.models.doctor import Doctor
 from app.models.slot import Slot
@@ -64,8 +66,31 @@ def _department_name_for_slot(db: Session, clinic_id: uuid.UUID, slot: Slot) -> 
     return department.name if department else None
 
 
+def _doctor_ratings(db: Session, doctor_ids: list[uuid.UUID]) -> dict[uuid.UUID, tuple[float, int]]:
+    """Same avg/count-over-AppointmentFeedback shape used by the public
+    top-rated-doctors endpoint (see api/clinics.py) and the patient slot list
+    (see api/slots.py), scoped here to just the doctors already in this
+    payload rather than a join, since `availability.doctors` is already a
+    small, resolved list by the time this runs. A doctor absent from the
+    returned dict simply has no ratings yet.
+    """
+    if not doctor_ids:
+        return {}
+    rows = db.execute(
+        select(
+            AppointmentFeedback.doctor_id,
+            func.avg(AppointmentFeedback.rating),
+            func.count(AppointmentFeedback.id),
+        )
+        .where(AppointmentFeedback.doctor_id.in_(doctor_ids))
+        .group_by(AppointmentFeedback.doctor_id)
+    ).all()
+    return {doctor_id: (round(float(avg_rating), 1), rating_count) for doctor_id, avg_rating, rating_count in rows}
+
+
 def _doctor_options_payload(db: Session, clinic_id: uuid.UUID, availability, note: str | None = None) -> str:
     tz = _clinic_timezone(db, clinic_id)
+    ratings = _doctor_ratings(db, [d.doctor_id for d in availability.doctors])
     payload = {
         "note": note,
         "department_name": availability.department_name,
@@ -74,6 +99,8 @@ def _doctor_options_payload(db: Session, clinic_id: uuid.UUID, availability, not
                 "doctor_id": str(d.doctor_id),
                 "doctor_name": d.full_name,
                 "specialization": d.specialization,
+                "average_rating": ratings.get(d.doctor_id, (None, 0))[0],
+                "rating_count": ratings.get(d.doctor_id, (None, 0))[1],
                 "slots": [
                     {"slot_id": str(s.slot_id), "when": _format_when(s.start_utc, tz)} for s in d.slots
                 ],

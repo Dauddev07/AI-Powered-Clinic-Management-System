@@ -9,6 +9,7 @@ import {
   submitFeedback,
 } from "../../api/chat";
 import { ApiError } from "../../api/client";
+import DoctorRatingBadge from "../../components/DoctorRatingBadge";
 import Modal from "../../components/Modal";
 import StarIcon from "../../components/StarIcon";
 import styles from "./ChatPage.module.css";
@@ -185,9 +186,12 @@ function DoctorOptionsCard({ options, onSelectSlot, disabled }) {
 function DoctorGroup({ doctor, onSelectSlot, disabled }) {
   return (
     <div className={styles.doctorOptionGroup}>
-      <div className={styles.doctorOptionName}>
-        {doctor.doctor_name}
-        {doctor.specialization ? ` — ${doctor.specialization}` : ""}
+      <div className={styles.doctorOptionNameRow}>
+        <div className={styles.doctorOptionName}>
+          {doctor.doctor_name}
+          {doctor.specialization ? ` — ${doctor.specialization}` : ""}
+        </div>
+        <DoctorRatingBadge averageRating={doctor.average_rating} ratingCount={doctor.rating_count} />
       </div>
       <div className={styles.doctorOptionSlots}>
         {doctor.slots.map((slot) => (

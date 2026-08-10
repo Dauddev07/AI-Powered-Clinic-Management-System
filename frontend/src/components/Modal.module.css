@@ -19,6 +19,7 @@
   padding: 1.25rem;
   background: var(--app-bg-card);
   color: var(--app-text-body);
+  border: 1px solid var(--app-border);
   border-radius: 16px;
   box-shadow: 0 12px 40px var(--app-shadow);
   /* Safety net at narrow widths, matching the other cards in the app. */

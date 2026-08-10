@@ -1,0 +1,32 @@
+/* Instructed live to make the plain inline "★ 4.8 (32)" text read as an
+   actual designed badge — a small amber-tinted pill (same tinted-chip
+   pattern used elsewhere in the app, e.g. AdminHome's .titleIcon variants)
+   rather than bare text floating next to the doctor's name. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem 0.15rem 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, #d9b34a 14%, transparent);
+  border: 1px solid color-mix(in srgb, #d9b34a 30%, transparent);
+  font-size: var(--font-size-label);
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--app-text-title);
+  white-space: nowrap;
+}
+
+.icon {
+  flex-shrink: 0;
+  color: #d9b34a;
+}
+
+.value {
+  color: var(--app-text-title);
+}
+
+.count {
+  color: var(--app-text-subtitle);
+  font-weight: 500;
+}

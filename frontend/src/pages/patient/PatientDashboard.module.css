@@ -48,6 +48,8 @@
      booking reason) can force its column wider than the grid track, pushing
      the whole grid into horizontal overflow instead of wrapping. */
   min-width: 0;
+  position: relative;
+  overflow: hidden;
   background: var(--app-bg-card);
   border: 1px solid var(--app-border);
   border-radius: 20px;
@@ -74,14 +76,33 @@
     border-color 260ms ease;
 }
 
+.card::after {
+  content: "";
+  position: absolute;
+  top: -35%;
+  right: -25%;
+  width: 55%;
+  height: 55%;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 14%, transparent), transparent 70%);
+  opacity: 0;
+  transition: opacity 260ms ease;
+  pointer-events: none;
+}
+
 .card:hover {
   transform: translateY(-3px);
   border-color: color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
   box-shadow: 0 10px 32px var(--app-shadow);
 }
 
+.card:hover::after {
+  opacity: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .card {
+  .card,
+  .card::after {
     transition: box-shadow 220ms ease, border-color 220ms ease;
   }
 

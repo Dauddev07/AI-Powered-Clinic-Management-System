@@ -20,13 +20,30 @@
 
 .statTile {
   background: var(--app-bg-card);
+  border: 1px solid var(--app-border);
   border-radius: 16px;
   border-left: 4px solid var(--app-border);
-  box-shadow: 0 4px 24px var(--app-shadow);
+  box-shadow: 0 3px 14px var(--app-shadow);
   padding: 1rem 1.1rem;
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease;
+}
+
+.statTile:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px var(--app-shadow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statTile {
+    transition: none;
+  }
+
+  .statTile:hover {
+    transform: none;
+  }
 }
 
 .statTile_good {

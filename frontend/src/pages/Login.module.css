@@ -14,17 +14,40 @@
 }
 
 .card {
+  position: relative;
+  overflow: hidden;
   width: 100%;
   max-width: 380px;
   min-width: 0;
   box-sizing: border-box;
   background: var(--app-bg-card);
+  border: 1px solid var(--app-border);
   border-radius: 20px;
-  box-shadow: 0 4px 24px var(--app-shadow);
-  /* Safety net: any unexpectedly long unbroken string wraps instead of pushing
-     the card wider than the viewport at narrow widths. */
-  overflow-wrap: anywhere;
+  box-shadow: 0 12px 40px var(--app-shadow);
   padding: 2rem;
+}
+
+/* A thin brand-accent bar across the top edge — the same quiet "considered"
+   detail used on the landing page's own cards (see Landing.module.css
+   .deptCard::before), here static rather than hover-triggered since this is
+   the very first thing a visitor sees on the auth flow, not a hoverable
+   grid item. */
+.card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 40%, transparent));
+}
+
+.card > * {
+  /* Safety net: any unexpectedly long unbroken string wraps instead of pushing
+     the card wider than the viewport at narrow widths. Scoped to direct
+     children rather than .card itself now that .card also has overflow:
+     hidden (for the top accent bar above) and position: relative. */
+  overflow-wrap: anywhere;
 }
 
 /* Intro side panel only exists as a large-screen embellishment (see the

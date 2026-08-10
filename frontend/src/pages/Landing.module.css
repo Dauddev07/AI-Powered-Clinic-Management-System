@@ -14,6 +14,9 @@
    section is its own natural height. */
 .hero {
   box-sizing: border-box;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -27,15 +30,96 @@
   background-color: var(--app-bg-page);
 }
 
+/* Ambient depth layer — a very faint dot-grid wash plus two large, softly
+   blurred accent blobs pinned in opposite corners. Everything here is
+   static (no cursor tracking, no particles) and low-opacity by design:
+   the earlier "energy field" experiments were repeatedly rejected as too
+   busy/bright, so this only adds quiet depth behind the same content, never
+   competes with it. isolation: isolate on .hero plus z-index: 0 here keeps
+   all three layers pinned behind .heroCard (z-index: 1) regardless of
+   paint order. */
+.heroBgPattern {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--app-accent) 30%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 28px 28px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black 0%, transparent 75%);
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black 0%, transparent 75%);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.heroGlow1,
+.heroGlow2 {
+  position: absolute;
+  z-index: 0;
+  border-radius: 50%;
+  filter: blur(70px);
+  pointer-events: none;
+}
+
+.heroGlow1 {
+  top: -14%;
+  right: -8%;
+  width: min(46vw, 560px);
+  height: min(46vw, 560px);
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 22%, transparent), transparent 70%);
+}
+
+.heroGlow2 {
+  bottom: -22%;
+  left: -10%;
+  width: min(38vw, 460px);
+  height: min(38vw, 460px);
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 16%, transparent), transparent 70%);
+}
+
+/* A perspective grid "floor" pinned to the hero's bottom edge — the actual
+   3D background treatment (a first pass used small floating gradient
+   spheres, rejected live as "3D shapes, not a 3D theme"). Two repeating
+   linear gradients form a square grid; rotateX tilts that flat grid back
+   in 3D space so it reads as a surface receding into depth rather than a
+   flat pattern, anchored at the bottom edge via transform-origin so it
+   tilts away from the viewer instead of pivoting around its center. The
+   mask fades it out well before it reaches the text/visual content above,
+   and every color comes from the app's own tokens so both themes work
+   with no separate styling. */
+.heroGridFloor {
+  position: absolute;
+  z-index: 0;
+  left: -15%;
+  right: -15%;
+  bottom: 0;
+  height: 150%;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--app-accent) 32%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--app-accent) 32%, transparent) 1px, transparent 1px);
+  background-size: 54px 54px;
+  transform: perspective(700px) rotateX(58deg);
+  transform-origin: bottom center;
+  -webkit-mask-image: linear-gradient(to top, black 0%, black 45%, transparent 78%);
+  mask-image: linear-gradient(to top, black 0%, black 45%, transparent 78%);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
 .heroCard {
   box-sizing: border-box;
+  position: relative;
+  z-index: 1;
   max-width: 1180px;
   margin: 0 auto;
+  width: 100%;
 }
 
 .heroTop {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 400px);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 480px);
   align-items: center;
   gap: clamp(2rem, 5vw, 4rem);
 }
@@ -102,17 +186,47 @@
   }
 }
 
+/* Small pill above the headline — the first thing a visitor's eye lands on,
+   establishing "this is a real product" before the headline itself does.
+   A single quiet accent dot (not the icon-plus-badge treatment used on
+   .heroVisualBadge) keeps it from competing with the CTA buttons below. */
+.heroEyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.9rem 0.4rem 0.7rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-accent) 10%, var(--app-bg-card));
+  border: 1px solid color-mix(in srgb, var(--app-accent) 22%, var(--app-border));
+  color: var(--app-accent);
+  font-size: var(--font-size-caption);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.heroEyebrowDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--app-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 20%, transparent);
+}
+
 .headline {
   margin: 0;
-  font-size: clamp(2rem, 4vw, calc(var(--font-size-title) * 1.35));
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.15;
+  font-size: clamp(2.1rem, 4.4vw, calc(var(--font-size-title) * 1.5));
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
   color: var(--app-text-title);
+  text-wrap: balance;
 }
 
 .accentWord {
-  color: var(--app-accent);
+  background: linear-gradient(100deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 60%, #4fb0a8));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .description {
@@ -121,6 +235,24 @@
   color: var(--app-text-subtitle);
   font-size: var(--font-size-body);
   line-height: 1.6;
+}
+
+/* Persuasive follow-on copy — plain prose (not another bullet list, see the
+   JSX call site's own comment). Same color/weight as .description right
+   above it (instructed live: match its opacity) so the two paragraphs read
+   as one continuous voice; the bolded phrases (see .urgency strong) are what
+   carries the emphasis instead of the paragraph's own color/weight. */
+.urgency {
+  margin: 0;
+  max-width: 34rem;
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-body);
+  line-height: 1.6;
+}
+
+.urgency strong {
+  color: var(--app-text-title);
+  font-weight: 700;
 }
 
 /* The hero's primary conversion moment — see the JSX call site's own
@@ -142,9 +274,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.85rem 1.9rem;
+  gap: 0.5rem;
+  padding: 0.85rem 1.7rem 0.85rem 1.9rem;
   border-radius: 14px;
-  background: var(--app-accent);
+  background: linear-gradient(135deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 78%, black));
   color: var(--app-accent-text);
   font-size: var(--font-size-body);
   font-weight: 700;
@@ -155,7 +288,7 @@
 }
 
 .heroCtaPrimary:hover {
-  background: var(--app-accent-hover);
+  background: linear-gradient(135deg, var(--app-accent-hover), color-mix(in srgb, var(--app-accent-hover) 78%, black));
   transform: translateY(-2px);
   box-shadow: 0 12px 30px color-mix(in srgb, var(--app-accent) 48%, transparent);
 }
@@ -164,6 +297,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.5rem;
   padding: 0.85rem 1.9rem;
   border-radius: 14px;
   border: 1.5px solid var(--app-border);
@@ -217,6 +351,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.5rem;
   margin-top: 0.5rem;
   padding: 0.65rem 1.4rem;
   border-radius: 14px;
@@ -234,6 +369,20 @@
   transform: translateY(-1px);
 }
 
+.backToDashboardArrow {
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.backToDashboardBtn:hover .backToDashboardArrow {
+  transform: translateX(-3px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backToDashboardBtn:hover .backToDashboardArrow {
+    transform: none;
+  }
+}
+
 /* The hero's graphic side — no real photography is used (nothing to
    license/fabricate), so this is a line-art panel in the app's own brand
    language instead: a circle in the brand accent tone with a large
@@ -242,21 +391,69 @@
    capabilities rather than being decoration for decoration's sake. */
 .heroVisual {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 300px;
+  isolation: isolate;
+  width: 100%;
+  max-width: 480px;
+  height: clamp(420px, 44vw, 528px);
+  margin: 0 auto;
 }
 
-/* A quiet dot-grid in the card's top-right corner — the one purely
-   decorative texture element, kept small/faint enough to read as a material
-   detail (like dot-grid paper) rather than a pattern competing for attention. */
+/* The big soft circle every prop/card sits in front of — a themed surface,
+   not a photo backdrop, so it holds up identically in both themes. */
+.heroVisualBackdrop {
+  position: absolute;
+  z-index: 0;
+  left: 50%;
+  top: 52%;
+  transform: translate(-50%, -50%);
+  width: 90%;
+  height: 90%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, color-mix(in srgb, var(--app-accent) 12%, var(--app-bg-card)), var(--app-bg-page) 76%);
+}
+
+/* One complete ring around the phone — replaced the earlier dashed ring
+   plus the separate connecting-dot "thread" lines with a single clean
+   circle. An animated light traveling around it was tried and then
+   instructed live to be removed again, so this stays static; instructed
+   live again to make the rim itself more aesthetic. A flat single-color
+   border read as a hard, mechanical outline — this instead builds the ring
+   from a conic-gradient (varying brightness around the circumference, like
+   a glass/metal rim catching light unevenly rather than a uniform stroke),
+   masked down to a thin ring via the same radial-gradient punch-out used
+   elsewhere in this file, plus a soft ambient glow so it reads as a subtle
+   halo rather than a drawn line. */
+.heroVisualRingFull {
+  position: absolute;
+  z-index: 0;
+  left: 50%;
+  top: 52%;
+  transform: translate(-50%, -50%);
+  width: 78%;
+  height: 78%;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 220deg,
+    color-mix(in srgb, var(--app-accent) 55%, transparent),
+    color-mix(in srgb, var(--app-accent) 10%, transparent) 30%,
+    color-mix(in srgb, var(--app-accent) 34%, transparent) 55%,
+    color-mix(in srgb, var(--app-accent) 8%, transparent) 80%,
+    color-mix(in srgb, var(--app-accent) 55%, transparent)
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1.5px));
+  filter: drop-shadow(0 0 16px color-mix(in srgb, var(--app-accent) 16%, transparent));
+}
+
+/* A quiet dot-grid in the corner — the one purely decorative texture
+   element, kept small/faint enough to read as a material detail rather
+   than a pattern competing for attention. */
 .heroVisualDots {
   position: absolute;
-  top: -6%;
-  right: -4%;
-  width: 130px;
-  height: 130px;
+  top: -4%;
+  right: -2%;
+  width: 110px;
+  height: 110px;
   background-image: radial-gradient(
     circle,
     color-mix(in srgb, var(--app-accent) 45%, transparent) 1.6px,
@@ -268,153 +465,355 @@
   pointer-events: none;
 }
 
-.heroVisualCircle {
-  position: relative;
+/* Desk-calendar prop, tucked behind the phone's bottom-left corner — one
+   SVG object (spiral rings + a real day-grid with one checked cell) rather
+   than the earlier flat DOM-grid tiles, which didn't read as an actual
+   calendar at this scale. Previously leaned on a fold-out easel stand;
+   instructed live to remove that entirely (its terracotta color wasn't
+   wanted) rather than re-color it again. */
+.propCalendar {
+  position: absolute;
   z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: min(300px, 78vw);
-  height: min(300px, 78vw);
-  border-radius: 50%;
-  background: radial-gradient(
-    circle at 32% 28%,
-    color-mix(in srgb, var(--app-accent) 22%, var(--app-bg-card)),
-    color-mix(in srgb, var(--app-accent) 6%, var(--app-bg-card)) 72%
-  );
-  border: 1px solid var(--app-border);
-  color: var(--app-accent);
-  box-shadow: 0 24px 48px color-mix(in srgb, var(--app-accent) 18%, transparent);
+  left: -3%;
+  bottom: 4%;
+  width: clamp(90px, 23%, 128px);
+  height: auto;
+  transform: rotate(-6deg);
+  filter: drop-shadow(0 16px 20px var(--app-shadow));
 }
 
-.stethoscopeSvg {
-  max-width: 78%;
-  max-height: 78%;
-}
-
-/* Gradient stops — see the JSX call site's own comment for why this is a
-   shaded illustration rather than a photo or the earlier thin-line icon.
-   `stop-color`/`stop-opacity` are real, styleable SVG presentation
-   properties in CSS, so these can pull from the app's own accent token
-   (color-mix, theme-aware) the same way any other element here does,
-   instead of being hardcoded per theme. */
-.stethTubeStart {
-  stop-color: var(--app-accent);
-  stop-opacity: 0.95;
-}
-
-.stethTubeEnd {
-  stop-color: var(--app-accent);
-  stop-opacity: 0.55;
-}
-
-.stethChestStart {
-  stop-color: color-mix(in srgb, white 70%, var(--app-bg-card));
-  stop-opacity: 1;
-}
-
-.stethChestMid {
-  stop-color: var(--app-accent);
-  stop-opacity: 0.4;
-}
-
-.stethChestEnd {
-  stop-color: var(--app-accent);
-  stop-opacity: 0.18;
-}
-
-.stethShadow {
-  fill: var(--app-shadow);
-  opacity: 0.5;
-}
-
-.stethTube {
-  stroke: url(#stethTubeGrad);
-  stroke-width: 9;
-  stroke-linecap: round;
-}
-
-.stethTubeHighlight {
-  stroke: color-mix(in srgb, white 55%, var(--app-accent));
-  stroke-opacity: 0.5;
-  stroke-width: 2.5;
-  stroke-linecap: round;
-}
-
-.stethMetal {
-  fill: color-mix(in srgb, var(--app-text-subtitle) 55%, var(--app-bg-card));
-}
-
-.stethStem {
-  stroke: color-mix(in srgb, var(--app-text-subtitle) 55%, var(--app-bg-card));
-  stroke-width: 6;
-  stroke-linecap: round;
-}
-
-.stethChestRing {
-  stroke: var(--app-accent);
+.propCalendarRingLink {
+  stroke: color-mix(in srgb, var(--app-text-subtitle) 55%, transparent);
   stroke-width: 2;
 }
 
-.stethChestInner {
-  stroke: var(--app-accent);
+.propCalendarRing {
+  fill: none;
+  stroke: color-mix(in srgb, var(--app-text-subtitle) 65%, transparent);
+  stroke-width: 2.5;
+}
+
+/* A small offset highlight dot on each ring — reads as a metal spiral
+   catching light, instead of a flat uniform grey loop. */
+.propCalendarRingShine {
+  fill: color-mix(in srgb, white 65%, transparent);
+}
+
+.propCalendarHead {
+  fill: var(--app-accent);
+}
+
+.propCalendarBody {
+  fill: var(--app-bg-card);
+  stroke: var(--app-border);
   stroke-width: 1.5;
-  opacity: 0.55;
 }
 
-.stethChestSheen {
-  fill: white;
-  opacity: 0.55;
+/* A small row of colored "weekday" dots printed between the header and the
+   date grid — real desk calendars carry a printed weekday band there; this
+   is the equivalent bit of designed detail, in the same accent family
+   already used by the hero's float cards, rather than being all-neutral. */
+.propCalendarWeekdayDot_a {
+  fill: var(--app-accent);
 }
 
-.heroVisualBadge {
+.propCalendarWeekdayDot_b {
+  fill: #4f8ff0;
+}
+
+.propCalendarWeekdayDot_c {
+  fill: #e0637d;
+}
+
+.propCalendarWeekdayDot_d {
+  fill: #c9972e;
+}
+
+.propCalendarWeekdayDot_e {
+  fill: color-mix(in srgb, var(--app-accent) 55%, #4fb0a8);
+}
+
+.propCalendarGridLine {
+  stroke: var(--app-border);
+  stroke-width: 1.5;
+}
+
+.propCalendarCellActive {
+  fill: var(--app-accent);
+}
+
+.propCalendarCheck {
+  fill: none;
+  stroke: var(--app-accent-text);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Potted plant prop, bottom-right — layered leaf paths (each its own
+   light-to-dark gradient, see the <linearGradient> defs at the JSX call
+   site) fanning out from a gradient-shaded pot with a rim highlight, in
+   place of the earlier flat single-tone version. */
+.propPlant {
+  position: absolute;
+  z-index: 1;
+  right: -1%;
+  bottom: 0;
+  width: clamp(70px, 18%, 104px);
+  height: auto;
+}
+
+.propPlantShadow {
+  fill: var(--app-shadow);
+  opacity: 0.35;
+}
+
+.propPlantPotRim {
+  fill: color-mix(in srgb, #d99a5b 70%, white);
+}
+
+.propPlantPotGroove {
+  fill: none;
+  stroke: color-mix(in srgb, black 18%, transparent);
+  stroke-width: 1;
+  stroke-linecap: round;
+}
+
+.plantStopDark {
+  stop-color: color-mix(in srgb, var(--app-accent) 88%, black);
+}
+
+.plantStopMid {
+  stop-color: var(--app-accent);
+}
+
+.plantStopLight {
+  stop-color: color-mix(in srgb, var(--app-accent) 65%, white);
+}
+
+/* Warm terracotta clay pot — instructed live alongside the calendar stand
+   to make the plant's own "stand" (its pot) more colorful than the
+   earlier flat neutral-grey version. */
+.plantPotStopLight {
+  stop-color: #e0a86b;
+}
+
+.plantPotStopDark {
+  stop-color: #a8622f;
+}
+
+/* The centerpiece — a static mockup of the app's own booking flow inside a
+   phone frame. Went through two earlier passes: a multi-axis
+   perspective()+rotateY+rotateX+rotate() combo that made the screen content
+   look tilted independently of the frame, then a flat 2D rotate() "lean"
+   that read as tilted rather than turned. Instructed live to go back to an
+   actual 3D turn (rotateY only, no extra rotateX/rotate axes stacked on
+   top) rather than a flat lean — one clean rotation on this single rigid
+   box, so frame and screen content turn together with nothing to visually
+   disagree about. */
+.phoneMock {
   position: absolute;
   z-index: 2;
+  left: 50%;
+  top: 53%;
+  transform: translate(-50%, -50%) perspective(1000px) rotateY(-20deg);
+  width: clamp(150px, 34%, 188px);
+  aspect-ratio: 9 / 18.5;
+  box-sizing: border-box;
+  padding: 11px 8px;
+  border-radius: clamp(20px, 6vw, 28px);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--app-text-title) 94%, transparent), color-mix(in srgb, var(--app-text-title) 76%, transparent));
+  box-shadow:
+    18px 26px 20px -14px color-mix(in srgb, var(--app-shadow) 80%, transparent),
+    0 34px 56px color-mix(in srgb, var(--app-shadow) 55%, transparent),
+    inset 1px 1px 0 color-mix(in srgb, white 14%, transparent);
+}
+
+/* A thin brighter strip along the frame's left edge — reads as the device
+   catching ambient light on its near (upper, toward the viewer) side once
+   it's tilted, reinforcing the lean instead of looking flat. */
+.phoneMock::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: 4%;
+  bottom: 4%;
+  left: 2px;
+  width: 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, white 22%, transparent);
+  pointer-events: none;
+}
+
+.phoneNotch {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 32%;
+  height: 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, black 35%, var(--app-text-title));
+}
+
+.phoneScreen {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 16px 8px 10px;
+  border-radius: clamp(14px, 4vw, 20px);
+  background: var(--app-bg-card);
+  overflow: hidden;
+}
+
+.phoneScreenHeader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.phoneScreenIcon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 3.25rem;
-  height: 3.25rem;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  background: var(--app-bg-card);
-  border: 1px solid var(--app-border);
+  background: color-mix(in srgb, var(--app-accent) 18%, transparent);
   color: var(--app-accent);
-  box-shadow: 0 10px 24px var(--app-shadow);
-  /* A slow, individually-offset float — enough to read as "alive" without
-     asking for attention the way the field/particle experiments earlier did. */
-  animation: hero-badge-float 4.5s ease-in-out infinite;
 }
 
-.heroVisualBadge_fill {
-  background: var(--app-accent);
+.phoneScreenHeader span:last-child {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--app-text-title);
+}
+
+.phoneSlotList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.phoneSlot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--app-bg-page);
+  border: 1px solid var(--app-border);
+  font-size: 8.5px;
+  font-weight: 600;
+  color: var(--app-text-subtitle);
+}
+
+.phoneSlotSelected {
+  background: color-mix(in srgb, var(--app-accent) 16%, var(--app-bg-page));
   border-color: var(--app-accent);
+  color: var(--app-text-title);
+}
+
+.phoneSlotSelected svg {
+  color: var(--app-accent);
+  flex-shrink: 0;
+}
+
+.phoneConfirmBtn {
+  margin-top: auto;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: center;
+  padding: 8px 0;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 78%, black));
   color: var(--app-accent-text);
+  font-size: 9px;
+  font-weight: 700;
 }
 
-.heroVisualBadge_care {
-  top: -2%;
-  right: 8%;
+/* Floating feature cards — icon + title + short description, restated from
+   the app's real capabilities (booking, live slot updates, patient
+   ratings) rather than the earlier icon-only badges. --card-tint drives
+   both the icon color and its chip background, one value per card. */
+.floatCard {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  width: clamp(148px, 44%, 190px);
+  box-sizing: border-box;
+  padding: 0.7rem 0.8rem;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--app-bg-card) 94%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--app-border);
+  box-shadow: 0 16px 32px var(--app-shadow);
+  animation: hero-float-card 5s ease-in-out infinite;
 }
 
-.heroVisualBadge_schedule {
-  top: 20%;
-  left: -4%;
-  animation-delay: 0.5s;
+.floatCardIcon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--card-tint, var(--app-accent)) 18%, transparent);
+  color: var(--card-tint, var(--app-accent));
 }
 
-.heroVisualBadge_patients {
-  top: 54%;
+.floatCardText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.floatCardTitle {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--app-text-title);
+}
+
+.floatCardDesc {
+  margin-top: 2px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--app-text-subtitle);
+}
+
+.floatCard_booking {
+  --card-tint: var(--app-accent);
+  top: 3%;
   left: -8%;
-  animation-delay: 1s;
 }
 
-.heroVisualBadge_trust {
-  bottom: 4%;
-  left: 14%;
-  animation-delay: 1.5s;
+.floatCard_live {
+  --card-tint: #4f8ff0;
+  top: 38%;
+  left: -12%;
+  animation-delay: 0.6s;
 }
 
-@keyframes hero-badge-float {
+.floatCard_trust {
+  --card-tint: #e0637d;
+  top: 3%;
+  right: -6%;
+  animation-delay: 1.2s;
+}
+
+@keyframes hero-float-card {
   0%, 100% {
     transform: translateY(0);
   }
@@ -424,8 +823,19 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .heroVisualBadge {
+  .floatCard {
     animation: none;
+  }
+}
+
+@media (max-width: 1080px) {
+  .floatCard_live {
+    left: -6%;
+  }
+
+  .floatCard_booking,
+  .floatCard_trust {
+    width: clamp(140px, 40%, 168px);
   }
 }
 
@@ -443,111 +853,19 @@
     justify-content: center;
   }
 
-  /* Reported live: badges drifted away from the circle and clipped off the
-     card's edge once .heroTop collapsed to one column. Cause: badge
-     position percentages (top/left/right on .heroVisualBadge_*) are relative
-     to .heroVisual's own box — at the two-column desktop width that box is
-     ~400px, close to the circle's own size, so a percentage like "left: -4%"
-     reads as a small, sensible offset from the circle's edge. Once
-     .heroVisual becomes a full-width single-column row (previously 700px+),
-     the same percentage computes against that much wider box and pushes the
-     badges far past the now-much-narrower centered circle. Capping the
-     width back down to the circle's own desktop column size keeps the
-     percentages meaning the same thing regardless of layout mode. */
-  .heroVisual {
-    max-width: 400px;
-    margin: 0 auto;
-    min-height: 260px;
-  }
-}
-
-@media (max-width: 480px) {
-  .heroVisualDots {
-    display: none;
-  }
-}
-
-/* Instructed live: hide the visual entirely below this width — the
-   stethoscope illustration + its floating badges take up real vertical
-   space (300px+) that's worth handing back to the actual pitch/CTA once the
-   screen is this narrow, rather than shrinking it further. Placed after the
-   base .heroVisual rule (and the other .heroVisual media blocks above) so
-   this display: none reliably wins the cascade — an identical rule placed
-   earlier in the file was silently overridden by the base rule's own
-   `display: flex`, since equal-specificity rules resolve by source order,
-   not by which one is wrapped in a media query. */
-@media (max-width: 420px) {
+  /* Instructed live: hide the visual entirely at this width and below —
+     previously only hidden under 421px, but the photo + floating badges
+     still took up real vertical space worth handing back to the actual
+     pitch/CTA once .heroTop has already collapsed to a single column here.
+     Placed in the same block as .heroTop's own collapse (rather than a
+     separate, narrower breakpoint) since both changes should land together
+     — no reason to keep the visual around through an in-between range where
+     the layout is already single-column. This also makes the older
+     badge-repositioning/dot-hiding rules that used to live at this and
+     narrower breakpoints unreachable, so they've been removed rather than
+     left as dead code. */
   .heroVisual {
     display: none;
-  }
-}
-
-/* The "more filled" info row — see HERO_HIGHLIGHTS in Landing.jsx for why
-   these four specific facts. A full-width strip below the two-column top
-   section, divided by thin vertical rules (not the earlier centered 2x2
-   grid) so it reads as a considered footer stat-bar the way the reference
-   layout's own bottom strip does.
-
-   A 4-column grid with equal-width tracks (minmax(0, 1fr)), not flex-wrap —
-   reported live: flex-wrap's break point depends on however each label
-   happens to measure at a given width, and produced a ragged 3-then-1 wrap
-   well before the explicit breakpoint below kicked in. Equal grid tracks
-   instead force every item the same width and let its own text wrap inside
-   that cell if it must, so there's no in-between state where the row can
-   break unevenly. */
-.heroHighlights {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0;
-  margin: clamp(1.75rem, 4vw, 2.5rem) 0 0;
-  padding: 1.4rem 0 0;
-  border-top: 1px solid var(--app-border);
-  list-style: none;
-}
-
-.heroHighlight {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-  gap: 0.5rem;
-  padding: 0.4rem 1rem;
-  border-left: 1px solid var(--app-border);
-  font-size: var(--font-size-label);
-  font-weight: 600;
-  color: var(--app-text-subtitle);
-}
-
-.heroHighlight:first-child {
-  border-left: none;
-}
-
-.heroHighlight svg {
-  flex-shrink: 0;
-  color: var(--app-accent);
-}
-
-/* Matches .heroTop's own single-column collapse — both changes land
-   together instead of the highlights row switching at a different width
-   than the two-column content above it. */
-@media (max-width: 900px) {
-  .heroHighlights {
-    grid-template-columns: repeat(2, auto);
-    justify-content: center;
-    gap: 0.75rem 2rem;
-  }
-
-  .heroHighlight {
-    padding: 0;
-    border-left: none;
-    white-space: nowrap;
-  }
-}
-
-@media (max-width: 420px) {
-  .heroHighlights {
-    grid-template-columns: auto;
-    justify-items: center;
   }
 }
 
@@ -728,34 +1046,101 @@
   }
 }
 
-/* Departments grid */
+/* Departments grid — instructed live: fixed 6-up (two even rows of 6 for
+   the current 12 departments) on desktop instead of auto-fit's own count,
+   which depended on however many 150px tracks happened to fit the
+   container and produced an uneven 5/5/2 split. Explicit column counts per
+   breakpoint below (rather than auto-fit) so the row count is deliberate at
+   every width, stepping down as there's less room per card: 6 → 4 → 3 → 2 → 1. */
 .deptGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 0.85rem;
-  text-align: center;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1rem;
+  text-align: left;
 }
 
+@media (max-width: 900px) {
+  .deptGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .deptGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .deptGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 360px) {
+  .deptGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Each tile is a small elevated card rather than a flat bordered box —
+   deliberate depth (shadow + slightly lifted background) so a 12-item grid
+   still reads as a set of considered cards, not a plain list of icon+label
+   pairs. A quiet top-edge accent bar (see ::before) and a corner-peeking
+   arrow (see .deptArrow) that only appears on interaction are the two
+   details that carry the "designed" feel, kept subtle so the grid as a
+   whole stays calm at 12-up. */
 .deptCard {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 1rem 0.75rem;
-  background: var(--app-bg-page);
+  align-items: flex-start;
+  gap: 0.9rem;
+  /* Slightly tighter side padding than the card's top/bottom (was 1.25rem
+     all round) — reported live: at the fixed 6-up desktop grid, longer
+     single-word department names ("Ophthalmology", "Dermatology") were only
+     a few px too wide for one line, so overflow-wrap: anywhere (see
+     .deptName) broke them at an arbitrary character, leaving an orphaned
+     2-3 letter fragment ("gy") on its own second line that read as cut off.
+     The extra width here is enough for every current department name to sit
+     on one line at the 6-up breakpoint. */
+  padding: 1.35rem 1rem 1.25rem;
+  background: var(--app-bg-card);
   border: 1px solid var(--app-border);
-  border-radius: 20px;
+  border-radius: 18px;
+  box-shadow: 0 3px 14px var(--app-shadow);
   text-decoration: none;
   cursor: pointer;
   min-width: 0;
-  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease, border-color 220ms ease;
+}
+
+/* A thin accent bar across the top edge, hidden by translating it fully out
+   of view — slides into place on hover instead of a full border-color swap,
+   a quieter version of the same "this card is now active" signal. */
+.deptCard::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 40%, transparent));
+  transform: translateY(-3px);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .deptCard:hover,
 .deptCard:focus-visible {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px var(--app-shadow);
-  border-color: var(--app-accent);
+  transform: translateY(-4px);
+  box-shadow: 0 14px 32px var(--app-shadow);
+  border-color: color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
+}
+
+.deptCard:hover::before,
+.deptCard:focus-visible::before {
+  transform: translateY(0);
 }
 
 .deptCard:focus-visible {
@@ -767,21 +1152,76 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 999px;
-  background: linear-gradient(145deg, var(--app-info-bg), var(--app-bg-card));
-  border: 1px solid var(--app-info-border);
+  width: 2.85rem;
+  height: 2.85rem;
+  border-radius: 13px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--app-accent) 16%, var(--app-bg-card)), color-mix(in srgb, var(--app-accent) 4%, var(--app-bg-card)));
+  border: 1px solid color-mix(in srgb, var(--app-accent) 20%, var(--app-border));
   color: var(--app-accent);
   flex: none;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.deptCard:hover .deptIcon,
+.deptCard:focus-visible .deptIcon {
+  transform: scale(1.08) rotate(-4deg);
 }
 
 .deptName {
-  font-size: var(--font-size-label);
-  font-weight: 600;
+  margin-top: -0.2rem;
+  font-size: 0.83rem;
+  font-weight: 700;
   letter-spacing: 0.01em;
-  color: var(--app-text-body);
-  overflow-wrap: anywhere;
+  line-height: 1.35;
+  color: var(--app-text-title);
+  /* break-word (only breaks when a word truly can't fit) plus hyphens
+     instead of the site-wide safety-net "anywhere" (see other .*Name/.card
+     rules) — anywhere was breaking long single-word department names at an
+     arbitrary character with no hyphen, e.g. "Ophthalmolo" / "gy", which
+     read as the text being cut off. If a name still can't fit on the
+     narrowest supported card width, this now breaks at a hyphenated
+     syllable instead of a random character. */
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: auto;
+}
+
+.deptArrow {
+  position: absolute;
+  right: 1.1rem;
+  bottom: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--app-accent);
+  opacity: 0;
+  transform: translate(-6px, 6px);
+  transition: opacity 200ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.deptCard:hover .deptArrow,
+.deptCard:focus-visible .deptArrow {
+  opacity: 1;
+  transform: translate(0, 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deptCard,
+  .deptCard::before,
+  .deptIcon,
+  .deptArrow {
+    transition: none;
+  }
+
+  .deptCard:hover,
+  .deptCard:focus-visible {
+    transform: none;
+  }
+
+  .deptCard:hover .deptIcon,
+  .deptCard:focus-visible .deptIcon {
+    transform: none;
+  }
 }
 
 /* How-it-works flow */
@@ -800,11 +1240,38 @@
   max-width: 260px;
 }
 
+/* Given the same elevated-card treatment as every other card on this page
+   (see .deptCard/.featureCard/.doctorCard) so the "how it works" steps read
+   as part of the same design language instead of plain centered text. */
 .flowStepInner {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 1.5rem 1.1rem 1.25rem;
+  background: var(--app-bg-card);
+  border: 1px solid var(--app-border);
+  border-radius: 18px;
+  box-shadow: 0 3px 14px var(--app-shadow);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease, border-color 220ms ease;
+}
+
+.flowStepInner:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 14px 30px var(--app-shadow);
+  border-color: color-mix(in srgb, var(--app-accent) 30%, var(--app-border));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flowStepInner {
+    transition: none;
+  }
+
+  .flowStepInner:hover {
+    transform: none;
+  }
 }
 
 .flowNumber {
@@ -813,12 +1280,14 @@
   justify-content: center;
   width: 2.25rem;
   height: 2.25rem;
+  flex: none;
   border-radius: 999px;
-  background: var(--app-accent);
+  background: linear-gradient(135deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 78%, black));
   color: var(--app-accent-text);
   font-family: Georgia, 'Times New Roman', serif;
   font-weight: 700;
   font-size: var(--font-size-body);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--app-accent) 35%, transparent);
 }
 
 .flowTitle {
@@ -843,7 +1312,10 @@
   flex: 1 1 auto;
   min-width: 1.5rem;
   align-self: flex-start;
-  margin-top: 0.65rem;
+  /* Vertically centers on .flowNumber's own circle: the card's top padding
+     (1.5rem) plus half the circle's height (1.125rem), now that the number
+     sits inside a padded card instead of flush at the top. */
+  margin-top: 2.6rem;
   color: var(--app-accent);
 }
 
@@ -897,13 +1369,69 @@
   border: 1px solid var(--app-border);
   border-top: 3px solid var(--rank-color);
   border-radius: 20px;
+  box-shadow: 0 3px 14px var(--app-shadow);
   transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease, border-color 220ms ease;
 }
 
+/* Clips the corner glow (::after below) to the card's own rounded corners —
+   a separate layer with its own overflow: hidden rather than that living on
+   .doctorCard itself, which would also clip .rankBadge (it deliberately
+   sits half outside the card's top edge). Sits behind everything else
+   (z-index: 0, painted first) and ignores pointer events. */
+.doctorCardGlow {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.doctorCardGlow::after {
+  content: "";
+  position: absolute;
+  top: -35%;
+  right: -25%;
+  width: 55%;
+  height: 55%;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--rank-color) 22%, transparent), transparent 70%);
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+
 .doctorCard:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 10px 24px var(--app-shadow);
+  transform: translateY(-4px);
+  box-shadow: 0 16px 34px var(--app-shadow);
   border-color: var(--rank-color);
+}
+
+.doctorCard:hover .doctorCardGlow::after {
+  opacity: 1;
+}
+
+.doctorAvatar {
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.doctorCard:hover .doctorAvatar {
+  transform: scale(1.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doctorCard,
+  .doctorCardGlow::after,
+  .doctorAvatar {
+    transition: none;
+  }
+
+  .doctorCard:hover {
+    transform: none;
+  }
+
+  .doctorCard:hover .doctorAvatar {
+    transform: none;
+  }
 }
 
 .doctorCard_gold {
@@ -1083,30 +1611,77 @@
 }
 
 .featureCard {
-  padding: 1.5rem;
+  position: relative;
+  overflow: hidden;
+  padding: 1.75rem 1.5rem;
   background: var(--app-bg-page);
   border: 1px solid var(--app-border);
   border-radius: 20px;
-  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+  box-shadow: 0 3px 14px var(--app-shadow);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease, border-color 220ms ease;
+}
+
+/* A large, softly blurred corner glow that only becomes visible on hover —
+   same restrained "quiet depth" language as the hero's own glow blobs
+   (see .heroGlow1/.heroGlow2), scaled down to a per-card detail here. */
+.featureCard::after {
+  content: "";
+  position: absolute;
+  top: -40%;
+  right: -30%;
+  width: 60%;
+  height: 60%;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 16%, transparent), transparent 70%);
+  opacity: 0;
+  transition: opacity 260ms ease;
+  pointer-events: none;
 }
 
 .featureCard:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px var(--app-shadow);
-  border-color: var(--app-accent);
+  transform: translateY(-4px);
+  box-shadow: 0 16px 34px var(--app-shadow);
+  border-color: color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
+}
+
+.featureCard:hover::after {
+  opacity: 1;
 }
 
 .featureIcon {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.75rem;
-  height: 2.75rem;
-  margin-bottom: 1rem;
-  border-radius: 10px;
-  background: linear-gradient(145deg, var(--app-info-bg), var(--app-bg-card));
-  border: 1px solid var(--app-info-border);
+  width: 2.9rem;
+  height: 2.9rem;
+  margin-bottom: 1.1rem;
+  border-radius: 13px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--app-accent) 16%, var(--app-bg-card)), color-mix(in srgb, var(--app-accent) 4%, var(--app-bg-card)));
+  border: 1px solid color-mix(in srgb, var(--app-accent) 20%, var(--app-border));
   color: var(--app-accent);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.featureCard:hover .featureIcon {
+  transform: scale(1.08) rotate(-4deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .featureCard,
+  .featureCard::after,
+  .featureIcon {
+    transition: none;
+  }
+
+  .featureCard:hover {
+    transform: none;
+  }
+
+  .featureCard:hover .featureIcon {
+    transform: none;
+  }
 }
 
 .featureTitle {

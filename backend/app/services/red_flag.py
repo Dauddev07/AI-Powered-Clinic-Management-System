@@ -54,7 +54,15 @@ _RED_FLAG_PATTERNS = [
     # breathing. Same technique as the bleeding-severity patterns below.
     r"(?<!not )(?<!n't )(?<!no )\bshortness of breath\b",
     r"(?<!not )(?<!n't )(?<!no )\bshort of breath\b",
-    r"(?<!not )(?<!n't )(?<!no )\b(can'?t|cannot|can not|difficulty|struggling to|trouble)\s*breath",
+    # Reported live: "i am having difficulty to breath now" (a foreign object lodged
+    # in the nose, patient actively struggling to breathe) fell through entirely —
+    # \s*breath required the trigger word to sit directly against "breath" with only
+    # whitespace between them, so the extra "to" in this very common non-native-English
+    # phrasing ("difficulty to breathe", also "trouble to breathe") broke the match.
+    # The optional (?:\s+to)? closes exactly that gap without loosening the pattern
+    # into a generic character-gap that would risk matching unrelated "difficulty ...
+    # breathing" mentions many words apart.
+    r"(?<!not )(?<!n't )(?<!no )\b(can'?t|cannot|can not|difficulty|struggling to|trouble)(?:\s+to)?\s*breath",
     r"\bnot breathing\b",
     r"\bgasping\b",
     r"\bsuffocat",
@@ -96,17 +104,33 @@ _RED_FLAG_PATTERNS = [
     # knife, screw, splinter, or similar object stuck/lodged/embedded/piercing the
     # head, skull, neck, chest, abdomen, back, or any other body part is exactly as
     # much an emergency as one in the eye (arguably more so for the head/chest/
-    # abdomen), so this is not eye-specific.
+    # abdomen), so this is not eye-specific. Includes the nose/nostril(s) — previously
+    # missing from this list entirely (see the standalone nose patterns below for why
+    # that specific gap mattered).
     r"\b(nail|glass|metal|splinter|screw|knife|shard|needle|object|something (?:sharp|pointy))\b"
     r".{0,20}\b(stuck|lodged|embedded|piercing|penetrat\w*|went (?:in|into)|sticking (?:in|into|out))\b"
-    r".{0,20}\b(head|skull|brain|neck|throat|chest|abdomen|stomach|back|face|eyes?|ears?|body)\b",
-    r"\b(head|skull|brain|neck|throat|chest|abdomen|stomach|back|face|eyes?|ears?)\b.{0,20}"
+    r".{0,20}\b(head|skull|brain|neck|throat|chest|abdomen|stomach|back|face|eyes?|ears?|nose|nostrils?|body)\b",
+    r"\b(head|skull|brain|neck|throat|chest|abdomen|stomach|back|face|eyes?|ears?|nose|nostrils?)\b.{0,20}"
     r"\b(stuck|lodged|embedded|piercing|penetrat\w*)\b",
     r"\b(stuck|lodged|embedded|piercing|penetrat\w*)\b.{0,20}\b(in|into)\b.{0,10}"
-    r"\b(head|skull|brain|neck|throat|chest|abdomen|stomach|back|face|eyes?|ears?)\b",
-    r"\bforeign (object|body)\b.{0,15}\b(eyes?|head|skull|neck|chest|abdomen|body)\b",
+    r"\b(head|skull|brain|neck|throat|chest|abdomen|stomach|back|face|eyes?|ears?|nose|nostrils?)\b",
+    r"\bforeign (object|body)\b.{0,15}\b(eyes?|head|skull|neck|chest|abdomen|nose|nostrils?|body)\b",
     r"\b(something|object|nail|knife|glass|metal)\b.{0,10}\bin (my|his|her|the) "
-    r"(eyes?|head|skull|neck|chest|abdomen|stomach|back|throat)\b",
+    r"(eyes?|head|skull|neck|chest|abdomen|stomach|back|throat|nose|nostrils?)\b",
+    # Object inserted/stuck/lodged in the nose specifically — deliberately NOT scoped
+    # to a fixed list of object nouns like the patterns above (a seed, bead, bean,
+    # button, toy, or coin lodged in the nose is a common real scenario, especially in
+    # children, and the specific object isn't enumerable) so this fires on "stuck in
+    # my nose"/"lodged in my nose" regardless of what word immediately precedes it.
+    # Reported live: "seed of date got stuck in my nose and i am having difficulty to
+    # breath now" matched none of the patterns above (the object word "seed" wasn't in
+    # any enumerated list, and "nose" wasn't in the body-part list at all).
+    # Deliberately no "nose is blocked" pattern here — a blocked/stuffy nose from an
+    # ordinary cold is one of the most common ENT complaints there is, not remotely an
+    # emergency, so this stays scoped to explicit foreign-object-insertion verbs only.
+    r"\b(stuck|lodged|stuffed|pushed|inserted)\b.{0,20}\b(in|into)\b.{0,10}\b(my|his|her|the)\b.{0,5}"
+    r"\b(nose|nostrils?)\b",
+    r"\b(nose|nostrils?)\b.{0,20}\b(stuck|lodged)\b",
     # Chemical exposure to the eyes or skin (splashed/sprayed/got in) — distinct from
     # the ingestion/poisoning patterns above, since exposure rather than swallowing is
     # its own recognized emergency (chemical burns, blindness risk).

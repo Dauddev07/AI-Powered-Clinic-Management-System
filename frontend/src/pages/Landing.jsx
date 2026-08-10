@@ -40,6 +40,12 @@ function TopRatedDoctorCard({ doctor, rank }) {
   const tone = RANK_TONES[rank] || "bronze";
   return (
     <div className={`${styles.doctorCard} ${styles[`doctorCard_${tone}`]}`}>
+      {/* Clips only the corner glow (see .doctorCardGlow) to the card's own
+          rounded corners — kept as a separate layer rather than overflow:
+          hidden on .doctorCard itself, which used to clip the top of
+          .rankBadge below (it deliberately sits half outside the card's top
+          edge, see .rankBadge's own top: -13px). */}
+      <span className={styles.doctorCardGlow} aria-hidden="true" />
       <span className={`${styles.rankBadge} ${styles[`rankBadge_${tone}`]}`}>#{rank + 1}</span>
       <div className={styles.doctorCardHeader}>
         <span className={styles.doctorAvatar} aria-hidden="true">
@@ -88,62 +94,6 @@ const WHY_CARDS = [
     description:
       "From choosing a department to confirming your appointment, the whole flow takes minutes — no hold music, no calling around, no guessing.",
     icon: "M13 2 4 14h6l-1 8 9-12h-6l1-8Z",
-  },
-];
-
-// The four floating badges around the hero visual — real account/booking
-// capabilities (mirrors HERO_HIGHLIGHTS' own claims below), not decoration
-// picked for shape alone. One filled (the brand's own heart-pulse mark, same
-// motif as Logo.jsx) and three outline, echoing the reference layout without
-// copying its exact icon set. Each path is deliberately drawn small/simple
-// (not borrowed from HERO_HIGHLIGHTS) since these render 3-4x larger.
-const HERO_VISUAL_BADGES = [
-  {
-    key: "care",
-    fill: true,
-    icon: "M12 20.5s-7.2-4.4-9.6-8.6C.8 8.4 3 5 6.4 5c2 0 3.6 1.4 4.1 2.4.5-1 2.1-2.4 4.1-2.4 3.4 0 5.6 3.4 4 6.9C19.2 16.1 12 20.5 12 20.5Z M5.3 12h3l1.6-3.2 2 6 1.6-3.8H18.7",
-  },
-  {
-    key: "schedule",
-    fill: false,
-    icon: "M8 3v3M16 3v3M4 9h16M5 6h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z",
-  },
-  {
-    key: "patients",
-    fill: false,
-    icon: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4.5 20c0-3.6 3.4-6 7.5-6s7.5 2.4 7.5 6",
-  },
-  {
-    key: "trust",
-    fill: false,
-    icon: "M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3Z M9 12l2 2 4-4",
-  },
-];
-
-// A short row of real, site-specific facts (not filler) directly under the
-// hero description — instructed live: the hero read as too empty once it
-// went back to plain text with no card/imagery. DEPARTMENTS.length is the
-// actual live count from landingDepartments.js (reported live: was labeled
-// "12+" when it's an exact, known count — corrected to state it plainly);
-// the rest mirror WHY_CARDS' own claims below plus the app's real account
-// features, so nothing here is a new promise the rest of the page doesn't
-// already back up.
-const HERO_HIGHLIGHTS = [
-  {
-    icon: "M8 3v3M16 3v3M4 9h16M5 6h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z",
-    label: `${DEPARTMENTS.length} departments`,
-  },
-  {
-    icon: "M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
-    label: "Live slot availability",
-  },
-  {
-    icon: "M13 2 4 14h6l-1 8 9-12h-6l1-8Z",
-    label: "Book in minutes",
-  },
-  {
-    icon: "M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11",
-    label: "Manage visits anytime",
   },
 ];
 
@@ -222,27 +172,59 @@ export default function Landing() {
       </p>
 
       <section className={styles.hero}>
-        {/* Instructed live to match a specific reference layout: a
-            two-column card (text left, a graphic "visual" right) instead of
-            the full-bleed atmospheric background this section went through
-            many rounds of (gradient wash, particle field, traveling pulse
-            line) — all of that is gone in favor of a clean elevated card,
-            closer to a product landing page than an ambient scene. No real
-            photography is used (nothing to license/fabricate) — the visual
-            is a line-art panel in the app's own brand language instead: a
-            large stethoscope glyph inside a soft accent-tinted circle, with
-            four small floating badges (see HERO_VISUAL_BADGES) that mirror
-            the app's real capabilities rather than being decoration for its
-            own sake. */}
+        {/* Ambient depth layer — two softly blurred accent-tinted blobs plus a
+            faint dot-grid wash across the whole hero, purely decorative
+            (aria-hidden) and fixed/static (no motion, no cursor-follow) —
+            deliberately restrained after the earlier particle-field/energy
+            experiments were rejected as too busy. This is just quiet visual
+            depth behind the same content layout, not a new interactive
+            concept. */}
+        <div className={styles.heroBgPattern} aria-hidden="true" />
+        <div className={styles.heroGlow1} aria-hidden="true" />
+        <div className={styles.heroGlow2} aria-hidden="true" />
+
+        {/* Instructed live to add a genuine background "3D" treatment
+            (a first pass using small floating gradient spheres was
+            rejected as "3D shapes", not a 3D backdrop) — a perspective
+            grid plane pinned to the hero's floor, tilted back via
+            rotateX so it reads as a surface receding into depth, masked
+            so it fades to nothing before it reaches the content. Built
+            from the app's own border/accent tokens so it holds up in
+            both themes with no separate light/dark styling needed. */}
+        <div className={styles.heroGridFloor} aria-hidden="true" />
+        {/* Two-column layout: text left, a graphic "visual" right. No real
+            photography is used (nothing to license/fabricate) — see the
+            heroVisual block below for the booking-app mockup that replaced
+            it, instructed live from a supplied reference. */}
         <div className={styles.heroCard}>
           <div className={styles.heroTop}>
             <div className={styles.heroContent}>
+              <span className={styles.heroEyebrow}>
+                <span className={styles.heroEyebrowDot} aria-hidden="true" />
+                Online booking, made for patients
+              </span>
               <h1 className={styles.headline}>
                 Quality care, made simple to <span className={styles.accentWord}>book</span>.
               </h1>
               <p className={styles.description}>
                 Quick Check Clinic lets you find a doctor, book an appointment, and
                 manage your visits — all in one calm, simple place.
+              </p>
+              {/* Extra persuasive copy, instructed live to be prose (full
+                  sentences), not another bullet/points list — the highlights
+                  row below already covers the quick facts, this is the case
+                  for booking now rather than waiting. Grounded in real
+                  mechanics of the booking system (slots are a finite,
+                  first-come resource; doctors carry real patient ratings —
+                  see the "Our top rated doctors" section) rather than an
+                  invented urgency device like a countdown or a fake
+                  "X people viewing this" claim. */}
+              <p className={styles.urgency}>
+                Every slot shown here is real, and <strong>once it's taken it's gone</strong> —
+                the doctor and time you want today may not be open tomorrow. Every
+                doctor on Quick Check Clinic is <strong>rated by patients who've
+                already been seen</strong>, so you can book with confidence instead of
+                guessing who to trust.
               </p>
               {/* The hero's whole job is to turn a first-time visitor into a
                   booked appointment — instructed live: this is the page's first
@@ -256,9 +238,18 @@ export default function Landing() {
               {!isAuthenticated && (
                 <div className={styles.heroCtaRow}>
                   <Link to="/register" className={styles.heroCtaPrimary}>
+                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M9 20a4 4 0 0 1 8 0" />
+                      <circle cx="13" cy="8" r="3.2" />
+                      <path d="M4 9h4M6 7v4" />
+                    </svg>
                     Register
                   </Link>
                   <Link to="/login" className={styles.heroCtaSecondary}>
+                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" />
+                      <path d="M11 8l4 4-4 4M15 12H3" />
+                    </svg>
                     Log in
                   </Link>
                 </div>
@@ -271,102 +262,183 @@ export default function Landing() {
                   pointless. */}
               {isAuthenticated && (
                 <Link to={user?.role === "admin" ? "/admin" : "/patient"} className={styles.backToDashboardBtn}>
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={styles.backToDashboardArrow}>
+                    <path d="M19 12H5M11 6l-6 6 6 6" />
+                  </svg>
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" />
+                    <rect x="13.5" y="3.5" width="7" height="7" rx="1.5" />
+                    <rect x="3.5" y="13.5" width="7" height="7" rx="1.5" />
+                    <rect x="13.5" y="13.5" width="7" height="7" rx="1.5" />
+                  </svg>
                   Back to Dashboard
                 </Link>
               )}
             </div>
 
+            {/* Instructed live to match a supplied reference: a booking-app
+                phone mockup with a soft circular backdrop, two small desk
+                props (a calendar, a plant), and floating feature cards —
+                replaces the earlier photo-in-a-circle treatment. Nothing
+                here is real photography; the "screen" content is a static
+                mockup of the app's own booking flow (slot list + confirm),
+                not a live component, and the floating cards restate real
+                capabilities (booking, live slots, patient ratings) rather
+                than being decoration for its own sake. */}
             <div className={styles.heroVisual} aria-hidden="true">
+              <span className={styles.heroVisualBackdrop} />
+              {/* Instructed live to drop the dashed ring + connecting-dot
+                  "thread" lines that used to surround the phone in favor of
+                  one clean complete circle — and then, after trying an
+                  animated light traveling around it, instructed live again
+                  to remove that motion too and leave the ring static. */}
+              <span className={styles.heroVisualRingFull} />
               <span className={styles.heroVisualDots} />
-              <div className={styles.heroVisualCircle}>
-                {/* Instructed live: no real photograph is available in the
-                    project (checked src/assets and public — nothing usable),
-                    and fetching/fabricating an external stock-photo URL isn't
-                    something to guess at. Rebuilt as a proper shaded/
-                    gradient illustration instead of the earlier thin
-                    single-stroke icon. Reported live (2nd report): the first
-                    version — a large chest piece centered directly under a
-                    symmetric V of tubing — read as a medallion on a ribbon,
-                    not a stethoscope. Redrawn asymmetrically: the chest
-                    piece is smaller and sits off to one side, connected by
-                    an explicit rigid stem (not just the flexible tube
-                    fading straight into it), the way a real stethoscope
-                    actually hangs rather than dangling dead-center. */}
-                <svg viewBox="0 0 160 200" width="152" height="190" className={styles.stethoscopeSvg}>
-                  <defs>
-                    <linearGradient id="stethTubeGrad" x1="0" y1="0" x2="1" y2="1">
-                      <stop offset="0%" className={styles.stethTubeStart} />
-                      <stop offset="100%" className={styles.stethTubeEnd} />
-                    </linearGradient>
-                    <radialGradient id="stethChestGrad" cx="34%" cy="30%" r="75%">
-                      <stop offset="0%" className={styles.stethChestStart} />
-                      <stop offset="55%" className={styles.stethChestMid} />
-                      <stop offset="100%" className={styles.stethChestEnd} />
-                    </radialGradient>
-                  </defs>
-                  {/* Soft contact shadow beneath the chest piece — grounds it
-                      instead of looking pasted flat onto the circle. */}
-                  <ellipse cx="112" cy="176" rx="24" ry="7" className={styles.stethShadow} />
-                  {/* Tube — two branches from the ear tips merging into a
-                      single stem, then curving down and to the right toward
-                      the chest piece (asymmetric, not a mirrored V) so the
-                      whole silhouette reads as something draped rather than
-                      a hung medal. */}
-                  <path
-                    d="M42 22 C 26 52 30 84 54 100 C 68 109 74 118 74 132 C 74 148 84 158 100 163"
-                    fill="none"
-                    className={styles.stethTube}
+
+              {/* Desk calendar prop, redrawn as one SVG object (spiral rings
+                  + a real grid, not flat colored tiles) — instructed live
+                  that the earlier DOM-grid version didn't read as an actual
+                  calendar. The easel stand it originally leaned on was
+                  instructed live to be removed outright (its terracotta
+                  color wasn't wanted), rather than re-colored again. */}
+              <svg className={styles.propCalendar} viewBox="0 0 120 106" fill="none">
+                {[14, 36, 58, 80, 102].map((cx) => (
+                  <g key={cx}>
+                    <line className={styles.propCalendarRingLink} x1={cx} y1="10" x2={cx} y2="20" />
+                    <circle className={styles.propCalendarRing} cx={cx} cy="9" r="4.5" />
+                    <circle className={styles.propCalendarRingShine} cx={cx - 1.3} cy="7.3" r="1.4" />
+                  </g>
+                ))}
+                <path className={styles.propCalendarHead} d="M16 14h88a6 6 0 0 1 6 6v10H10V20a6 6 0 0 1 6-6Z" />
+                <path className={styles.propCalendarBody} d="M10 24h100v70a6 6 0 0 1-6 6H16a6 6 0 0 1-6-6Z" />
+                {/* A row of small colored weekday dots — the "more designed"
+                    desk-calendar detail real ones have (a printed weekday
+                    band above the date grid), reusing the same accent
+                    family already used across the hero's float cards. */}
+                {[
+                  { x: 20, color: "a" }, { x: 38.5, color: "b" }, { x: 57, color: "c" },
+                  { x: 75.5, color: "d" }, { x: 94, color: "e" },
+                ].map((dot) => (
+                  <circle
+                    key={dot.x}
+                    className={`${styles.propCalendarWeekdayDot} ${styles[`propCalendarWeekdayDot_${dot.color}`]}`}
+                    cx={dot.x}
+                    cy="31"
+                    r="2.6"
                   />
-                  <path
-                    d="M112 20 C 130 46 126 76 100 94 C 84 105 76 116 76 130"
-                    fill="none"
-                    className={styles.stethTube}
-                  />
-                  {/* Glossy highlight riding one branch only — real tubing
-                      catches light on one side, not symmetrically. */}
-                  <path
-                    d="M46 28 C 32 54 35 80 54 95"
-                    fill="none"
-                    className={styles.stethTubeHighlight}
-                  />
-                  {/* Binaural spring + ear tips */}
-                  <rect x="34" y="12" width="7" height="15" rx="3.5" className={styles.stethMetal} transform="rotate(-16 37.5 19.5)" />
-                  <rect x="116" y="10" width="7" height="15" rx="3.5" className={styles.stethMetal} transform="rotate(16 119.5 17.5)" />
-                  {/* Rigid stem connecting the flexible tube to the chest
-                      piece — a straight thick segment, deliberately reading
-                      as stiffer than the curved tube above it. */}
-                  <path d="M100 163 L109 170" fill="none" className={styles.stethStem} />
-                  {/* Chest piece — smaller and off-center, not a centered
-                      medallion. */}
-                  <circle cx="115" cy="176" r="21" fill="url(#stethChestGrad)" className={styles.stethChestRing} />
-                  <circle cx="115" cy="176" r="12" fill="none" className={styles.stethChestInner} />
-                  <circle cx="108" cy="169" r="3.5" className={styles.stethChestSheen} />
-                </svg>
+                ))}
+                {[36.5, 59, 81.5].map((x) => (
+                  <line key={x} className={styles.propCalendarGridLine} x1={x} y1="38" x2={x} y2="94" />
+                ))}
+                {[52, 68, 84].map((y) => (
+                  <line key={y} className={styles.propCalendarGridLine} x1="14" y1={y} x2="106" y2={y} />
+                ))}
+                <rect className={styles.propCalendarCellActive} x="60" y="53" width="20.5" height="14" rx="3" />
+                <path className={styles.propCalendarCheck} d="M65.5 60.2l3.6 3.6 7-7.4" />
+              </svg>
+
+              {/* Potted plant prop — gradient-shaded leaves (per-leaf tone,
+                  darkest at the back) and a pot with a rim highlight, redrawn
+                  from the earlier flat-fill version for more depth. */}
+              <svg className={styles.propPlant} viewBox="0 0 84 112" fill="none">
+                <defs>
+                  <linearGradient id="heroPlantLeafGradA" x1="0" y1="0" x2="1" y2="1">
+                    <stop className={styles.plantStopDark} offset="0%" />
+                    <stop className={styles.plantStopMid} offset="100%" />
+                  </linearGradient>
+                  <linearGradient id="heroPlantLeafGradB" x1="1" y1="0" x2="0" y2="1">
+                    <stop className={styles.plantStopMid} offset="0%" />
+                    <stop className={styles.plantStopLight} offset="100%" />
+                  </linearGradient>
+                  <linearGradient id="heroPlantPotGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop className={styles.plantPotStopLight} offset="0%" />
+                    <stop className={styles.plantPotStopDark} offset="100%" />
+                  </linearGradient>
+                </defs>
+                <ellipse className={styles.propPlantShadow} cx="42" cy="108" rx="26" ry="4" />
+                {/* Five blades fanning from one base point, outer two painted
+                    first (read as furthest back), the tall center blade
+                    painted last (frontmost) — gives the cluster depth
+                    instead of the previous two-leaf silhouette. */}
+                <path fill="url(#heroPlantLeafGradA)" d="M42,84C32,72 14,66 6,42C24,46 36,60 40,80Z" />
+                <path fill="url(#heroPlantLeafGradA)" d="M42,84C52,72 70,66 78,42C60,46 48,60 44,80Z" />
+                <path fill="url(#heroPlantLeafGradB)" d="M42,84C36,62 24,42 18,16C34,24 40,50 40,80Z" />
+                <path fill="url(#heroPlantLeafGradB)" d="M42,84C48,62 60,42 66,16C50,24 44,50 44,80Z" />
+                <path fill="url(#heroPlantLeafGradB)" d="M42,84C42,58 40,30 42,6C46,30 46,58 42,84Z" />
+                <path className={styles.propPlantPotRim} d="M14 82h56l-3 8H17Z" />
+                <path fill="url(#heroPlantPotGrad)" d="M17 90h50l-6 30a6 6 0 0 1-6 5H29a6 6 0 0 1-6-5Z" />
+                {/* A subtle horizontal groove near the pot's rim — the kind
+                    of thrown-clay banding real terracotta pots have, a
+                    small extra bit of "designed" detail rather than a flat
+                    tapered block. */}
+                <path className={styles.propPlantPotGroove} d="M18.5 97.5h47" />
+              </svg>
+
+              <div className={styles.phoneMock}>
+                <span className={styles.phoneNotch} />
+                <div className={styles.phoneScreen}>
+                  <div className={styles.phoneScreenHeader}>
+                    <span className={styles.phoneScreenIcon}>
+                      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M8 3v3M16 3v3M4 9h16M5 6h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z M9 14l2 2 4-4" />
+                      </svg>
+                    </span>
+                    <span>Book Appointment</span>
+                  </div>
+                  <div className={styles.phoneSlotList}>
+                    <span className={styles.phoneSlot}>10:00 AM</span>
+                    <span className={`${styles.phoneSlot} ${styles.phoneSlotSelected}`}>
+                      11:30 AM
+                      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M5 13l4 4L19 7" />
+                      </svg>
+                    </span>
+                    <span className={styles.phoneSlot}>2:00 PM</span>
+                  </div>
+                  <span className={styles.phoneConfirmBtn}>Confirm Booking</span>
+                </div>
               </div>
-              {HERO_VISUAL_BADGES.map((badge) => (
-                <span
-                  key={badge.key}
-                  className={`${styles.heroVisualBadge} ${styles[`heroVisualBadge_${badge.key}`]} ${badge.fill ? styles.heroVisualBadge_fill : ""}`}
-                >
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d={badge.icon} />
+
+              <div className={`${styles.floatCard} ${styles.floatCard_booking}`}>
+                <span className={styles.floatCardIcon}>
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M8 3v3M16 3v3M4 9h16M5 6h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z M9 14l2 2 4-4" />
                   </svg>
                 </span>
-              ))}
+                <span className={styles.floatCardText}>
+                  <span className={styles.floatCardTitle}>Easy Booking</span>
+                  <span className={styles.floatCardDesc}>Book appointments in just a few clicks.</span>
+                </span>
+              </div>
+
+              <div className={`${styles.floatCard} ${styles.floatCard_live}`}>
+                <span className={styles.floatCardIcon}>
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="8.5" />
+                    <path d="M12 7.5V12l3 2" />
+                  </svg>
+                </span>
+                <span className={styles.floatCardText}>
+                  <span className={styles.floatCardTitle}>Live Slot Updates</span>
+                  <span className={styles.floatCardDesc}>See open slots and book instantly.</span>
+                </span>
+              </div>
+
+              <div className={`${styles.floatCard} ${styles.floatCard_trust}`}>
+                <span className={styles.floatCardIcon}>
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 20.5s-7.2-4.4-9.6-8.6C.8 8.4 3 5 6.4 5c2 0 3.6 1.4 4.1 2.4.5-1 2.1-2.4 4.1-2.4 3.4 0 5.6 3.4 4 6.9C19.2 16.1 12 20.5 12 20.5Z" />
+                  </svg>
+                </span>
+                <span className={styles.floatCardText}>
+                  <span className={styles.floatCardTitle}>Patient First</span>
+                  <span className={styles.floatCardDesc}>Every doctor is rated by real patients.</span>
+                </span>
+              </div>
             </div>
           </div>
-
-          <ul className={styles.heroHighlights}>
-            {HERO_HIGHLIGHTS.map((item) => (
-              <li key={item.label} className={styles.heroHighlight}>
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d={item.icon} />
-                </svg>
-                {item.label}
-              </li>
-            ))}
-          </ul>
         </div>
+
       </section>
 
       <div className={styles.bandPage}>
@@ -416,6 +488,15 @@ export default function Landing() {
                     </svg>
                   </span>
                   <span className={styles.deptName}>{dept.name}</span>
+                  {/* Only appears on hover/focus (see .deptArrow) — signals the
+                      card is a clickable link rather than a static tile,
+                      without adding a permanently-visible second element to
+                      every one of the 12 cards. */}
+                  <span className={styles.deptArrow} aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M5 12h14M13 6l6 6-6 6" />
+                    </svg>
+                  </span>
                 </Link>
               </div>
             ))}

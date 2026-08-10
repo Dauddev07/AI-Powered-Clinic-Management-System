@@ -31,6 +31,7 @@
 .card {
   background: var(--app-bg-card);
   color: var(--app-text-body);
+  border: 1px solid var(--app-border);
   border-radius: 20px;
   box-shadow: 0 4px 24px var(--app-shadow);
   padding: 1.5rem;
@@ -348,6 +349,29 @@
 
 .table tbody tr {
   transition: background-color 180ms ease;
+}
+
+/* The Doctor cell's name + rating badge need to stack on their own line
+   rather than fight the cell's default white-space: nowrap / single-line
+   layout, both in the desktop table row and the mobile stacked-card view
+   (where this is the single flex child sitting opposite the ::before
+   label). */
+.slotDoctorCell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  white-space: normal;
+}
+
+@media (max-width: 640px) {
+  .slotDoctorCell {
+    align-items: flex-end;
+  }
+}
+
+.slotDoctorName {
+  color: var(--app-text-title);
 }
 
 .table tbody tr:hover {

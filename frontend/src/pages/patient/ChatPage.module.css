@@ -838,6 +838,14 @@
   gap: 0.35rem;
 }
 
+.doctorOptionNameRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.6rem;
+}
+
 .doctorOptionName {
   font-size: var(--font-size-label);
   font-weight: 600;

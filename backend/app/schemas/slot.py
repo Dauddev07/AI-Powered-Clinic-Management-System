@@ -15,6 +15,10 @@ class SlotOut(BaseModel):
     end_utc: datetime
     status: str
     is_bookable: bool
+    # None when the doctor has no AppointmentFeedback ratings yet, rather than 0 —
+    # a doctor with zero ratings isn't "rated 0 stars", they're simply unrated.
+    average_rating: float | None = None
+    rating_count: int = 0
 
 
 class SlotListOut(BaseModel):

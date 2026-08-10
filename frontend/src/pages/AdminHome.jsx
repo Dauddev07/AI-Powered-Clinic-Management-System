@@ -45,6 +45,12 @@ function TopRatedDoctorCard({ doctor, rank }) {
   const tone = RANK_TONES[rank] || "bronze";
   return (
     <div className={`${styles.doctorCard} ${styles[`doctorCard_${tone}`]}`}>
+      {/* Clips only the corner glow (see .doctorCardGlow) to the card's own
+          rounded corners — kept as a separate layer rather than overflow:
+          hidden on .doctorCard itself, which used to clip the top of
+          .rankBadge below (it deliberately sits half outside the card's top
+          edge, see .rankBadge's own top: -12px). */}
+      <span className={styles.doctorCardGlow} aria-hidden="true" />
       <span className={`${styles.rankBadge} ${styles[`rankBadge_${tone}`]}`}>#{rank + 1}</span>
       <div className={styles.doctorCardHeader}>
         <span className={styles.doctorAvatar} aria-hidden="true">

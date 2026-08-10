@@ -42,6 +42,7 @@
   box-sizing: border-box;
   background: var(--app-bg-card);
   color: var(--app-text-body);
+  border: 1px solid var(--app-border);
   border-radius: 20px;
   box-shadow: 0 4px 24px var(--app-shadow);
   /* Safety net: any unexpectedly long unbroken string (an email, a UUID, a long

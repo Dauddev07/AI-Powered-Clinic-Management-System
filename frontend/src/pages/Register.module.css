@@ -16,17 +16,38 @@
 }
 
 .card {
+  position: relative;
+  overflow: hidden;
   width: 100%;
   max-width: 380px;
   min-width: 0;
   box-sizing: border-box;
   background: var(--app-bg-card);
+  border: 1px solid var(--app-border);
   border-radius: 20px;
-  box-shadow: 0 4px 24px var(--app-shadow);
-  /* Safety net: any unexpectedly long unbroken string wraps instead of pushing
-     the card wider than the viewport at narrow widths. */
-  overflow-wrap: anywhere;
+  box-shadow: 0 12px 40px var(--app-shadow);
   padding: 2rem;
+}
+
+/* Same static top-accent-bar treatment as Login.module.css's own .card — see
+   its comment for why this stays a plain gradient bar rather than the
+   hover-triggered version used on grid cards elsewhere. */
+.card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 40%, transparent));
+}
+
+.card > * {
+  /* Safety net: any unexpectedly long unbroken string wraps instead of pushing
+     the card wider than the viewport at narrow widths. Scoped to direct
+     children (inherited to their own descendants) now that .card also needs
+     overflow: hidden for the top accent bar above. */
+  overflow-wrap: anywhere;
 }
 
 /* Intro side panel only exists as a large-screen embellishment (see the

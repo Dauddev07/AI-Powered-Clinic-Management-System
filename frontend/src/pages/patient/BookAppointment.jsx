@@ -8,6 +8,7 @@ import {
   fetchSlots,
 } from "../../api/patientBooking";
 import { ApiError } from "../../api/client";
+import DoctorRatingBadge from "../../components/DoctorRatingBadge";
 import StatusBadge from "../../components/StatusBadge";
 import EmptyState from "../../components/EmptyState";
 import Skeleton from "../../components/Skeleton";
@@ -542,7 +543,15 @@ export default function BookAppointment() {
                       <td data-label="Time">
                         {formatTime(slot.start_utc, slotData.clinic_timezone)}
                       </td>
-                      <td data-label="Doctor">{slot.doctor_name}</td>
+                      <td data-label="Doctor">
+                        <span className={styles.slotDoctorCell}>
+                          <span className={styles.slotDoctorName}>{slot.doctor_name}</span>
+                          <DoctorRatingBadge
+                            averageRating={slot.average_rating}
+                            ratingCount={slot.rating_count}
+                          />
+                        </span>
+                      </td>
                       <td data-label="Department">{slot.department_name}</td>
                       <td data-label="Status">
                         <StatusBadge tone={slot.is_bookable ? "info" : "neutral"} label={slot.is_bookable ? "Open" : "Taken"} />

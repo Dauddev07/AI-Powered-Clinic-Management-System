@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_role
 from app.core.db import get_db
+from app.models.appointment_feedback import AppointmentFeedback
 from app.models.clinic import Clinic
 from app.models.department import Department
 from app.models.doctor import Doctor
@@ -51,10 +52,25 @@ def list_slots(
     tz = ZoneInfo(clinic.timezone)
     now = datetime.now(timezone.utc)
 
+    # Same avg/count-over-AppointmentFeedback shape used by the public
+    # top-rated-doctors endpoint (see clinics.py), but outer-joined here — a
+    # doctor with no ratings yet must still show their slots, just with no
+    # rating badge, rather than being excluded like the top-rated list.
+    rating_subq = (
+        select(
+            AppointmentFeedback.doctor_id.label("doctor_id"),
+            func.avg(AppointmentFeedback.rating).label("avg_rating"),
+            func.count(AppointmentFeedback.id).label("rating_count"),
+        )
+        .group_by(AppointmentFeedback.doctor_id)
+        .subquery()
+    )
+
     stmt = (
-        select(Slot, Doctor, Department)
+        select(Slot, Doctor, Department, rating_subq.c.avg_rating, rating_subq.c.rating_count)
         .join(Doctor, (Doctor.id == Slot.doctor_id) & (Doctor.clinic_id == clinic_id))
         .join(Department, (Department.id == Doctor.department_id) & (Department.clinic_id == clinic_id))
+        .outerjoin(rating_subq, rating_subq.c.doctor_id == Doctor.id)
         .where(
             Slot.clinic_id == clinic_id,
             Slot.status.in_(("open", "booked")),
@@ -94,8 +110,10 @@ def list_slots(
             end_utc=slot.end_utc,
             status=slot.status,
             is_bookable=slot.status == "open",
+            average_rating=round(float(avg_rating), 1) if avg_rating is not None else None,
+            rating_count=rating_count or 0,
         )
-        for slot, doctor, department in rows
+        for slot, doctor, department, avg_rating, rating_count in rows
     ]
 
     return SlotListOut(clinic_timezone=clinic.timezone, total=total, limit=limit, offset=offset, slots=slots)
