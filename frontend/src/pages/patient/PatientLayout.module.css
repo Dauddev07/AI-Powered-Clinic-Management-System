@@ -23,9 +23,18 @@
 }
 
 /* Chat page only — fills the viewport with no side/top/bottom gutter and no
-   reading-column cap, at every breakpoint (overrides the padding rules above). */
+   reading-column cap, at every breakpoint (overrides the padding rules above).
+   height (not min-height) pinned to the real, dynamically-measured header height
+   (--app-header-height, same source ChatPage.module.css's .page already uses) —
+   .content's own min-height above is a hardcoded 3.5rem guess that doesn't match
+   the actual header, so without this override .content could grow a few pixels
+   taller than the viewport and make the whole page scrollable, even though
+   ChatPage's own .messages is already meant to be the only scrolling region. */
 .contentFullBleed {
   padding: 0;
+  min-height: 0;
+  height: calc(100dvh - var(--app-header-height, 56px));
+  overflow: hidden;
 }
 
 .contentInnerFullBleed {
