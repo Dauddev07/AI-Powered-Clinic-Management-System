@@ -1660,6 +1660,43 @@ def test_run_symptom_agent_recovers_a_real_department_when_the_model_advice_dump
     assert "Would you like me to help" not in result
 
 
+def test_run_symptom_agent_keeps_a_valid_path1_emergency_reply_intact(monkeypatch, db, ctx, clinic):
+    # Reported live: "chest pain is mild and accompanied my sweating" — the model
+    # correctly caught this as a real emergency-consistent combination via PATH 1's
+    # EMERGENCY BACKSTOP secondary layer (no literal "severe" or other word-level
+    # trigger fired for this one) and replied exactly as PATH 1 requires: a
+    # one-sentence emergency statement, no tool call, first-aid steps formatted as
+    # a numbered "1) ... 2) ..." list per the STRUCTURE RULE. That numbered-list
+    # formatting is indistinguishable from _looks_like_an_advice_dump_instead_of_
+    # routing's own trigger (2+ list-formatted lines) — LangSmith showed the model
+    # produced this exact reply, but the patient received a Cardiology booking
+    # card instead, because the advice-dump recovery discarded it and rebuilt a
+    # department card from symptom keywords. This confirms the reply now survives
+    # untouched instead.
+    emergency_reply = (
+        "This sounds like an emergency—please call 1122 or go to the nearest ER right away.\n"
+        "1) Sit down, stay calm, and loosen any tight clothing.\n"
+        "2) If you feel faint, lie down with your legs raised slightly.\n"
+        "3) Keep the phone handy and be ready to describe your symptoms to emergency responders."
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: emergency_reply)
+
+    history = [
+        _row("user", "i am having chest pain"),
+        _row(
+            "assistant",
+            "Is the chest pain mild or moderate? Is it getting worse, spreading to your arm, "
+            "jaw, or back, or accompanied by shortness of breath or sweating?",
+        ),
+    ]
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "chest pain is mild and accompanied my sweating", "en", history
+    )
+
+    assert result == emergency_reply
+    assert not result.startswith(DOCTOR_OPTIONS_MARKER)
+
+
 def test_run_symptom_agent_recovers_when_the_model_recommends_a_specialist_in_plain_prose(
     monkeypatch, db, ctx, clinic
 ):

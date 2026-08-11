@@ -237,6 +237,28 @@ def _recommends_a_specialist_in_free_text(reply: str) -> bool:
     return bool(_SPECIALIST_TITLE_RE.search(reply))
 
 
+# Reported live: a genuine PATH 1 emergency reply ("chest pain is mild and
+# accompanied my sweating" — a real emergency-consistent combination the model
+# correctly caught via the EMERGENCY BACKSTOP secondary layer, since no literal
+# "severe" or other word-level trigger fired) got silently discarded and replaced
+# with a Cardiology booking card — the model did EXACTLY what PATH 1 requires (a
+# one-sentence emergency statement, no tool call, first-aid steps formatted as a
+# numbered "1) ... 2) ..." list per the STRUCTURE RULE), but that numbered-list
+# formatting is indistinguishable from _looks_like_an_advice_dump_instead_of_
+# routing's own trigger (2+ list-formatted lines) — every correctly-formatted
+# PATH 1 reply necessarily trips it. "1122" is the one thing PATH 1 always
+# contains and nothing else in this prompt ever produces (it's this clinic's
+# specific emergency number, explicitly never substituted for a different
+# country's), so checking for it first is a reliable, low-false-positive way to
+# recognize "this is a valid emergency reply, don't touch it" before any of the
+# other recovery triggers below get a chance to override it.
+_VALID_EMERGENCY_REPLY_RE = re.compile(r"\b1122\b")
+
+
+def _looks_like_a_valid_emergency_reply(reply: str) -> bool:
+    return bool(_VALID_EMERGENCY_REPLY_RE.search(reply))
+
+
 def _patient_named_this_department(department_name: str, message: str, history: list[ConversationMemory]) -> bool:
     """True when the patient themselves (never the assistant) said this
     department's name somewhere in the conversation — used to tell "the patient
@@ -441,12 +463,18 @@ def run_symptom_agent(
     # so the turn still ends with a real department/doctor option on the table —
     # the diagnostic free text itself is discarded, never shown to the patient.
     # Also covers the faked-tool-payload, advice-dump, and specialist-recommendation
-    # cases above — same recovery, wider trigger.
-    if not reply.startswith((DOCTOR_OPTIONS_MARKER, DEPARTMENT_LIST_MARKER, NO_SLOTS_MARKER)) and (
-        violates_no_diagnosis_rule(reply)
-        or _looks_like_a_faked_tool_payload(reply)
-        or _looks_like_an_advice_dump_instead_of_routing(reply)
-        or _recommends_a_specialist_in_free_text(reply)
+    # cases above — same recovery, wider trigger. Excludes a valid PATH 1 emergency
+    # reply (see _looks_like_a_valid_emergency_reply's own docstring) — that reply
+    # is meant to end the turn exactly as written, never routed to a department.
+    if (
+        not reply.startswith((DOCTOR_OPTIONS_MARKER, DEPARTMENT_LIST_MARKER, NO_SLOTS_MARKER))
+        and not _looks_like_a_valid_emergency_reply(reply)
+        and (
+            violates_no_diagnosis_rule(reply)
+            or _looks_like_a_faked_tool_payload(reply)
+            or _looks_like_an_advice_dump_instead_of_routing(reply)
+            or _recommends_a_specialist_in_free_text(reply)
+        )
     ):
         hinted = departments_hinted_by_patient_symptom_words(message, history, department_names, set())
         if hinted:
