@@ -34,8 +34,14 @@ function CountIcon({ kind }) {
   );
 }
 
+// Reported live: at 3:49 for a 3:45-4:00 appointment this showed "10 min"
+// instead of "11 min" — Math.round flips to the lower minute as soon as
+// you're more than 30s into the current clock-minute (3:49:31 -> 10.48 ->
+// rounds to 10), so the display disagreed with what the clock still read.
+// Math.ceil keeps it at 11 for the whole 3:49:00-3:49:59 window and only
+// drops to 10 the instant the clock actually reaches 3:50.
 function formatMinutesRemaining(endIso, now) {
-  const minutes = Math.max(0, Math.round((new Date(endIso).getTime() - now.getTime()) / 60000));
+  const minutes = Math.max(0, Math.ceil((new Date(endIso).getTime() - now.getTime()) / 60000));
   if (minutes <= 0) return "Ending now";
   if (minutes < 60) return `Ends in ${minutes} min`;
   const hours = Math.floor(minutes / 60);
