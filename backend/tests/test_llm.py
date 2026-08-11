@@ -490,6 +490,17 @@ def test_agent_prompt_includes_broken_bone_in_ambiguous_symptom_screening():
     assert "a broken bone or suspected fracture" in prompt
 
 
+def test_agent_prompt_a_severe_answer_is_not_overruled_by_other_reply_detail():
+    # Reported live: "its very severe and since 10 days" (answering a headache
+    # severity screen) wrongly routed to PATH 3 instead of PATH 1 — the "10 days"
+    # duration was read as making this chronic/non-acute and downgraded the explicit
+    # "severe" answer to routine booking. Duration/location/etc. volunteered
+    # alongside "severe" must never override the severity word itself.
+    prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
+    assert "its very severe and since 10 days" in prompt
+    assert "never a downgrade signal" in prompt
+
+
 def test_agent_prompt_recommendation_phrasing_does_not_waive_the_screening_floor():
     # Reported live: "I am having a bit of fever and body aches, what do you
     # recommend?" — a FIRST message combining a symptom with an explicit

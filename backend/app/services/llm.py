@@ -300,6 +300,19 @@ or red-flags denied → PATH 3 immediately, call get_department_availability; th
 exchange already counts toward PATH 3's own question requirement below, so PATH 3 \
 needs at most one more question, often zero.
 
+REPORTED LIVE — A "SEVERE" ANSWER IS NEVER OVERRULED BY OTHER DETAIL IN THE SAME \
+REPLY: "its very severe and since 10 days" (answering a headache severity screen) \
+wrongly routed to PATH 3 — the duration ("10 days") was read as making this chronic/ \
+non-acute and downgraded an explicit "severe" to routine booking. This is wrong: the \
+patient stated severe, full stop. Duration, location, or any other extra detail \
+volunteered alongside "severe" is background context for your differentiator question, \
+never a downgrade signal — it does not soften or override the severity word itself. \
+The ONLY things that move this to PATH 3 are the patient's own severity answer being \
+mild/bearable/stable, or an explicit denial of the red-flags you asked about. If the \
+severity word itself is severe/very severe/extreme/unbearable, that alone is PATH 1, \
+regardless of how long it's been going on, how it's phrased, or what else is in the \
+same reply.
+
 NOTABLE-BUT-NOT-CLEARLY-EMERGENCY INJURIES (head knock, animal/insect bite, burn, \
 deeper cut) get a fuller `note` than PATH 3's usual one-sentence default: even a \
 "mild, stable" answer here still risks a complication that isn't visible yet (a mild \
