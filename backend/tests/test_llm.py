@@ -446,12 +446,13 @@ def test_agent_prompt_requires_severity_screening_for_ambiguous_symptoms():
     # PATH 2: chest pain/tightness/head pain must be screened with a direct
     # severity question before any department routing decision — this is the
     # product-level change from auto-firing on "chest pain" alone (see
-    # red_flag.py) to asking first. The question no longer offers "severe" as
-    # a choice — a genuinely severe answer is intercepted server-side before
-    # the model ever sees it (see the bare-severity rule in red_flag.py).
+    # red_flag.py) to asking first. The severity question offers "severe" as a
+    # real choice again — the model, not a server-side gate, decides PATH 1 vs.
+    # PATH 3 from the answer (see red_flag.py's detect_red_flag docstring for
+    # why the blanket bare-"severe" server-side rule was added and then removed).
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
     assert "PATH 2" in prompt
-    assert "is it moderate or mild?" in prompt
+    assert "is it severe, moderate, or mild?" in prompt
     assert "Do NOT decide a department, call get_department_availability, or state/imply" in prompt
     assert "chest pain, tightness, or pressure; head pain; a broken bone" in prompt
 
@@ -493,13 +494,13 @@ def test_agent_prompt_includes_broken_bone_in_ambiguous_symptom_screening():
 
 
 def test_agent_prompt_a_severe_answer_is_not_overruled_by_other_reply_detail():
-    # Superseded by the bare-severity rule (see red_flag.py): a literal "severe"
-    # answer is now intercepted server-side before the model ever sees it, so
-    # this prompt text covers the remaining reachable case instead — an
-    # extreme/unbearable/worst-of-my-life answer (no literal "severe") must
-    # still not be downgraded by other detail volunteered in the same reply
-    # (e.g. duration making it read as chronic-and-fine).
+    # Reported live: "its very severe and since 10 days" (answering a headache
+    # severity screen) wrongly routed to PATH 3 — the duration ("10 days") was
+    # read as making this chronic/non-acute and downgraded an explicit "severe"
+    # to routine booking. Extra detail volunteered alongside a severe/extreme/
+    # unbearable answer is background context, never a downgrade signal.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
+    assert "its very severe and since 10 days" in prompt
     assert "worst pain of my life" in prompt
     assert "never a downgrade signal" in prompt
 

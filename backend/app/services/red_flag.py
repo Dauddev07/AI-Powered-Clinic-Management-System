@@ -27,13 +27,14 @@ against a real paraphrase/benign test set (see tests/test_red_flag.py) rather th
 guessed, since ungrounded thresholds are exactly the kind of thing that silently drifts
 wrong.
 
-BARE-SEVERITY LAYER: a plain product rule, not a heuristic — see
-_severity_stated_as_severe's own docstring. The model was repeatedly relied on to
-escalate a patient's own explicit "severe" answer to PATH 1 (both as a reply to a
-screening question and stated outright in the first message) and did not comply
-reliably, so this is now a deterministic check instead: any message stating a
-symptom is "severe", unnegated, is an emergency, full stop, regardless of which
-symptom category or what else is in the same message.
+BROKEN-BONE LAYER: a major weight-bearing bone stated as broken/fractured (see
+_bare_broken_bone_stated's own docstring) is unambiguous the same way the regex-gate
+categories above are — it doesn't depend on screening or context, so it's checked
+deterministically too. Ambiguous/PATH-2 categories (headache, chest pain, abdominal
+pain, etc.) — including a "severe" answer for one of THOSE — are deliberately NOT
+checked here; that's the LLM's own job via PATH 1/2 in app.services.llm. See
+detect_red_flag's own docstring for why a blanket bare-"severe" rule used to live
+here and was removed.
 """
 import re
 
@@ -65,11 +66,12 @@ def _negation_lookbehinds() -> str:
 def _negation_word_alternation() -> str:
     """Same _NEGATION_WORDS list as a plain (non-lookbehind) alternation, for a
     pattern that scans FORWARD from the negation word instead of checking what
-    immediately precedes a fixed target (see _NEGATED_SEVERE_RE below, which needs
-    to span an intervening word like "not THAT severe" — a fixed-width lookbehind
-    can't do that, so it matches forward from the negation word instead). "n't" has
-    no leading \\b for the same reason _negation_lookbehinds' docstring gives:
-    "isn't"/"doesn't" have no word boundary between the preceding letter and "n"."""
+    immediately precedes a fixed target (see _BROKEN_BONE_NEGATED_RE below, which
+    needs to span an intervening word like "i dont THINK my arm is broken" — a
+    fixed-width lookbehind can't do that, so it matches forward from the negation
+    word instead). "n't" has no leading \\b for the same reason
+    _negation_lookbehinds' docstring gives: "isn't"/"doesn't" have no word
+    boundary between the preceding letter and "n"."""
     parts = [r"n't\b" if word == "n't" else rf"\b{word}\b" for word in _NEGATION_WORDS]
     return "(?:" + "|".join(parts) + ")"
 
@@ -492,37 +494,6 @@ def _semantic_red_flag(message: str) -> bool:
     )
 
 
-_BARE_SEVERE_RE = re.compile(r"\bsevere(?:ly)?\b", re.IGNORECASE)
-# Negation window: up to 3 words between a negation word and "severe" — covers
-# "not that severe", "isn't really severe", "doesnt seem too severe", not just "not
-# severe" with nothing between them. A fixed-width lookbehind (the style used
-# elsewhere in this file, e.g. the bleeding-severity patterns) can't stretch across
-# an intervening word like "that"/"really", so this uses a bounded forward window
-# instead, built from the same _NEGATION_WORDS list everything else uses.
-_NEGATED_SEVERE_RE = re.compile(_negation_word_alternation() + r"(?:\s+\S+){0,3}\s+severe", re.IGNORECASE)
-
-
-def _severity_stated_as_severe(message: str) -> bool:
-    """Product decision: if the patient plainly states a symptom is "severe" —
-    the FIRST message or a later reply, any ambiguous/PATH-2 category (headache,
-    chest pain, abdominal pain, back pain, fever, etc.), regardless of what else
-    is in the same message — that alone means emergency, no screening question
-    needed first. Reported live three times before landing on this as a blanket
-    server-side rule rather than a narrower conversational pattern: "its very
-    severe and since 10 days" and a bare "its severe" (both answering a headache
-    severity screen) routed to PATH 3 instead of PATH 1 despite the prompt saying
-    "severe" alone should escalate; then "i am having severe headache" as a FIRST
-    message skipped straight to a department card with no screening AND no
-    emergency check at all. A prompt instruction alone is not a guarantee, so
-    this is now a plain server-side check, same principle as the regex patterns
-    above — and it supersedes the older, narrower chest-pain-specific design
-    decision that wanted a screening question first even when "severe" was
-    already stated (see llm.py's _TRIAGE_SECTION): the general rule now covers
-    chest pain too.
-    """
-    return bool(_BARE_SEVERE_RE.search(message)) and not _NEGATED_SEVERE_RE.search(message)
-
-
 _BODY_PART = r"(?:leg|arm|hand|foot|ankle|wrist|hip|bone|finger|toe|rib|collarbone|jaw|nose)"
 _BROKEN_BONE_RE = re.compile(
     rf"\bbroken\b.{{0,15}}\b{_BODY_PART}\b"
@@ -533,21 +504,22 @@ _BROKEN_BONE_RE = re.compile(
     rf"|\b{_BODY_PART}\b.{{0,15}}\bfractured\b",
     re.IGNORECASE,
 )
-# Wider window (5, not 3 like _NEGATED_SEVERE_RE) — reported live: "i dont think my
-# arm is broken" has 4 words between "dont" and "broken" ("think my arm is"), more
-# than a severity answer typically has between its own negation word and "severe".
+# Wider window (5 words, not fewer) — reported live: "i dont think my arm is
+# broken" has 4 words between "dont" and "broken" ("think my arm is").
 _BROKEN_BONE_NEGATED_RE = re.compile(
     _negation_word_alternation() + r"(?:\s+\S+){0,5}\s+(?:broken|broke|fractured)\b", re.IGNORECASE
 )
 
 
 def _bare_broken_bone_stated(message: str) -> bool:
-    """Same principle and shape as _severity_stated_as_severe above, for the same
-    reason: reported live, "my leg is broken" / "my arm got broken" / "i am having
-    severe headache"-style plain statements were repeatedly missed or unreliably
-    escalated by the LLM. A patient's own plain, unnegated claim that a bone is
-    broken/fractured is unambiguous enough to treat as an emergency on its own,
-    regardless of phrasing, connector word, or word order.
+    """Reported live: "my leg is broken" / "my arm got broken"-style plain
+    statements were repeatedly missed by the original narrower patterns or
+    unreliably escalated by the LLM. A patient's own plain, unnegated claim that a
+    major weight-bearing bone is broken/fractured is unambiguous enough to treat
+    as an emergency on its own, regardless of phrasing, connector word, or word
+    order — same "don't rely on the LLM alone for this" principle as the regex
+    gate above, kept deterministic even though the ambiguous bare-"severe" rule
+    that used to sit next to it was removed (see detect_red_flag's own docstring).
     """
     return bool(_BROKEN_BONE_RE.search(message)) and not _BROKEN_BONE_NEGATED_RE.search(message)
 
@@ -602,8 +574,6 @@ def _is_confirmed_denial(message: str) -> bool:
     message as a denial of a specific, recognized emergency category — see the
     module comment right above this function for why the veto is scoped this
     narrowly rather than firing on any negation word anywhere in the message."""
-    if _BARE_SEVERE_RE.search(message) and _NEGATED_SEVERE_RE.search(message):
-        return True
     if _BROKEN_BONE_RE.search(message) and _BROKEN_BONE_NEGATED_RE.search(message):
         return True
     if _BARE_DENIABLE_RE.search(message) and not _RED_FLAG_RE.search(message):
@@ -613,18 +583,30 @@ def _is_confirmed_denial(message: str) -> bool:
 
 def detect_red_flag(message: str) -> bool:
     """True if ANY layer fires: the regex gate (exact/loose wording matches), the
-    bare "severe" product rule (see _severity_stated_as_severe's own docstring), the
-    broken-bone rule (see _bare_broken_bone_stated's own docstring), or the semantic
-    similarity check (paraphrases with no shared vocabulary with any regex pattern) —
-    UNLESS the word-level layer has confirmed this exact message is a denial of one
-    of its own recognized categories, in which case the semantic layer is vetoed
-    rather than allowed to override that confirmed judgment (see
-    _is_confirmed_denial's own docstring)."""
-    if (
-        bool(_RED_FLAG_RE.search(message))
-        or _severity_stated_as_severe(message)
-        or _bare_broken_bone_stated(message)
-    ):
+    broken-bone rule (see _bare_broken_bone_stated's own docstring — a major
+    weight-bearing bone stated as broken is unambiguous enough to treat as an
+    emergency regardless of context, same as the regex-gate categories), or the
+    semantic similarity check (paraphrases with no shared vocabulary with any
+    regex pattern) — UNLESS the word-level layer has confirmed this exact message
+    is a denial of one of its own recognized categories, in which case the
+    semantic layer is vetoed rather than allowed to override that confirmed
+    judgment (see _is_confirmed_denial's own docstring).
+
+    Deliberately does NOT auto-fire on a bare "severe" mention for an ambiguous/
+    PATH-2 category (headache, chest pain, abdominal pain, etc.) — that used to be
+    a blanket server-side rule here, added after the model appeared to not
+    reliably escalate a "severe" PATH 2 answer to PATH 1. Root cause turned out to
+    be different: app.services.orchestrator.agents.symptom_agent's own recovery
+    logic was silently discarding a VALID PATH 1 emergency reply (its mandated
+    numbered first-aid-steps format tripped an "advice dump instead of routing"
+    detector) and replacing it with a routine department card — the model had
+    been deciding PATH 1 correctly the whole time. With that fixed at its actual
+    source, ambiguous-category severity screening (including "severe" itself) is
+    back to being the LLM's own job via PATH 2/PATH 1 in app.services.llm, which
+    can now compose symptom-specific first-aid guidance instead of this one
+    generic canned message for every severe presentation.
+    """
+    if bool(_RED_FLAG_RE.search(message)) or _bare_broken_bone_stated(message):
         return True
     if _is_confirmed_denial(message):
         return False
