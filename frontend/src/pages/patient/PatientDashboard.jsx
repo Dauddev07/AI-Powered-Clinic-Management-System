@@ -215,6 +215,11 @@ export default function PatientDashboard() {
         </div>
       </div>
 
+      {/* Hidden under 720px (see FloatingChatButton.module.css) — that's
+          exactly where PrimaryNavMobile's fixed bottom tab bar takes over
+          and already has its own prominent Chat entry, so this would sit
+          right on top of it. Kept on wider screens, where PrimaryNavDesktop
+          is a top row and this floats bottom-left with no overlap. */}
       <FloatingChatButton />
     </>
   );

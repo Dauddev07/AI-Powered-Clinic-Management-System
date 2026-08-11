@@ -44,3 +44,28 @@
   outline: 2px solid var(--app-accent);
   outline-offset: -2px;
 }
+
+.tabIcon {
+  display: inline-flex;
+}
+
+/* Filled accent badge around just the Chat icon — see the JSX call site's
+   own comment. Sits slightly above the row (negative margin) so the badge
+   reads as its own raised element rather than just a colored square inline
+   with the others. */
+.tabIconChat {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-top: -2px;
+  border-radius: 50%;
+  color: var(--app-accent-text);
+  background: linear-gradient(135deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 78%, black));
+  box-shadow: 0 3px 8px color-mix(in srgb, var(--app-accent) 40%, transparent);
+}
+
+.tabItem.active .tabIconChat {
+  background: linear-gradient(135deg, var(--app-accent-hover), color-mix(in srgb, var(--app-accent-hover) 78%, black));
+}

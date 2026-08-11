@@ -31,11 +31,12 @@ export default function PrimaryNavDesktop() {
       {items.map((item) => {
         const active = location.pathname === item.to;
         const isHome = item.key === "home";
+        const isChat = item.key === "chat";
         return (
           <Link
             key={item.key}
             to={item.to}
-            className={`${styles.navItem} ${active ? styles.active : ""}`}
+            className={`${styles.navItem} ${active ? styles.active : ""} ${isChat ? styles.chat : ""}`}
             aria-current={active ? "page" : undefined}
             onClick={
               isHome

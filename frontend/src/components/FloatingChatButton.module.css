@@ -9,6 +9,17 @@
   gap: 0.7rem;
 }
 
+/* PrimaryNavMobile's fixed bottom tab bar takes over at the exact same
+   breakpoint PrimaryNavDesktop's top row gives way to it (see
+   PrimaryNavDesktop.module.css) — that tab bar already has its own
+   prominent Chat entry, so this floating button would sit right on top of
+   it here instead of floating freely like it does on wider screens. */
+@media (max-width: 719px) {
+  .wrapper {
+    display: none;
+  }
+}
+
 .button {
   position: relative;
   width: 62px;
@@ -203,29 +214,6 @@
   }
 }
 
-@media (max-width: 480px) {
-  .wrapper {
-    left: 1rem;
-    bottom: 1rem;
-  }
-
-  .button {
-    width: 54px;
-    height: 54px;
-  }
-
-  .tooltip {
-    font-size: var(--font-size-caption);
-    max-width: calc(100vw - 2rem);
-    padding: 0.5rem 0.8rem;
-  }
-}
-
-@media (max-width: 300px) {
-  /* At the smallest supported width the bubble would crowd the screen edge —
-     drop it rather than let it clip or overflow off-screen. The button (and its
-     accessible label) remains the entry point either way. */
-  .tooltip {
-    display: none;
-  }
-}
+/* No sub-720px tuning needed below this point — the whole button is hidden
+   under 719px (see .wrapper above), so nothing here is ever visible at a
+   width narrow enough to need it. */

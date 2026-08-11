@@ -36,6 +36,7 @@ export default function PrimaryNavMobile() {
     <nav className={styles.tabBar} aria-label="Primary">
       {items.map((item) => {
         const active = location.pathname === item.to;
+        const isChat = item.key === "chat";
         return (
           <Link
             key={item.key}
@@ -43,9 +44,14 @@ export default function PrimaryNavMobile() {
             className={`${styles.tabItem} ${active ? styles.active : ""}`}
             aria-current={active ? "page" : undefined}
           >
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d={getIconPath(item.icon)} />
-            </svg>
+            {/* Chat used to be its own floating action button (see the removed
+                FloatingChatButton) — the filled accent badge keeps that same
+                "this one's special" weight now that it's a tab like the rest. */}
+            <span className={isChat ? styles.tabIconChat : styles.tabIcon}>
+              <svg viewBox="0 0 24 24" width={isChat ? 17 : 20} height={isChat ? 17 : 20} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d={getIconPath(item.icon)} />
+              </svg>
+            </span>
             <span>{item.shortLabel}</span>
           </Link>
         );
