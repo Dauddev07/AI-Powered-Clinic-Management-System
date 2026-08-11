@@ -187,20 +187,17 @@
   background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 45%, transparent), transparent 70%);
 }
 
-/* A continuously flowing ECG/pulse trace instead of the earlier floating
-   circles — a monitor-style line reads as "alive" the way a static shape
-   never does, and it's a natural fit for a clinic booking hero. .heroPulseSvg
-   is rendered at 200% width holding two identical 400-wide repeats of the
-   same two-peak waveform back to back; animating it to exactly -50% of its
-   own width lines the second repeat up perfectly with where the first one
-   started, so the loop has no visible seam at any screen width. The mask on
-   the wrapper fades both ends so the line doesn't just cut off at the
-   viewport edges. */
+/* A static ECG/pulse trace, pinned to the vertical middle of the hero
+   section, with a bright green glow that travels along it — the line itself
+   never moves (instructed live), only the glow does. The mask on the
+   wrapper fades both ends so the line doesn't just cut off at the viewport
+   edges. */
 .heroPulseLine {
   left: 0;
   right: 0;
-  top: 20%;
+  top: 50%;
   height: 56px;
+  transform: translateY(-50%);
   overflow: hidden;
   -webkit-mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
   mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
@@ -208,33 +205,45 @@
 
 .heroPulseSvg {
   display: block;
-  width: 200%;
+  width: 100%;
   height: 100%;
-  animation: hero-pulse-flow 7s linear infinite;
 }
 
-.heroPulsePath {
+/* The always-visible line itself — faint and static. */
+.heroPulsePathBase {
   stroke: var(--app-accent);
-  stroke-width: 2;
+  stroke-width: 1.75;
   stroke-linecap: round;
   stroke-linejoin: round;
-  opacity: 0.55;
+  opacity: 0.3;
 }
 
-@keyframes hero-pulse-flow {
+/* Traced directly over the base path with an identical "d" — a short bright
+   dash against a much longer gap (stroke-dasharray), animated by sliding
+   stroke-dashoffset across one full pathLength="100" cycle. Because the
+   dash+gap pair (14 + 86) sums to exactly 100, a -100 dashoffset is exactly
+   one full pattern period, so the loop has no visible jump: the glow simply
+   re-enters at the start the instant it exits the end. */
+.heroPulsePathGlow {
+  stroke: color-mix(in srgb, var(--app-accent) 65%, #7CFFB2);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 14 86;
+  animation: hero-pulse-travel 4.5s linear infinite;
+}
+
+@keyframes hero-pulse-travel {
   from {
-    transform: translateX(0);
+    stroke-dashoffset: 0;
   }
   to {
-    /* Exactly one repeat unit (400 of the svg's 800-wide viewBox) — always
-       50% of the rendered width regardless of the container's actual pixel
-       size, which is what keeps the loop seamless at every screen width. */
-    transform: translateX(-50%);
+    stroke-dashoffset: -100;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .heroPulseSvg {
+  .heroPulsePathGlow {
     animation: none;
   }
 }

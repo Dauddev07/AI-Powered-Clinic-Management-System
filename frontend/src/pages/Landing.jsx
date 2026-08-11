@@ -194,27 +194,39 @@ export default function Landing() {
         <div className={styles.heroTopVignette} aria-hidden="true" />
         <div className={styles.heroSpotlight} aria-hidden="true" />
 
-        {/* Instructed live: no more 3D shapes or circles in the mobile
-            background (the three floating rings this used to have) — a
-            continuously flowing ECG-style pulse line instead, one repeating
-            unit with exactly two peaks. The path is drawn twice back to
-            back (0-400 and 400-800 in the viewBox) and the whole svg is
-            translated by exactly -50% of its own rendered width in a CSS
-            keyframe — since that's always exactly one 400-wide repeat unit
-            regardless of the actual screen width, the loop point is
-            invisible with no per-breakpoint tuning needed. */}
+        {/* Instructed live: the line itself should stay static (no more
+            travel/loop on the line's own position) — instead a bright green
+            glow travels along it. The base path is a plain static stroke;
+            the glow is a second copy of the exact same path with a short
+            bright dash (stroke-dasharray) animated via stroke-dashoffset.
+            pathLength="100" normalizes both to a 0-100 length scale
+            regardless of the path's real geometry, so "travel the whole
+            line" is always dashoffset 0 -> -100 no matter how the "d" below
+            ever changes. Exactly two peaks, per feedback. */}
         <div className={styles.heroPulseLine} aria-hidden="true">
           <svg
             className={styles.heroPulseSvg}
-            viewBox="0 0 800 60"
+            viewBox="0 0 400 60"
             preserveAspectRatio="none"
           >
+            <defs>
+              <filter id="heroPulseGlow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="2.5" />
+              </filter>
+            </defs>
             <path
-              className={styles.heroPulsePath}
+              className={styles.heroPulsePathBase}
               vectorEffect="non-scaling-stroke"
               fill="none"
-              d="M0,30 L60,30 L75,6 L90,54 L105,30 L165,30 L180,6 L195,54 L210,30 L400,30
-                 M400,30 L460,30 L475,6 L490,54 L505,30 L565,30 L580,6 L595,54 L610,30 L800,30"
+              d="M0,30 L60,30 L75,6 L90,54 L105,30 L165,30 L180,6 L195,54 L210,30 L400,30"
+            />
+            <path
+              className={styles.heroPulsePathGlow}
+              vectorEffect="non-scaling-stroke"
+              fill="none"
+              pathLength="100"
+              filter="url(#heroPulseGlow)"
+              d="M0,30 L60,30 L75,6 L90,54 L105,30 L165,30 L180,6 L195,54 L210,30 L400,30"
             />
           </svg>
         </div>
