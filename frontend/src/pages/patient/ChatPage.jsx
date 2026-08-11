@@ -433,7 +433,7 @@ function formatMessageTime(iso) {
   return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-function ChatMessage({ message, onSelectSlot, onSelectCandidate, sending, grouped }) {
+function ChatMessage({ message, onSelectSlot, onSelectCandidate, disabled, grouped }) {
   const isUser = message.role === "user";
   const booking = !isUser ? parseBookingConfirmation(message.content) : null;
   const doctorOptions = !isUser && !booking ? parseDoctorOptions(message.content) : null;
@@ -464,14 +464,14 @@ function ChatMessage({ message, onSelectSlot, onSelectCandidate, sending, groupe
           {booking ? (
             <BookingConfirmationCard booking={booking} />
           ) : doctorOptions ? (
-            <DoctorOptionsCard options={doctorOptions} onSelectSlot={onSelectSlot} disabled={sending} />
+            <DoctorOptionsCard options={doctorOptions} onSelectSlot={onSelectSlot} disabled={disabled} />
           ) : departmentList ? (
-            <DepartmentListCard list={departmentList} onSelectSlot={onSelectSlot} disabled={sending} />
+            <DepartmentListCard list={departmentList} onSelectSlot={onSelectSlot} disabled={disabled} />
           ) : doctorDisambiguation ? (
             <DoctorDisambiguationCard
               disambiguation={doctorDisambiguation}
               onSelectCandidate={onSelectCandidate}
-              disabled={sending}
+              disabled={disabled}
             />
           ) : isUser ? (
             stripSlotId(message.content)
@@ -503,6 +503,16 @@ export default function ChatPage() {
   const [openMenuSessionId, setOpenMenuSessionId] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  // Reported live: a slot/doctor card stays clickable in the transcript even
+  // after it's already been acted on — tapping an earlier "Book with Dr. X"
+  // slot again (or an earlier disambiguation candidate) re-sends that same
+  // stale selection. Indices (into the current `messages` array) of cards
+  // that have had a selection made from them — once a message's index is in
+  // here, its card is permanently disabled for the rest of this session view,
+  // not just while `sending` is true. Cleared everywhere `messages` itself is
+  // replaced wholesale (initial load, switching sessions, New Chat) so a
+  // stale index from a previous thread can never disable an unrelated card.
+  const [usedCardIndices, setUsedCardIndices] = useState(() => new Set());
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const topRef = useRef(null);
@@ -562,6 +572,7 @@ export default function ChatPage() {
             redFlag: m.red_flag,
           })),
         );
+        setUsedCardIndices(new Set());
       })
       .catch((err) => {
         setHistoryError(err instanceof ApiError ? err.detail || err.message : "Could not load chat history.");
@@ -655,6 +666,7 @@ export default function ChatPage() {
             redFlag: m.red_flag,
           })),
         );
+        setUsedCardIndices(new Set());
       })
       .catch((err) => {
         setHistoryError(err instanceof ApiError ? err.detail || err.message : "Could not load that conversation.");
@@ -671,6 +683,7 @@ export default function ChatPage() {
     setActiveSessionId(null);
     localStorage.removeItem(SESSION_STORAGE_KEY);
     setMessages([]);
+    setUsedCardIndices(new Set());
     setHistoryError(null);
     setInput("");
     setSidebarOpen(false);
@@ -983,9 +996,18 @@ export default function ChatPage() {
             <ChatMessage
               key={i}
               message={message}
-              onSelectSlot={selectSlot}
-              onSelectCandidate={selectCandidate}
-              sending={sending}
+              onSelectSlot={(doctorName, when, slotId) => {
+                // Marks THIS card (by its message index) used before the real
+                // selection even lands — see usedCardIndices' own comment on
+                // why a card must never be selectable a second time.
+                setUsedCardIndices((prev) => new Set(prev).add(i));
+                selectSlot(doctorName, when, slotId);
+              }}
+              onSelectCandidate={(doctorName, departmentName, when) => {
+                setUsedCardIndices((prev) => new Set(prev).add(i));
+                selectCandidate(doctorName, departmentName, when);
+              }}
+              disabled={sending || usedCardIndices.has(i)}
               grouped={i > 0 && messages[i - 1].role === message.role && !messages[i - 1].redFlag && !message.redFlag}
             />
           ))}
