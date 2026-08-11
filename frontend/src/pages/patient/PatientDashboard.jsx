@@ -9,7 +9,6 @@ import Skeleton from "../../components/Skeleton";
 import StatusBadge from "../../components/StatusBadge";
 import WelcomeBanner from "../../components/WelcomeBanner";
 import { useCountUp } from "../../hooks/useCountUp";
-import { useReveal } from "../../hooks/useReveal";
 import { useNow } from "../../hooks/useNow";
 import { isAppointmentInProgress } from "../../utils/appointmentStatus";
 import { formatClinicDateTime as formatDateTime } from "../../utils/formatDateTime";
@@ -55,7 +54,6 @@ export default function PatientDashboard() {
   const [fullName, setFullName] = useState(null);
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState(null);
-  const revealRef = useReveal();
   const now = useNow();
 
   useEffect(() => {
@@ -98,7 +96,15 @@ export default function PatientDashboard() {
 
       <div className={styles.sectionLabel}>Appointments</div>
       <div className={styles.grid}>
-        <div className={`${styles.card} ${nextCardAccentClass} reveal`} ref={revealRef}>
+        {/* Reported live: this card intermittently stayed permanently invisible
+            (opacity: 0, still occupying its grid slot) — the shared scroll-reveal
+            IntersectionObserver (see useReveal.js) never toggled its .revealed
+            class on some loads, with no visible failure mode short of the card
+            never appearing at all. Always-visible above-the-fold summary data has
+            no business depending on a scroll-triggered animation to begin with —
+            dropped the reveal/ref treatment entirely rather than chase the exact
+            observer race, same call made for the sibling card just below. */}
+        <div className={`${styles.card} ${nextCardAccentClass}`}>
           <div className={styles.cardTitleRow}>
             <span className={`${styles.titleIcon} ${styles.titleIcon_info}`} aria-hidden="true">
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -150,7 +156,7 @@ export default function PatientDashboard() {
           )}
         </div>
 
-        <div className={`${styles.card} reveal`} ref={revealRef}>
+        <div className={styles.card}>
           <div className={styles.cardTitleRow}>
             <span className={`${styles.titleIcon} ${styles.titleIcon_success}`} aria-hidden="true">
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
