@@ -144,6 +144,88 @@
   pointer-events: none;
 }
 
+/* Mobile-only decorative layer — hidden by default (desktop already has its
+   own two-column glow balance, see .heroGlow1/2/3), shown inside the
+   max-width: 900px block below. See the JSX call site's own comment for why
+   these exist instead of just repositioning the desktop glows in place. */
+.heroTopVignette,
+.heroSpotlight,
+.heroFloatDot1,
+.heroFloatDot2,
+.heroFloatDot3 {
+  display: none;
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* A soft fade tying the hero's top edge to the emergency banner just above
+   it, so the section doesn't feel like it starts abruptly under the banner
+   — most noticeable now that .heroVisual is gone and there's nothing else
+   occupying that upper area on the graphic side. */
+.heroTopVignette {
+  inset: 0 0 auto 0;
+  height: 40%;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--app-accent) 10%, transparent), transparent);
+}
+
+/* A tight, bright glow centered behind the eyebrow + headline — the one
+   thing on this page closest to a "hero image" once the phone mockup is
+   hidden, so it gets its own small spotlight instead of only sharing the
+   wide ambient wash the rest of the section uses. */
+.heroSpotlight {
+  top: -6%;
+  left: 50%;
+  width: min(90vw, 420px);
+  height: min(90vw, 420px);
+  transform: translateX(-50%);
+  border-radius: 50%;
+  filter: blur(60px);
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 30%, transparent), transparent 70%);
+  opacity: 0.6;
+}
+
+:global(html[data-theme="light"]) .heroSpotlight {
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 45%, transparent), transparent 70%);
+}
+
+/* Three small blurred rings scattered around the content — a light, minimal
+   echo of the desktop visual's floating feature badges, without their card
+   chrome or copy; purely a texture, sized and blurred so none of them ever
+   compete with the actual content. */
+.heroFloatDot1,
+.heroFloatDot2,
+.heroFloatDot3 {
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--app-accent) 35%, transparent);
+  filter: blur(0.5px);
+}
+
+.heroFloatDot1 {
+  top: 8%;
+  right: 8%;
+  width: 34px;
+  height: 34px;
+  opacity: 0.5;
+}
+
+.heroFloatDot2 {
+  top: 22%;
+  left: 6%;
+  width: 18px;
+  height: 18px;
+  background: color-mix(in srgb, var(--app-accent) 16%, transparent);
+  opacity: 0.55;
+}
+
+.heroFloatDot3 {
+  bottom: 14%;
+  right: 12%;
+  width: 24px;
+  height: 24px;
+  opacity: 0.4;
+}
+
 .heroCard {
   box-sizing: border-box;
   position: relative;
@@ -927,6 +1009,45 @@
 
   .heroEyebrowIcon {
     display: inline-flex;
+  }
+
+  /* .heroGlow1/2 are positioned for the desktop two-column split (one
+     hugging the top-right where the phone sits, one opposite it at
+     bottom-left) — lopsided once the content is a single centered column
+     with nothing on the other side. Recentered here instead of removed, so
+     the glow still frames the content rather than favoring one corner. */
+  .heroGlow1 {
+    top: -10%;
+    right: auto;
+    left: 50%;
+    width: min(80vw, 420px);
+    height: min(80vw, 420px);
+    transform: translateX(-50%);
+  }
+
+  .heroGlow2 {
+    bottom: -14%;
+    left: 50%;
+    width: min(70vw, 360px);
+    height: min(70vw, 360px);
+    transform: translateX(-50%);
+  }
+
+  .heroTopVignette,
+  .heroSpotlight,
+  .heroFloatDot1,
+  .heroFloatDot2,
+  .heroFloatDot3 {
+    display: block;
+  }
+
+  /* Tuned for the desktop composition, where the phone visual carries most
+     of the lower-section depth — bumped up here so the now-larger open area
+     below the centered content doesn't fade out as flat. */
+  .heroGridFloor {
+    opacity: 0.85;
+    -webkit-mask-image: linear-gradient(to top, black 0%, black 55%, transparent 85%);
+    mask-image: linear-gradient(to top, black 0%, black 55%, transparent 85%);
   }
 
   /* Requested live: the long two-paragraph pitch reads as a dense grey wall

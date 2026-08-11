@@ -184,6 +184,19 @@ export default function Landing() {
         <div className={styles.heroGlow1} aria-hidden="true" />
         <div className={styles.heroGlow2} aria-hidden="true" />
 
+        {/* Mobile-only additions (hidden by default, shown under the
+            max-width: 900px block in Landing.module.css) — .heroGlow1/2 are
+            offset for the two-column desktop layout (one hugging where the
+            phone mockup sits, one opposite it), which reads lopsided once
+            the content is a single centered column with no visual on the
+            other side. These fill that gap instead of just repositioning
+            the existing glows, so desktop is untouched. */}
+        <div className={styles.heroTopVignette} aria-hidden="true" />
+        <div className={styles.heroSpotlight} aria-hidden="true" />
+        <div className={styles.heroFloatDot1} aria-hidden="true" />
+        <div className={styles.heroFloatDot2} aria-hidden="true" />
+        <div className={styles.heroFloatDot3} aria-hidden="true" />
+
         {/* Instructed live to add a genuine background "3D" treatment
             (a first pass using small floating gradient spheres was
             rejected as "3D shapes", not a 3D backdrop) — a perspective
