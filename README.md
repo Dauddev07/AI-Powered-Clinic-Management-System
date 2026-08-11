@@ -1,7 +1,7 @@
 # AI-Powered Clinic Management System
 
 Multi-tenant clinic intake + appointment app with an AI triage/booking chatbot.
-Live at Render (backend) + Vercel (frontend).
+Live at Render (backend) + Vercel (frontend): **https://ai-powered-clinic-management-system.vercel.app**
 
 - **Superadmin**: manages clinics (tenants) via a seeding script — no code change
   needed to onboard a new clinic (see [Adding a new clinic](#adding-a-new-clinic)).
