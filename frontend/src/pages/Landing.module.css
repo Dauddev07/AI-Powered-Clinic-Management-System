@@ -300,8 +300,9 @@
 
 .headline {
   margin: 0;
+  font-family: var(--font-display);
   font-size: clamp(2.1rem, 4.4vw, calc(var(--font-size-title) * 1.5));
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.025em;
   line-height: 1.1;
   color: var(--app-text-title);

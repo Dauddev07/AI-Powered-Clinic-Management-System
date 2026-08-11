@@ -108,6 +108,11 @@ html[data-theme="light"] {
 
 :root {
   --sans: 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif;
+  /* Reserved for the app's few genuine "hero" headline moments (landing page
+     title, dashboard welcome heading) — everywhere else keeps using --sans/
+     Work Sans, so this stays a deliberate accent rather than the default
+     voice of the whole app. */
+  --font-display: 'Fraunces', 'Work Sans', system-ui, serif;
 
   --font-size-title: 1.75rem;
   --font-size-heading: 1.25rem;
@@ -123,6 +128,10 @@ html[data-theme="light"] {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Keeps digits a fixed width as they change — without this, live/animated
+     numbers (dashboard stat counters, the in-progress-appointment countdown,
+     prices) visibly shift width character by character as they update. */
+  font-variant-numeric: tabular-nums;
 
   @media (max-width: 1024px) {
     font-size: 16px;
@@ -153,7 +162,11 @@ html {
 h1,
 h2 {
   font-family: 'Work Sans', system-ui, sans-serif;
-  font-weight: 500;
+  /* Most real headings override this with their own component-specific
+     weight (usually 700) already — this is the fallback for the few that
+     don't (e.g. .introTitle, .dateHeading), bumped from 500 since that read
+     as flat/thin for a heading rather than deliberately light. */
+  font-weight: 600;
   color: var(--app-text-title);
 }
 
