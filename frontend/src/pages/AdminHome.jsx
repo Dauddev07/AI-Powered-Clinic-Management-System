@@ -122,11 +122,11 @@ const PIE_COLORS = [
   "#9085e9", // violet
   "#e66767", // red
 ];
-const PIE_OTHER_COLOR = "#7c7e83";
-// Past 8 doctors the fixed palette can't keep every slice distinguishable —
-// fold the smallest remainder into a single "Other" slice rather than cycling
-// colors (which would silently reuse a hue for a different doctor).
-const PIE_MAX_SLICES = 8;
+// Instructed live: the card is titled "Busiest doctors today", but with every
+// doctor who saw a patient today plotted it stopped reading as a top-N
+// leaderboard — capped to the busiest 3 (the backend already returns them
+// busiest-first) instead of folding the rest into an "Other" slice.
+const BUSIEST_DOCTORS_LIMIT = 3;
 
 function useIsNarrowScreen(query) {
   const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
@@ -234,14 +234,10 @@ export default function AdminHome() {
   const utilizationPercentAnimated = useCountUp(utilization?.percentage ?? null);
   const bookedTodayAnimated = useCountUp(bookedToday);
 
-  // Busiest-first per the backend's own ordering — fold anything past the
-  // fixed 8-color palette into a single "Other" slice instead of cycling colors.
-  const busiestDoctors = stats?.busiest_doctors_today || [];
-  const pieData = busiestDoctors.slice(0, PIE_MAX_SLICES).map((d) => ({ name: d.doctor_name, value: d.count }));
-  if (busiestDoctors.length > PIE_MAX_SLICES) {
-    const otherCount = busiestDoctors.slice(PIE_MAX_SLICES).reduce((sum, d) => sum + d.count, 0);
-    pieData.push({ name: "Other", value: otherCount });
-  }
+  // Busiest-first per the backend's own ordering — top 3 only, see
+  // BUSIEST_DOCTORS_LIMIT above.
+  const busiestDoctors = (stats?.busiest_doctors_today || []).slice(0, BUSIEST_DOCTORS_LIMIT);
+  const pieData = busiestDoctors.map((d) => ({ name: d.doctor_name, value: d.count }));
 
   return (
     <>
@@ -322,7 +318,7 @@ export default function AdminHome() {
                   {pieData.map((entry, index) => (
                     <Cell
                       key={entry.name}
-                      fill={index < busiestDoctors.length && index < PIE_MAX_SLICES ? PIE_COLORS[index] : PIE_OTHER_COLOR}
+                      fill={PIE_COLORS[index]}
                       stroke="var(--app-bg-card)"
                       strokeWidth={2}
                     />
