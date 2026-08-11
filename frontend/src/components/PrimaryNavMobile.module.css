@@ -1,15 +1,22 @@
+/* Instructed live: a floating rounded "dock" instead of an edge-to-edge
+   rectangle — inset from all three free edges (left/right/bottom) rather
+   than flush against them, full border-radius instead of only a top edge,
+   and its own standalone shadow/border since it's no longer visually
+   attached to the screen edge the way a docked bar's border-top used to
+   read. */
 .tabBar {
   display: none;
   position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
   z-index: 60;
   align-items: stretch;
   background: var(--app-bg-card);
-  border-top: 1px solid var(--app-border);
-  padding: 0.35rem 0.25rem calc(0.35rem + env(safe-area-inset-bottom, 0px));
-  box-shadow: 0 -6px 16px var(--app-shadow);
+  border: 1px solid var(--app-border);
+  border-radius: 22px;
+  padding: 0.4rem 0.4rem;
+  box-shadow: 0 8px 24px var(--app-shadow);
 }
 
 @media (max-width: 719px) {

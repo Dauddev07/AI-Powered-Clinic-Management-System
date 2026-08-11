@@ -149,7 +149,11 @@ body {
    class can be present above that width with no visible effect. */
 @media (max-width: 719px) {
   body.has-primary-nav-mobile {
-    padding-bottom: calc(3.75rem + env(safe-area-inset-bottom, 0px));
+    /* The bar itself now floats with its own 0.75rem bottom margin (see
+       PrimaryNavMobile.module.css) instead of sitting flush against the
+       edge — reserved space needs to cover that gap too, not just the
+       bar's own height. */
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
     box-sizing: border-box;
   }
 }
