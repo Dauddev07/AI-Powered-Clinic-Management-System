@@ -248,6 +248,14 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 20%, transparent);
 }
 
+/* Mobile-only counterpart to .heroEyebrowDot — see the toggle in the
+   max-width: 900px block further down and the JSX call site's own comment. */
+.heroEyebrowIcon {
+  display: none;
+  flex-shrink: 0;
+  color: var(--app-accent);
+}
+
 .headline {
   margin: 0;
   font-size: clamp(2.1rem, 4.4vw, calc(var(--font-size-title) * 1.5));
@@ -291,6 +299,45 @@
   font-weight: 700;
 }
 
+/* Mobile-only stand-in for .urgency — hidden by default, shown (and .urgency
+   hidden) inside the max-width: 900px block below. Same claims as the prose
+   paragraph, broken into short icon rows instead of one long block of grey
+   text, which reads heavier on a narrow phone screen than on the two-column
+   desktop layout. */
+.heroHighlights {
+  display: none;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 100%;
+  max-width: 26rem;
+}
+
+.heroHighlightItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  text-align: left;
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+}
+
+.heroHighlightIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin-top: 0.05rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--app-accent) 14%, transparent);
+  color: var(--app-accent);
+}
+
 /* The hero's primary conversion moment — see the JSX call site's own
    comment. Primary is deliberately the biggest, boldest thing in the hero
    after the headline itself (larger padding/font than .backToDashboardBtn,
@@ -329,6 +376,12 @@
   box-shadow: 0 12px 30px color-mix(in srgb, var(--app-accent) 48%, transparent);
 }
 
+/* Instructed live: Register/Log in used to read as mismatched — a bold solid
+   accent pill next to a plain neutral-grey outline, as if Log in were an
+   afterthought rather than an equally deliberate second action. Kept as an
+   outline (still visually secondary to .heroCtaPrimary's solid fill) but
+   pulled into the same accent color family — tinted border, tinted fill,
+   accent-colored label — so the two buttons read as one uniform pair. */
 .heroCtaSecondary {
   display: inline-flex;
   align-items: center;
@@ -336,19 +389,20 @@
   gap: 0.5rem;
   padding: 0.85rem 1.9rem;
   border-radius: 14px;
-  border: 1.5px solid var(--app-border);
-  background: transparent;
-  color: var(--app-text-title);
+  border: 1.5px solid color-mix(in srgb, var(--app-accent) 45%, var(--app-border));
+  background: color-mix(in srgb, var(--app-accent) 9%, transparent);
+  color: var(--app-accent);
   font-size: var(--font-size-body);
-  font-weight: 600;
+  font-weight: 700;
   text-decoration: none;
   white-space: nowrap;
-  transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease;
+  transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
 }
 
 .heroCtaSecondary:hover {
   border-color: var(--app-accent);
-  background: color-mix(in srgb, var(--app-accent) 8%, transparent);
+  background: color-mix(in srgb, var(--app-accent) 18%, transparent);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--app-accent) 20%, transparent);
   transform: translateY(-2px);
 }
 
@@ -860,10 +914,64 @@
   .heroContent {
     align-items: center;
     text-align: center;
+    /* Slightly tighter than the desktop 1rem — with the two-paragraph prose
+       gone (see .urgency/.heroHighlights swap below) there are more, shorter
+       elements stacked here now, and the wider gap started reading as loose
+       rather than airy. */
+    gap: 0.85rem;
   }
 
+  .heroEyebrowDot {
+    display: none;
+  }
+
+  .heroEyebrowIcon {
+    display: inline-flex;
+  }
+
+  /* Requested live: the long two-paragraph pitch reads as a dense grey wall
+     of text on a narrow phone screen in a way it doesn't in the desktop
+     two-column layout. .urgency (the longer of the two) swaps for
+     .heroHighlights — the same two claims as short icon rows instead of
+     prose — while .description stays as-is above it as the short tagline. */
+  .urgency {
+    display: none;
+  }
+
+  .heroHighlights {
+    display: flex;
+  }
+
+  /* Same accent-tinted underline treatment used nowhere else on this page —
+     scoped to mobile only, where the headline has no neighboring graphic
+     (.heroVisual is hidden here) to carry any of the page's accent color, so
+     the single accent word in the headline is doing that job alone. */
+  .accentWord {
+    position: relative;
+  }
+
+  .accentWord::after {
+    content: "";
+    position: absolute;
+    left: 0.1em;
+    right: 0.1em;
+    bottom: 0.06em;
+    height: 0.16em;
+    border-radius: 999px;
+    background: linear-gradient(100deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 60%, #4fb0a8));
+    opacity: 0.32;
+    z-index: -1;
+  }
+
+  /* A faint top divider ahead of the CTA row reads as "here's the actual
+     next step" rather than just the next line of centered copy — the same
+     depth language the rest of the hero already uses (see .heroGlow1/2/3),
+     scaled down to a hairline here instead of a blurred blob. */
   .heroCtaRow {
     justify-content: center;
+    margin-top: 1.1rem;
+    padding-top: 1.1rem;
+    border-top: 1px solid color-mix(in srgb, var(--app-accent) 16%, var(--app-border));
   }
 
   /* Instructed live: hide the visual entirely at this width and below —

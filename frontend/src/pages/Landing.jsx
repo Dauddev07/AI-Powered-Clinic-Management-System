@@ -202,6 +202,27 @@ export default function Landing() {
             <div className={styles.heroContent}>
               <span className={styles.heroEyebrow}>
                 <span className={styles.heroEyebrowDot} aria-hidden="true" />
+                {/* Mobile-only swap (see .heroEyebrowIcon/.heroEyebrowDot in
+                    Landing.module.css) — the plain dot reads fine at desktop
+                    size next to the phone mockup, but on its own above the
+                    headline on small screens a small glyph carries more
+                    visual weight for the same space. */}
+                <svg
+                  className={styles.heroEyebrowIcon}
+                  viewBox="0 0 24 24"
+                  width="13"
+                  height="13"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="3.5" y="5" width="17" height="15" rx="2.5" />
+                  <path d="M3.5 9.5h17M8 3v3.5M16 3v3.5" />
+                  <path d="M8.5 14l2 2 4.5-4.5" />
+                </svg>
                 Online booking, made for patients
               </span>
               <h1 className={styles.headline}>
@@ -227,6 +248,26 @@ export default function Landing() {
                 already been seen</strong>, so you can book with confidence instead of
                 guessing who to trust.
               </p>
+              {/* Mobile-only stand-in for .urgency above (hidden at the same
+                  breakpoint, see Landing.module.css) — the same two claims,
+                  broken into short icon rows instead of one long paragraph of
+                  prose, which reads heavier on a narrow phone screen. */}
+              <ul className={styles.heroHighlights}>
+                <li className={styles.heroHighlightItem}>
+                  <span className={styles.heroHighlightIcon} aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M20 6L9 17l-5-5" />
+                    </svg>
+                  </span>
+                  Every slot is real — once it's taken, it's gone.
+                </li>
+                <li className={styles.heroHighlightItem}>
+                  <span className={styles.heroHighlightIcon} aria-hidden="true">
+                    <StarIcon filled size={13} />
+                  </span>
+                  Every doctor is rated by patients who've already been seen.
+                </li>
+              </ul>
               {/* The hero's whole job is to turn a first-time visitor into a
                   booked appointment — instructed live: this is the page's first
                   impression, and it had no call to action at all for a
