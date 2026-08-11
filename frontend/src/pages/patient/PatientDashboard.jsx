@@ -10,7 +10,6 @@ import StatusBadge from "../../components/StatusBadge";
 import WelcomeBanner from "../../components/WelcomeBanner";
 import { useCountUp } from "../../hooks/useCountUp";
 import { useNow } from "../../hooks/useNow";
-import { useReveal } from "../../hooks/useReveal";
 import { isAppointmentInProgress } from "../../utils/appointmentStatus";
 import { formatClinicDateTime as formatDateTime } from "../../utils/formatDateTime";
 import styles from "./PatientDashboard.module.css";
@@ -62,7 +61,6 @@ export default function PatientDashboard() {
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState(null);
   const now = useNow();
-  const revealRef = useReveal();
 
   useEffect(() => {
     fetchMyProfile()
@@ -104,11 +102,15 @@ export default function PatientDashboard() {
 
       <div className={styles.sectionLabel}>Appointments</div>
       <div className={styles.grid}>
-        {/* Previously dropped the reveal treatment here after it intermittently
-            stayed permanently invisible on load — root cause was a timing race
-            in the shared IntersectionObserver hook itself (see useReveal.js's
-            own comment), now fixed there directly rather than avoided here. */}
-        <div className={`${styles.card} ${nextCardAccentClass} reveal`} ref={revealRef}>
+        {/* Reported live: this card intermittently stayed permanently invisible
+            (opacity: 0, still occupying its grid slot) — the shared scroll-reveal
+            IntersectionObserver (see useReveal.js) never toggled its .revealed
+            class on some loads, with no visible failure mode short of the card
+            never appearing at all. Always-visible above-the-fold summary data has
+            no business depending on a scroll-triggered animation to begin with —
+            dropped the reveal/ref treatment entirely rather than chase the exact
+            observer race, same call made for the sibling card just below. */}
+        <div className={`${styles.card} ${nextCardAccentClass}`}>
           <div className={styles.cardTitleRow}>
             <span className={`${styles.titleIcon} ${styles.titleIcon_info}`} aria-hidden="true">
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -160,7 +162,7 @@ export default function PatientDashboard() {
           )}
         </div>
 
-        <div className={`${styles.card} reveal`} ref={revealRef}>
+        <div className={styles.card}>
           <div className={styles.cardTitleRow}>
             <span className={`${styles.titleIcon} ${styles.titleIcon_success}`} aria-hidden="true">
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
