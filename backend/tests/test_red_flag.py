@@ -3,7 +3,6 @@ import pytest
 from app.services.red_flag import (
     RED_FLAG_MESSAGE_EN,
     detect_red_flag,
-    detect_severity_escalation,
     red_flag_message,
 )
 
@@ -20,18 +19,20 @@ def test_explicit_heart_attack_still_fires():
 @pytest.mark.parametrize(
     "message",
     [
-        "I have severe chest pain",
         "chest pressure and tightness",
         "there is a squeezing pain in my chest",
     ],
 )
 def test_plain_chest_pain_no_longer_auto_fires(message):
-    # Product decision: plain chest pain/pressure/tightness (without an explicit
-    # "heart attack") deliberately does NOT auto-fire anymore — it ranges from a
-    # pulled muscle to a real cardiac emergency, so the chat agent itself asks a
-    # same-turn severity-screening question first (see PATH 2 in
-    # app.services.llm._AGENT_SYSTEM_PROMPT) instead of an immediate blanket
-    # redirect with no chance to ask anything.
+    # Product decision: plain chest pain/pressure/tightness with no severity
+    # stated (and no explicit "heart attack") deliberately does NOT auto-fire —
+    # it ranges from a pulled muscle to a real cardiac emergency, so the chat
+    # agent itself asks a same-turn severity-screening question first (see
+    # PATH 2 in app.services.llm._AGENT_SYSTEM_PROMPT) instead of an immediate
+    # blanket redirect with no chance to ask anything. This carve-out is now
+    # narrower than it used to be, though: "I have severe chest pain" is no
+    # longer in this list — see test_bare_severe_mention_always_fires, the
+    # bare-severity rule now supersedes it once severity IS stated.
     assert not detect_red_flag(message)
 
 
@@ -198,11 +199,7 @@ def test_plain_broken_bone_patterns_fire(message):
     assert detect_red_flag(message)
 
 
-# --- deterministic severity-escalation backstop (PATH 2 "severe" -> PATH 1) ----------
-
-_SEVERITY_QUESTION = (
-    "Could you tell me how severe this is (mild, moderate, or severe) and how long you've had it?"
-)
+# --- bare-severity product rule: any "severe" mention is an emergency ---------------
 
 
 @pytest.mark.parametrize(
@@ -212,15 +209,23 @@ _SEVERITY_QUESTION = (
         "its very severe and since 10 days",
         "severe, started this morning",
         "extremely severe",
+        "i am having severe headache",
+        "i have severe chest pain",
+        "severe abdominal pain since yesterday",
+        "my back pain is severe",
     ],
 )
-def test_severity_escalation_fires_after_a_severity_question(message):
-    # Reported live TWICE: a bare "its severe" answer to a headache severity
-    # screen, and separately "its very severe and since 10 days" — both routed
-    # to PATH 3 (routine booking) instead of PATH 1, despite the prompt already
-    # saying a severe answer alone is sufficient. This is the deterministic
-    # backstop for that failure, not reliant on the model complying.
-    assert detect_severity_escalation(message, _SEVERITY_QUESTION)
+def test_bare_severe_mention_always_fires(message):
+    # Reported live THREE times before landing on this as a blanket rule: "its
+    # very severe and since 10 days" and a bare "its severe" (both answering a
+    # headache severity screen) routed to PATH 3 instead of PATH 1 despite the
+    # prompt saying a severe answer alone is sufficient; then "i am having
+    # severe headache" as a FIRST message skipped straight to a department
+    # card with no screening and no emergency check at all. Product decision:
+    # any message stating a symptom is "severe" is an emergency, first message
+    # or reply, any symptom category (including chest pain, which previously
+    # had a narrower "screen first" carve-out — see llm.py's _TRIAGE_SECTION).
+    assert detect_red_flag(message)
 
 
 @pytest.mark.parametrize(
@@ -230,18 +235,11 @@ def test_severity_escalation_fires_after_a_severity_question(message):
         "moderate, comes and goes",
         "not severe, just annoying",
         "it's not that severe",
+        "my headache isn't really severe",
     ],
 )
-def test_severity_escalation_does_not_fire_for_non_severe_or_denied_answers(message):
-    assert not detect_severity_escalation(message, _SEVERITY_QUESTION)
-
-
-def test_severity_escalation_does_not_fire_without_a_preceding_severity_question():
-    # "severe" on its own, with no immediately-preceding severity-screening
-    # question, is not this guard's concern — the LLM's own PATH 1/2 judgment
-    # (or the regex/semantic red-flag gate) handles those cases instead.
-    assert not detect_severity_escalation("its severe", "How can I help you today?")
-    assert not detect_severity_escalation("its severe", None)
+def test_non_severe_or_denied_severity_does_not_false_fire(message):
+    assert not detect_red_flag(message)
 
 
 # --- bleeding: reversed word order and common misspellings --------------------------
@@ -814,8 +812,10 @@ def test_semantic_similarity_catches_paraphrases_with_no_shared_regex_vocabulary
     [
         # These deliberately stay negative even with the semantic layer active — see
         # _EXEMPLARS' docstring for why chest pain/bleeding/burns/choking/fractures/
-        # testicular pain are excluded from the semantic bank specifically.
-        "I have severe chest pain",
+        # testicular pain are excluded from the semantic bank specifically. Note:
+        # "I have severe chest pain" is NOT in this list anymore — the bare-severity
+        # rule now fires on it regardless of the semantic layer (see
+        # test_bare_severe_mention_always_fires).
         "chest pressure and tightness",
         "there is a squeezing pain in my chest",
         "i have a small cut, barely bleeding",

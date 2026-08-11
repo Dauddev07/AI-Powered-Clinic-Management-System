@@ -444,14 +444,16 @@ def test_agent_prompt_names_the_clinic_local_emergency_number():
 
 def test_agent_prompt_requires_severity_screening_for_ambiguous_symptoms():
     # PATH 2: chest pain/tightness/head pain must be screened with a direct
-    # severity question ("severe, bearable, or mild?") before any department
-    # routing decision — this is the product-level change from auto-firing on
-    # "chest pain" alone (see red_flag.py) to asking first.
+    # severity question before any department routing decision — this is the
+    # product-level change from auto-firing on "chest pain" alone (see
+    # red_flag.py) to asking first. The question no longer offers "severe" as
+    # a choice — a genuinely severe answer is intercepted server-side before
+    # the model ever sees it (see the bare-severity rule in red_flag.py).
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
     assert "PATH 2" in prompt
-    assert "is it severe, bearable, or mild?" in prompt
+    assert "is it moderate or mild?" in prompt
     assert "Do NOT decide a department, call get_department_availability, or state/imply" in prompt
-    assert "chest pain, tightness, or pressure; head pain or severe headache" in prompt
+    assert "chest pain, tightness, or pressure; head pain; a broken bone" in prompt
 
 
 def test_agent_prompt_path2_covers_broad_real_world_symptom_list_not_just_examples():
@@ -462,7 +464,7 @@ def test_agent_prompt_path2_covers_broad_real_world_symptom_list_not_just_exampl
     # their own differentiator guidance.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
     assert "not a fixed list" in prompt
-    assert "severe/persistent abdominal" in prompt
+    assert "persistent abdominal" in prompt
     assert "stomach pain" in prompt
     assert "high or persistent fever" in prompt
     assert "dizziness, lightheadedness, or feeling faint" in prompt
@@ -491,13 +493,14 @@ def test_agent_prompt_includes_broken_bone_in_ambiguous_symptom_screening():
 
 
 def test_agent_prompt_a_severe_answer_is_not_overruled_by_other_reply_detail():
-    # Reported live: "its very severe and since 10 days" (answering a headache
-    # severity screen) wrongly routed to PATH 3 instead of PATH 1 — the "10 days"
-    # duration was read as making this chronic/non-acute and downgraded the explicit
-    # "severe" answer to routine booking. Duration/location/etc. volunteered
-    # alongside "severe" must never override the severity word itself.
+    # Superseded by the bare-severity rule (see red_flag.py): a literal "severe"
+    # answer is now intercepted server-side before the model ever sees it, so
+    # this prompt text covers the remaining reachable case instead — an
+    # extreme/unbearable/worst-of-my-life answer (no literal "severe") must
+    # still not be downgraded by other detail volunteered in the same reply
+    # (e.g. duration making it read as chronic-and-fine).
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "its very severe and since 10 days" in prompt
+    assert "worst pain of my life" in prompt
     assert "never a downgrade signal" in prompt
 
 

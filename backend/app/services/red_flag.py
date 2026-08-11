@@ -26,6 +26,14 @@ both layers, same as any heuristic system. The threshold (0.5) was picked empiri
 against a real paraphrase/benign test set (see tests/test_red_flag.py) rather than
 guessed, since ungrounded thresholds are exactly the kind of thing that silently drifts
 wrong.
+
+BARE-SEVERITY LAYER: a plain product rule, not a heuristic — see
+_severity_stated_as_severe's own docstring. The model was repeatedly relied on to
+escalate a patient's own explicit "severe" answer to PATH 1 (both as a reply to a
+screening question and stated outright in the first message) and did not comply
+reliably, so this is now a deterministic check instead: any message stating a
+symptom is "severe", unnegated, is an emergency, full stop, regardless of which
+symptom category or what else is in the same message.
 """
 import re
 
@@ -451,43 +459,38 @@ def _semantic_red_flag(message: str) -> bool:
     )
 
 
-_SEVERITY_QUESTION_RE = re.compile(r"\bsever(e|ity)\b", re.IGNORECASE)
-_MILD_RE = re.compile(r"\bmild\b", re.IGNORECASE)
-_SEVERE_WORD_RE = re.compile(r"\bsevere\b", re.IGNORECASE)
+_BARE_SEVERE_RE = re.compile(r"\bsevere(?:ly)?\b", re.IGNORECASE)
 # Negation window: up to 3 words between a negation word and "severe" — covers
 # "not that severe", "isn't really severe", "no, not severe", not just "not severe"
 # with nothing between them. A fixed-width lookbehind (the style used elsewhere in
 # this file, e.g. the bleeding-severity patterns) can't stretch across an
 # intervening word like "that"/"really", so this uses a bounded forward window
-# instead.
-_NEGATED_SEVERE_RE = re.compile(r"\b(not|n't|no)\b(?:\s+\S+){0,3}\s+severe\b", re.IGNORECASE)
+# instead. "n't" deliberately has no LEADING \b (only a trailing one) — "isn't"/
+# "wasn't"/"doesn't" have no word boundary between the preceding letter and "n"
+# since both are word characters, so a leading \b would silently fail to match
+# any contraction, only a bare standalone "not".
+_NEGATED_SEVERE_RE = re.compile(r"(?:\bnot\b|\bno\b|n't\b)(?:\s+\S+){0,3}\s+severe", re.IGNORECASE)
 
 
-def detect_severity_escalation(message: str, last_assistant_message: str | None) -> bool:
-    """Deterministic backstop for PATH 2's own "a severe answer -> PATH 1 immediately"
-    rule (see llm.py's _TRIAGE_SECTION). Reported live TWICE: "its very severe and
-    since 10 days" and, after the prompt was already strengthened once to say extra
-    reply detail must never override an explicit "severe" answer, a bare "its severe"
-    on its own STILL routed to PATH 3 instead of PATH 1 for a headache. A prompt
-    instruction alone is not a guarantee — same principle as detect_red_flag() above
-    — so this is a plain server-side check for this exact conversational pattern
-    instead of trusting the model to comply a third time.
-
-    Fires only when BOTH hold: the assistant's own immediately-preceding turn reads
-    as a severity-screening question (contains both "severe"/"severity" and "mild" —
-    the scale's two named endpoints, e.g. "is it mild, moderate, or severe?"), and
-    the patient's reply affirms severe (not negated, and not just "moderate"/"mild").
-    Deliberately narrow: an unrelated "severe" mention with no immediately-preceding
-    severity question does not fire here — this is a backstop for this one reported
-    failure mode, not a general severity detector.
+def _severity_stated_as_severe(message: str) -> bool:
+    """Product decision: if the patient plainly states a symptom is "severe" —
+    the FIRST message or a later reply, any ambiguous/PATH-2 category (headache,
+    chest pain, abdominal pain, back pain, fever, etc.), regardless of what else
+    is in the same message — that alone means emergency, no screening question
+    needed first. Reported live three times before landing on this as a blanket
+    server-side rule rather than a narrower conversational pattern: "its very
+    severe and since 10 days" and a bare "its severe" (both answering a headache
+    severity screen) routed to PATH 3 instead of PATH 1 despite the prompt saying
+    "severe" alone should escalate; then "i am having severe headache" as a FIRST
+    message skipped straight to a department card with no screening AND no
+    emergency check at all. A prompt instruction alone is not a guarantee, so
+    this is now a plain server-side check, same principle as the regex patterns
+    above — and it supersedes the older, narrower chest-pain-specific design
+    decision that wanted a screening question first even when "severe" was
+    already stated (see llm.py's _TRIAGE_SECTION): the general rule now covers
+    chest pain too.
     """
-    if not last_assistant_message:
-        return False
-    if not (_SEVERITY_QUESTION_RE.search(last_assistant_message) and _MILD_RE.search(last_assistant_message)):
-        return False
-    if not _SEVERE_WORD_RE.search(message):
-        return False
-    return not _NEGATED_SEVERE_RE.search(message)
+    return bool(_BARE_SEVERE_RE.search(message)) and not _NEGATED_SEVERE_RE.search(message)
 
 
 RED_FLAG_MESSAGE_EN = (
@@ -502,11 +505,12 @@ RED_FLAG_MESSAGE_EN = (
 
 
 def detect_red_flag(message: str) -> bool:
-    """True if EITHER layer fires: the regex gate (exact/loose wording matches) OR the
-    semantic similarity check (paraphrases with no shared vocabulary with any regex
-    pattern). Either one alone is sufficient — this is a union, not a requirement that
-    both agree."""
-    return bool(_RED_FLAG_RE.search(message)) or _semantic_red_flag(message)
+    """True if ANY layer fires: the regex gate (exact/loose wording matches), the
+    bare "severe" product rule (see _severity_stated_as_severe's own docstring), or
+    the semantic similarity check (paraphrases with no shared vocabulary with any
+    regex pattern). Any one alone is sufficient — this is a union, not a requirement
+    that they all agree."""
+    return bool(_RED_FLAG_RE.search(message)) or _severity_stated_as_severe(message) or _semantic_red_flag(message)
 
 
 def red_flag_message() -> str:
