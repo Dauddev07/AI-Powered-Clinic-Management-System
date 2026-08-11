@@ -35,7 +35,7 @@ from app.services.orchestrator.agents.appointment_agent import run_appointment_a
 from app.services.orchestrator.agents.general_info_agent import run_general_info_agent
 from app.services.orchestrator.agents.symptom_agent import run_symptom_agent
 from app.services.orchestrator.router import APPOINTMENT, GENERAL_INFO, SYMPTOM_GENERAL, classify_agent_intent
-from app.services.red_flag import detect_red_flag, red_flag_message
+from app.services.red_flag import detect_red_flag, detect_severity_escalation, red_flag_message
 
 # How many prior turns (user+assistant messages, not pairs) of THIS SAME SESSION are
 # LOADED FROM THE DATABASE, most-recent-first. This is the outer bound everything else
@@ -180,7 +180,7 @@ class GuardOutcome:
     red_flag: bool = False
 
 
-def _red_flag_guard(message: str) -> GuardOutcome | None:
+def _red_flag_guard(message: str, history: list[ConversationMemory]) -> GuardOutcome | None:
     """Emergency detection runs before anything else — a real emergency
     short-circuits triage, booking, and KB retrieval entirely and returns the
     urgent routing message immediately. A prompt instruction alone is not a
@@ -191,16 +191,33 @@ def _red_flag_guard(message: str) -> GuardOutcome | None:
     return None
 
 
-# Pre-agent guards: each takes the raw incoming message and can fully resolve
-# the turn (return a GuardOutcome) before routing/the specialist agent ever
-# runs. First non-None result wins; None means "not this guard's concern, try
-# the next one" — same first-match-wins shape as router._RULE_CASCADE.
-_PRE_AGENT_GUARDS: tuple = (_red_flag_guard,)
+def _severity_escalation_guard(message: str, history: list[ConversationMemory]) -> GuardOutcome | None:
+    """Backstop for PATH 2's "a severe answer -> PATH 1 immediately" rule (see
+    detect_severity_escalation's own docstring for the reported failure this
+    covers) — the model did not reliably comply with that prompt instruction on
+    its own, even after it was strengthened once already. `history` is most-
+    recent-LAST (see _load_recent_history), so the assistant's own immediately-
+    preceding turn — the question this message is answering, if any — is
+    history[-1] whenever history is non-empty and didn't just end on a user turn
+    (a user turn there means this isn't actually answering an assistant
+    question at all, so the guard doesn't fire)."""
+    last_assistant_message = history[-1].content if history and history[-1].role == "assistant" else None
+    if detect_severity_escalation(message, last_assistant_message):
+        return GuardOutcome(reply=red_flag_message(), red_flag=True)
+    return None
 
 
-def _run_pre_agent_guards(message: str) -> GuardOutcome | None:
+# Pre-agent guards: each takes the raw incoming message plus the session's prior
+# history and can fully resolve the turn (return a GuardOutcome) before routing/
+# the specialist agent ever runs. First non-None result wins; None means "not
+# this guard's concern, try the next one" — same first-match-wins shape as
+# router._RULE_CASCADE.
+_PRE_AGENT_GUARDS: tuple = (_red_flag_guard, _severity_escalation_guard)
+
+
+def _run_pre_agent_guards(message: str, history: list[ConversationMemory]) -> GuardOutcome | None:
     for guard in _PRE_AGENT_GUARDS:
-        outcome = guard(message)
+        outcome = guard(message, history)
         if outcome is not None:
             return outcome
     return None
@@ -233,15 +250,11 @@ def handle_chat_message(
     session_id = session_id or uuid.uuid4()
     language = detect_language(message)
 
-    pre_guard_outcome = _run_pre_agent_guards(message)
-    if pre_guard_outcome is not None:
-        _save_message(db, ctx, session_id, "user", message)
-        _save_message(db, ctx, session_id, "assistant", pre_guard_outcome.reply, red_flag=pre_guard_outcome.red_flag)
-        db.commit()
-        return ChatTurnResult(session_id=session_id, reply=pre_guard_outcome.reply, red_flag=pre_guard_outcome.red_flag)
-
     # Loaded before the current turn is saved, so the prompt's history never
-    # double-includes the message being answered right now.
+    # double-includes the message being answered right now. Also loaded before
+    # the pre-agent guards run (moved up from after them) — _severity_escalation_
+    # guard needs to see the assistant's own immediately-preceding turn to know
+    # whether this message is actually answering a severity-screening question.
     #
     # Reported live: patient memory is scoped to THIS session/chat only, by
     # design — a brand new chat must start completely fresh, with no digest of
@@ -263,6 +276,13 @@ def handle_chat_message(
         history = _load_recent_history(db, ctx, session_id)
     else:
         history = []
+
+    pre_guard_outcome = _run_pre_agent_guards(message, history)
+    if pre_guard_outcome is not None:
+        _save_message(db, ctx, session_id, "user", message)
+        _save_message(db, ctx, session_id, "assistant", pre_guard_outcome.reply, red_flag=pre_guard_outcome.red_flag)
+        db.commit()
+        return ChatTurnResult(session_id=session_id, reply=pre_guard_outcome.reply, red_flag=pre_guard_outcome.red_flag)
 
     # The orchestrator's intent layer replaces classify_message_intent() + the old
     # single agent entirely: exactly one specialist handles this turn, decided by

@@ -3,6 +3,7 @@ import pytest
 from app.services.red_flag import (
     RED_FLAG_MESSAGE_EN,
     detect_red_flag,
+    detect_severity_escalation,
     red_flag_message,
 )
 
@@ -195,6 +196,52 @@ def test_severe_trauma_and_limb_loss_patterns_fire(message):
 )
 def test_plain_broken_bone_patterns_fire(message):
     assert detect_red_flag(message)
+
+
+# --- deterministic severity-escalation backstop (PATH 2 "severe" -> PATH 1) ----------
+
+_SEVERITY_QUESTION = (
+    "Could you tell me how severe this is (mild, moderate, or severe) and how long you've had it?"
+)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "its severe",
+        "its very severe and since 10 days",
+        "severe, started this morning",
+        "extremely severe",
+    ],
+)
+def test_severity_escalation_fires_after_a_severity_question(message):
+    # Reported live TWICE: a bare "its severe" answer to a headache severity
+    # screen, and separately "its very severe and since 10 days" — both routed
+    # to PATH 3 (routine booking) instead of PATH 1, despite the prompt already
+    # saying a severe answer alone is sufficient. This is the deterministic
+    # backstop for that failure, not reliant on the model complying.
+    assert detect_severity_escalation(message, _SEVERITY_QUESTION)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "its mild",
+        "moderate, comes and goes",
+        "not severe, just annoying",
+        "it's not that severe",
+    ],
+)
+def test_severity_escalation_does_not_fire_for_non_severe_or_denied_answers(message):
+    assert not detect_severity_escalation(message, _SEVERITY_QUESTION)
+
+
+def test_severity_escalation_does_not_fire_without_a_preceding_severity_question():
+    # "severe" on its own, with no immediately-preceding severity-screening
+    # question, is not this guard's concern — the LLM's own PATH 1/2 judgment
+    # (or the regex/semantic red-flag gate) handles those cases instead.
+    assert not detect_severity_escalation("its severe", "How can I help you today?")
+    assert not detect_severity_escalation("its severe", None)
 
 
 # --- bleeding: reversed word order and common misspellings --------------------------

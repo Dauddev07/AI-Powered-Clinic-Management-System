@@ -451,6 +451,45 @@ def _semantic_red_flag(message: str) -> bool:
     )
 
 
+_SEVERITY_QUESTION_RE = re.compile(r"\bsever(e|ity)\b", re.IGNORECASE)
+_MILD_RE = re.compile(r"\bmild\b", re.IGNORECASE)
+_SEVERE_WORD_RE = re.compile(r"\bsevere\b", re.IGNORECASE)
+# Negation window: up to 3 words between a negation word and "severe" — covers
+# "not that severe", "isn't really severe", "no, not severe", not just "not severe"
+# with nothing between them. A fixed-width lookbehind (the style used elsewhere in
+# this file, e.g. the bleeding-severity patterns) can't stretch across an
+# intervening word like "that"/"really", so this uses a bounded forward window
+# instead.
+_NEGATED_SEVERE_RE = re.compile(r"\b(not|n't|no)\b(?:\s+\S+){0,3}\s+severe\b", re.IGNORECASE)
+
+
+def detect_severity_escalation(message: str, last_assistant_message: str | None) -> bool:
+    """Deterministic backstop for PATH 2's own "a severe answer -> PATH 1 immediately"
+    rule (see llm.py's _TRIAGE_SECTION). Reported live TWICE: "its very severe and
+    since 10 days" and, after the prompt was already strengthened once to say extra
+    reply detail must never override an explicit "severe" answer, a bare "its severe"
+    on its own STILL routed to PATH 3 instead of PATH 1 for a headache. A prompt
+    instruction alone is not a guarantee — same principle as detect_red_flag() above
+    — so this is a plain server-side check for this exact conversational pattern
+    instead of trusting the model to comply a third time.
+
+    Fires only when BOTH hold: the assistant's own immediately-preceding turn reads
+    as a severity-screening question (contains both "severe"/"severity" and "mild" —
+    the scale's two named endpoints, e.g. "is it mild, moderate, or severe?"), and
+    the patient's reply affirms severe (not negated, and not just "moderate"/"mild").
+    Deliberately narrow: an unrelated "severe" mention with no immediately-preceding
+    severity question does not fire here — this is a backstop for this one reported
+    failure mode, not a general severity detector.
+    """
+    if not last_assistant_message:
+        return False
+    if not (_SEVERITY_QUESTION_RE.search(last_assistant_message) and _MILD_RE.search(last_assistant_message)):
+        return False
+    if not _SEVERE_WORD_RE.search(message):
+        return False
+    return not _NEGATED_SEVERE_RE.search(message)
+
+
 RED_FLAG_MESSAGE_EN = (
     "This may be a medical emergency. Please call 1122 or go to "
     "the nearest emergency room right away. This assistant cannot handle emergencies.\n\n"
