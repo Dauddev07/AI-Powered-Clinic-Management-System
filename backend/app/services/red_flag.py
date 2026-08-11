@@ -41,6 +41,45 @@ import numpy as np
 
 from app.rag.embeddings import embed_texts
 
+# Reported live: "i doesnt broke my leg" (a denial, typed without the apostrophe —
+# an extremely common way to type "doesn't"/"isn't"/etc.) still fired the emergency
+# redirect, since every negation guard below only recognized "not"/"n't"/"no"
+# literally. "doesnt" contains neither "not" nor "n't" as a substring.
+#
+# Python's `re` module only supports FIXED-WIDTH lookbehind — a single
+# `(?<!(not|n't|no|doesnt|...) )` alternation can't work since each word is a
+# different length, so this needs one separate `(?<!word )` assertion per negation
+# word, concatenated. Defined once and reused everywhere a pattern below needs to
+# guard against a patient's own denial, so adding a newly reported typo variant is
+# one line here instead of hunting down every call site.
+_NEGATION_WORDS = (
+    "not", "no", "n't", "dont", "doesnt", "didnt", "isnt", "wasnt", "arent",
+    "werent", "cant", "couldnt", "wont", "hasnt", "havent",
+)
+
+
+def _negation_lookbehinds() -> str:
+    return "".join(f"(?<!{word} )" for word in _NEGATION_WORDS)
+
+
+def _negation_word_alternation() -> str:
+    """Same _NEGATION_WORDS list as a plain (non-lookbehind) alternation, for a
+    pattern that scans FORWARD from the negation word instead of checking what
+    immediately precedes a fixed target (see _NEGATED_SEVERE_RE below, which needs
+    to span an intervening word like "not THAT severe" — a fixed-width lookbehind
+    can't do that, so it matches forward from the negation word instead). "n't" has
+    no leading \\b for the same reason _negation_lookbehinds' docstring gives:
+    "isn't"/"doesn't" have no word boundary between the preceding letter and "n"."""
+    parts = [r"n't\b" if word == "n't" else rf"\b{word}\b" for word in _NEGATION_WORDS]
+    return "(?:" + "|".join(parts) + ")"
+
+
+# Precomputed once and prepended via plain string concatenation (not an f-string —
+# several patterns below contain literal {0,15}-style quantifiers that an f-string
+# would misparse as expressions needing escaping) wherever a pattern needs this guard.
+_NEG = _negation_lookbehinds()
+
+
 # Each pattern matches loosely-phrased real-world wording, not just clinical terms —
 # a patient describing an emergency rarely uses textbook language.
 _RED_FLAG_PATTERNS = [
@@ -60,8 +99,8 @@ _RED_FLAG_PATTERNS = [
     # phrase itself still matched regardless of the negation word right in front of it,
     # auto-firing on a patient's own reassurance that they're NOT having trouble
     # breathing. Same technique as the bleeding-severity patterns below.
-    r"(?<!not )(?<!n't )(?<!no )\bshortness of breath\b",
-    r"(?<!not )(?<!n't )(?<!no )\bshort of breath\b",
+    _NEG + r"\bshortness of breath\b",
+    _NEG + r"\bshort of breath\b",
     # Reported live: "i am having difficulty to breath now" (a foreign object lodged
     # in the nose, patient actively struggling to breathe) fell through entirely —
     # \s*breath required the trigger word to sit directly against "breath" with only
@@ -70,7 +109,7 @@ _RED_FLAG_PATTERNS = [
     # The optional (?:\s+to)? closes exactly that gap without loosening the pattern
     # into a generic character-gap that would risk matching unrelated "difficulty ...
     # breathing" mentions many words apart.
-    r"(?<!not )(?<!n't )(?<!no )\b(can'?t|cannot|can not|difficulty|struggling to|trouble)(?:\s+to)?\s*breath",
+    _NEG + r"\b(can'?t|cannot|can not|difficulty|struggling to|trouble)(?:\s+to)?\s*breath",
     r"\bnot breathing\b",
     r"\bgasping\b",
     r"\bsuffocat",
@@ -94,9 +133,9 @@ _RED_FLAG_PATTERNS = [
     # ("not bleeding severely", "isn't bleeding badly", "no heavy bleeding") — without
     # them the phrase itself still matched regardless of the negation word right in
     # front of it, auto-firing on a patient's own reassurance that it's NOT severe.
-    r"(?<!not )(?<!n't )(?<!no )\b(sever\w{0,4}ly|severe|heavy|heavily|uncontrolled|won'?t stop|not stopping|"
+    _NEG + r"\b(sever\w{0,4}ly|severe|heavy|heavily|uncontrolled|won'?t stop|not stopping|"
     r"a lot|badly|profusely|excessively)\s*bleed",
-    r"(?<!not )(?<!n't )(?<!no )\bbleed\w*\s*(sever\w{0,4}ly|severe|heavy|heavily|a lot|a ton|so much|very much|"
+    _NEG + r"\bbleed\w*\s*(sever\w{0,4}ly|severe|heavy|heavily|a lot|a ton|so much|very much|"
     r"won'?t stop|badly|profusely|excessively)\b",
     r"\bblood.{0,15}(everywhere|won'?t stop)\b",
     # Vehicle accidents / high-energy trauma — the mechanism itself (being struck by
@@ -165,32 +204,11 @@ _RED_FLAG_PATTERNS = [
     r"\bmissing\b.{0,10}\b(a|an|my|one)\b.{0,10}\b(leg|arm|hand|foot|finger|toe|limb)\b",
     r"\bcompound fracture\b",
     r"\bbone\b.{0,15}\bsticking out\b",
-    # Reported live: "my leg is broken" fell through entirely — every pattern in this
-    # section required either "compound fracture" or "sticking out" specifically, but
-    # a patient's own plain "it's broken"/"I broke my X"/"fractured" is exactly as
-    # unambiguous a severe-trauma claim and is far more common everyday phrasing than
-    # either of those two clinical terms.
-    #
-    # Reported live AGAIN: "my arm got broken"/"my leg got broken" still fell through
-    # — the reverse-order pattern below only matched the exact phrase "is broken", so
-    # any other connector ("got broken", "just broke", "feels broken") slipped past
-    # it. Body-part-then-broken/broke is now a generic proximity match with no fixed
-    # connector required, same style already used for the forward-order pattern.
-    # Negative lookbehinds on every "broken"/"broke"/"fractured" occurrence (not just
-    # the reverse-order patterns) guard against a patient's own reassurance ("my leg
-    # is not broken", "thankfully it isn't broken") — without them the word itself
-    # still matched regardless of a negation word sitting right in front of it, same
-    # failure mode as the bleeding/breathing patterns above, fixed the same way.
-    r"\bbroken\b.{0,15}\b(leg|arm|hand|foot|ankle|wrist|hip|bone|finger|toe|rib|collarbone|jaw|nose)\b",
-    r"\b(leg|arm|hand|foot|ankle|wrist|hip|finger|toe|rib|collarbone|jaw|nose)\b.{0,15}"
-    r"(?<!not )(?<!n't )(?<!no )\bbroken\b",
-    r"(?<!not )(?<!n't )(?<!no )\bbroke\b.{0,10}\b(my|his|her|their)\b.{0,5}"
-    r"\b(leg|arm|hand|foot|ankle|wrist|hip|finger|toe|rib|collarbone|jaw|nose)\b",
-    r"\b(leg|arm|hand|foot|ankle|wrist|hip|finger|toe|rib|collarbone|jaw|nose)\b.{0,15}"
-    r"(?<!not )(?<!n't )(?<!no )\bbroke\b",
-    r"\bfractured\b.{0,15}\b(leg|arm|hand|foot|ankle|wrist|hip|bone|finger|toe|rib|collarbone|jaw|nose)\b",
-    r"\b(leg|arm|hand|foot|ankle|wrist|hip|finger|toe|rib|collarbone|jaw|nose)\b.{0,15}"
-    r"(?<!not )(?<!n't )(?<!no )\bfractured\b",
+    # Broken/fractured bones are handled separately below (see
+    # _bare_broken_bone_stated) rather than as regex entries here — a simple
+    # adjacent lookbehind isn't wide enough to catch a negation several words
+    # away ("i dont think my arm is broken"), the same problem the bare-severity
+    # rule already had to solve with a forward-scanning window instead.
     r"\bcrush(ed|ing)\b.{0,20}\b(leg|arm|hand|foot|limb|chest|head)\b",
     r"\b(leg|arm|hand|foot|limb|chest|head)\b.{0,20}\bcrush(ed|ing)\b",
     r"\bimpaled\b",
@@ -476,15 +494,12 @@ def _semantic_red_flag(message: str) -> bool:
 
 _BARE_SEVERE_RE = re.compile(r"\bsevere(?:ly)?\b", re.IGNORECASE)
 # Negation window: up to 3 words between a negation word and "severe" — covers
-# "not that severe", "isn't really severe", "no, not severe", not just "not severe"
-# with nothing between them. A fixed-width lookbehind (the style used elsewhere in
-# this file, e.g. the bleeding-severity patterns) can't stretch across an
-# intervening word like "that"/"really", so this uses a bounded forward window
-# instead. "n't" deliberately has no LEADING \b (only a trailing one) — "isn't"/
-# "wasn't"/"doesn't" have no word boundary between the preceding letter and "n"
-# since both are word characters, so a leading \b would silently fail to match
-# any contraction, only a bare standalone "not".
-_NEGATED_SEVERE_RE = re.compile(r"(?:\bnot\b|\bno\b|n't\b)(?:\s+\S+){0,3}\s+severe", re.IGNORECASE)
+# "not that severe", "isn't really severe", "doesnt seem too severe", not just "not
+# severe" with nothing between them. A fixed-width lookbehind (the style used
+# elsewhere in this file, e.g. the bleeding-severity patterns) can't stretch across
+# an intervening word like "that"/"really", so this uses a bounded forward window
+# instead, built from the same _NEGATION_WORDS list everything else uses.
+_NEGATED_SEVERE_RE = re.compile(_negation_word_alternation() + r"(?:\s+\S+){0,3}\s+severe", re.IGNORECASE)
 
 
 def _severity_stated_as_severe(message: str) -> bool:
@@ -508,6 +523,35 @@ def _severity_stated_as_severe(message: str) -> bool:
     return bool(_BARE_SEVERE_RE.search(message)) and not _NEGATED_SEVERE_RE.search(message)
 
 
+_BODY_PART = r"(?:leg|arm|hand|foot|ankle|wrist|hip|bone|finger|toe|rib|collarbone|jaw|nose)"
+_BROKEN_BONE_RE = re.compile(
+    rf"\bbroken\b.{{0,15}}\b{_BODY_PART}\b"
+    rf"|\b{_BODY_PART}\b.{{0,15}}\bbroken\b"
+    rf"|\bbroke\b.{{0,10}}\b(?:my|his|her|their)\b.{{0,5}}\b{_BODY_PART}\b"
+    rf"|\b{_BODY_PART}\b.{{0,15}}\bbroke\b"
+    rf"|\bfractured\b.{{0,15}}\b{_BODY_PART}\b"
+    rf"|\b{_BODY_PART}\b.{{0,15}}\bfractured\b",
+    re.IGNORECASE,
+)
+# Wider window (5, not 3 like _NEGATED_SEVERE_RE) — reported live: "i dont think my
+# arm is broken" has 4 words between "dont" and "broken" ("think my arm is"), more
+# than a severity answer typically has between its own negation word and "severe".
+_BROKEN_BONE_NEGATED_RE = re.compile(
+    _negation_word_alternation() + r"(?:\s+\S+){0,5}\s+(?:broken|broke|fractured)\b", re.IGNORECASE
+)
+
+
+def _bare_broken_bone_stated(message: str) -> bool:
+    """Same principle and shape as _severity_stated_as_severe above, for the same
+    reason: reported live, "my leg is broken" / "my arm got broken" / "i am having
+    severe headache"-style plain statements were repeatedly missed or unreliably
+    escalated by the LLM. A patient's own plain, unnegated claim that a bone is
+    broken/fractured is unambiguous enough to treat as an emergency on its own,
+    regardless of phrasing, connector word, or word order.
+    """
+    return bool(_BROKEN_BONE_RE.search(message)) and not _BROKEN_BONE_NEGATED_RE.search(message)
+
+
 RED_FLAG_MESSAGE_EN = (
     "This may be a medical emergency. Please call 1122 or go to "
     "the nearest emergency room right away. This assistant cannot handle emergencies.\n\n"
@@ -521,11 +565,17 @@ RED_FLAG_MESSAGE_EN = (
 
 def detect_red_flag(message: str) -> bool:
     """True if ANY layer fires: the regex gate (exact/loose wording matches), the
-    bare "severe" product rule (see _severity_stated_as_severe's own docstring), or
-    the semantic similarity check (paraphrases with no shared vocabulary with any
-    regex pattern). Any one alone is sufficient — this is a union, not a requirement
-    that they all agree."""
-    return bool(_RED_FLAG_RE.search(message)) or _severity_stated_as_severe(message) or _semantic_red_flag(message)
+    bare "severe" product rule (see _severity_stated_as_severe's own docstring), the
+    broken-bone rule (see _bare_broken_bone_stated's own docstring), or the semantic
+    similarity check (paraphrases with no shared vocabulary with any regex pattern).
+    Any one alone is sufficient — this is a union, not a requirement that they all
+    agree."""
+    return (
+        bool(_RED_FLAG_RE.search(message))
+        or _severity_stated_as_severe(message)
+        or _bare_broken_bone_stated(message)
+        or _semantic_red_flag(message)
+    )
 
 
 def red_flag_message() -> str:

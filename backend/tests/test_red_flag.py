@@ -212,9 +212,29 @@ def test_plain_broken_bone_patterns_fire(message):
         "my leg is not broken",
         "good news my arm isn't broken thankfully",
         "my ankle is not fractured",
+        # Reported live: "i doesnt broke my leg" — an apostrophe-dropped contraction
+        # ("doesnt", not "doesn't") — still fired, since "doesnt" contains neither
+        # "not" nor "n't" as a literal substring. This is an extremely common way to
+        # type these contractions, not an edge case.
+        "i doesnt broke my leg",
+        "i dont think my arm is broken",
+        "i havent broken anything",
     ],
 )
 def test_explicitly_denied_broken_bone_does_not_false_fire(message):
+    assert not detect_red_flag(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "its not severe, just annoying",
+        "doesnt seem too severe",
+        "i dont have severe pain",
+        "isnt that severe honestly",
+    ],
+)
+def test_apostrophe_dropped_negation_does_not_false_fire_on_severity(message):
     assert not detect_red_flag(message)
 
 
