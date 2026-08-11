@@ -21,7 +21,11 @@ export default function PrimaryNavDesktop() {
   const location = useLocation();
   const [homeSpinning, setHomeSpinning] = useState(false);
 
-  if (!isAuthenticated) return null;
+  // Hidden on the landing page — a signed-in patient/admin who navigates
+  // there (via the header's brand link) is meant to see it as the public
+  // marketing page, with its own "Back to Dashboard" link (see Landing.jsx),
+  // not as another app screen wearing the app's own persistent nav.
+  if (!isAuthenticated || location.pathname === "/") return null;
 
   const dashboardPath = user?.role === "admin" ? "/admin" : "/patient";
   const items = getNavItems(user?.role, dashboardPath);

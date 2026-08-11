@@ -9,11 +9,17 @@ import styles from "./PrimaryNavMobile.module.css";
 // convention instead of a top row once there's no room for a horizontal bar
 // next to the header. Hidden on the chat page: it's already a full-bleed,
 // edge-to-edge surface with its own bottom input bar (see PatientLayout.jsx),
-// and a second fixed bottom bar would sit on top of it.
+// and a second fixed bottom bar would sit on top of it. Also hidden on the
+// landing page — a signed-in patient/admin who navigates there (via the
+// header's brand link) is meant to see it as the public marketing page, with
+// its own "Back to Dashboard" link (see Landing.jsx), not as another app
+// screen wearing the app's own persistent nav.
 export default function PrimaryNavMobile() {
   const { isAuthenticated, user } = useAuth();
   const location = useLocation();
   const isChatPage = location.pathname === "/patient/chat";
+  const isLandingPage = location.pathname === "/";
+  const isHidden = isChatPage || isLandingPage;
 
   // Page content (and the footer, which sits right after it — see App.jsx)
   // needs room reserved at the bottom so this fixed bar never covers the
@@ -22,12 +28,12 @@ export default function PrimaryNavMobile() {
   // already uses for its own scroll lock. The actual padding only applies
   // under 720px (see index.css) — this class is otherwise inert above that.
   useEffect(() => {
-    const shouldReserveSpace = isAuthenticated && !isChatPage;
+    const shouldReserveSpace = isAuthenticated && !isHidden;
     document.body.classList.toggle("has-primary-nav-mobile", shouldReserveSpace);
     return () => document.body.classList.remove("has-primary-nav-mobile");
-  }, [isAuthenticated, isChatPage]);
+  }, [isAuthenticated, isHidden]);
 
-  if (!isAuthenticated || isChatPage) return null;
+  if (!isAuthenticated || isHidden) return null;
 
   const dashboardPath = user?.role === "admin" ? "/admin" : "/patient";
   const items = getNavItems(user?.role, dashboardPath);
