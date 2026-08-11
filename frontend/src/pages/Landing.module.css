@@ -149,8 +149,7 @@
    max-width: 900px block below. See the JSX call site's own comment for why
    these exist instead of just repositioning the desktop glows in place. */
 .heroTopVignette,
-.heroSpotlight,
-.heroPulseLine {
+.heroSpotlight {
   display: none;
   position: absolute;
   z-index: 0;
@@ -185,67 +184,6 @@
 
 :global(html[data-theme="light"]) .heroSpotlight {
   background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 45%, transparent), transparent 70%);
-}
-
-/* A static ECG/pulse trace, pinned to the vertical middle of the hero
-   section, with a bright green glow that travels along it — the line itself
-   never moves (instructed live), only the glow does. The mask on the
-   wrapper fades both ends so the line doesn't just cut off at the viewport
-   edges. */
-.heroPulseLine {
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 56px;
-  transform: translateY(-50%);
-  overflow: hidden;
-  -webkit-mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
-  mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
-}
-
-.heroPulseSvg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-/* The always-visible line itself — faint and static. */
-.heroPulsePathBase {
-  stroke: var(--app-accent);
-  stroke-width: 1.75;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  opacity: 0.3;
-}
-
-/* Traced directly over the base path with an identical "d" — a short bright
-   dash against a much longer gap (stroke-dasharray), animated by sliding
-   stroke-dashoffset across one full pathLength="100" cycle. Because the
-   dash+gap pair (14 + 86) sums to exactly 100, a -100 dashoffset is exactly
-   one full pattern period, so the loop has no visible jump: the glow simply
-   re-enters at the start the instant it exits the end. */
-.heroPulsePathGlow {
-  stroke: color-mix(in srgb, var(--app-accent) 65%, #7CFFB2);
-  stroke-width: 3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-dasharray: 14 86;
-  animation: hero-pulse-travel 4.5s linear infinite;
-}
-
-@keyframes hero-pulse-travel {
-  from {
-    stroke-dashoffset: 0;
-  }
-  to {
-    stroke-dashoffset: -100;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .heroPulsePathGlow {
-    animation: none;
-  }
 }
 
 .heroCard {
@@ -1056,8 +994,7 @@
   }
 
   .heroTopVignette,
-  .heroSpotlight,
-  .heroPulseLine {
+  .heroSpotlight {
     display: block;
   }
 
