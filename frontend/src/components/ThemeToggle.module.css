@@ -19,7 +19,8 @@
   transition: border-color 220ms ease, transform 180ms ease, box-shadow 220ms ease;
 }
 
-/* Base lift matches homeBtn/bellBtn's own hover motion exactly — the glow
+/* Base lift matches the header's other icon controls (bellBtn etc.) hover
+   motion exactly — the glow
    ring and border-color shift below are this control's own extra badge
    flourish, layered on top of the same shared motion, not a replacement
    for it. */

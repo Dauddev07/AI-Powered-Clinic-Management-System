@@ -1,0 +1,66 @@
+.navRow {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  padding: 0.5rem clamp(1rem, 4vw, 2.5rem) 0.65rem;
+  border-top: 1px solid var(--app-border);
+}
+
+/* Below 720px PrimaryNavMobile's fixed bottom tab bar takes over instead. */
+@media (max-width: 719px) {
+  .navRow {
+    display: none;
+  }
+}
+
+.navItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.navItem:hover {
+  color: var(--app-text-title);
+  background: var(--app-surface);
+}
+
+.navItem.active {
+  background: var(--app-accent-bg);
+  color: var(--app-accent);
+}
+
+.navItem:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 1px;
+}
+
+/* Same spin-on-click feedback the old header home button had — see
+   PrimaryNavDesktop.jsx's own comment on why a click while already on the
+   dashboard still counts as a real navigation. */
+.iconSpin {
+  animation: primary-nav-home-spin 480ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes primary-nav-home-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iconSpin {
+    animation: none;
+  }
+}

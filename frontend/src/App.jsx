@@ -4,6 +4,7 @@ import { AuthProvider } from "./auth/AuthContext";
 import RequireAuth from "./auth/RequireAuth";
 import AppHeader from "./components/AppHeader";
 import Footer from "./components/Footer";
+import PrimaryNavMobile from "./components/PrimaryNavMobile";
 import { ToastProvider } from "./components/ToastContext";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
@@ -100,6 +101,7 @@ export default function App() {
         </Routes>
       </div>
       {location.pathname !== "/patient/chat" && <Footer />}
+      <PrimaryNavMobile />
       </AuthProvider>
     </ToastProvider>
   );

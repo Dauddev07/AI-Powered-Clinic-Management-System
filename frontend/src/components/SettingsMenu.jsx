@@ -6,8 +6,6 @@ import styles from "./SettingsMenu.module.css";
 
 const ICONS = {
   profile: <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4.5 20.5c0-4.14 3.36-7.5 7.5-7.5s7.5 3.36 7.5 7.5" />,
-  calendar: <path d="M7 3v3M17 3v3M4 9h16M5 6h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z" />,
-  clock: <path d="M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,
   settings: <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 13a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H4a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H10a1.65 1.65 0 0 0 1-1.51V4a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V10a1.65 1.65 0 0 0 1.51 1H20a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />,
   logout: <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" />,
   lock: <path d="M6 11V8a6 6 0 0 1 12 0v3M5 11h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Z" />,
@@ -20,15 +18,6 @@ const ICONS = {
   log: (
     <path d="M4 12h4l2 3h4l2-3h4M4 12l1.5-6.5A1 1 0 0 1 6.47 4.75h11.06a1 1 0 0 1 .97.75L20 12M4 12v6a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6" />
   ),
-  book: (
-    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20V4a2 2 0 0 0-2-2H6.5A2.5 2.5 0 0 0 4 4.5v15Z" />
-  ),
-  chat: (
-    <path d="M4 12.5C4 7.81 8.03 4 13 4s9 3.81 9 8.5-4.03 8.5-9 8.5c-1.09 0-2.13-.19-3.1-.53L4 21l1.2-4.02A8.16 8.16 0 0 1 4 12.5Z" />
-  ),
-  star: (
-    <path d="M12 2.5l2.9 6.06 6.6.86-4.85 4.63 1.24 6.6L12 17.6l-5.89 3.05 1.24-6.6-4.85-4.63 6.6-.86L12 2.5Z" />
-  ),
 };
 
 // Nested sub-panels reached from a top-level menu item, keyed by the `view`
@@ -37,22 +26,15 @@ const ICONS = {
 // so drilling into "Manage Doctors", "Upload Documents", or "Appointments"
 // never leaves the overlay.
 const SUBVIEWS = {
-  appointments: {
-    heading: "Appointments",
-    icon: "calendar",
-    description: "Book a new visit or manage your upcoming appointments.",
-    items: [
-      { to: "/patient/book", icon: "calendar", section: "Book", label: "Book appointment" },
-      { to: "/patient/appointments", icon: "clock", section: "Upcoming", label: "Upcoming appointments" },
-      { to: "/patient/appointments/history", icon: "log", section: "History", label: "Appointment history" },
-    ],
-  },
+  // "Book appointment" and "Upcoming appointments" moved to the persistent
+  // nav (PrimaryNavDesktop/Mobile) — Appointment history is the one thing
+  // left here, reached directly as a top-level link instead (see below)
+  // rather than a whole subview for a single item.
   manageDoctors: {
     heading: "Manage Doctors",
     icon: "doctors",
-    description: "Review your roster, import doctors via CSV, and check past ingestion runs.",
+    description: "Import doctors via CSV and check past ingestion runs.",
     items: [
-      { to: "/admin/doctors", icon: "doctors", section: "Roster", label: "Doctors" },
       { to: "/admin/doctors/import", icon: "upload", section: "Import", label: "Import doctors" },
       { to: "/admin/doctors/ingestion-log", icon: "log", section: "History", label: "Ingestion log" },
     ],
@@ -228,27 +210,26 @@ export default function SettingsMenu() {
 
               <nav className={styles.menuList} aria-label="Account actions">
                 {user.role === "patient" && (
-                  <>
-                    <button
-                      type="button"
-                      className={styles.menuItem}
-                      role="menuitem"
-                      onClick={() => {
-                        setDirection("forward");
-                        setView("appointments");
-                      }}
-                    >
-                      <MenuRow icon="calendar" chevron>
-                        Appointments
-                      </MenuRow>
-                    </button>
-                    <Link to="/patient/chat" className={styles.menuItem} role="menuitem" onClick={() => setOpen(false)}>
-                      <MenuRow icon="chat">AI Assistant</MenuRow>
-                    </Link>
-                  </>
+                  // Book appointment / Upcoming appointments / Chat now live in
+                  // the persistent nav (see PrimaryNavDesktop/Mobile) —
+                  // Appointment history is the one appointment-related screen
+                  // that's not frequent enough to promote there, so it's a
+                  // direct link here instead of a whole subview for one item.
+                  <Link
+                    to="/patient/appointments/history"
+                    className={styles.menuItem}
+                    role="menuitem"
+                    onClick={() => setOpen(false)}
+                  >
+                    <MenuRow icon="log">Appointment History</MenuRow>
+                  </Link>
                 )}
                 {user.role === "admin" && (
                   <>
+                    {/* Doctors (roster) and Patient Feedback now live in the
+                        persistent nav (see PrimaryNavDesktop/Mobile) — Manage
+                        Doctors here now only covers the less-frequent CSV import
+                        + ingestion history (see SUBVIEWS.manageDoctors above). */}
                     <button
                       type="button"
                       className={styles.menuItem}
@@ -275,9 +256,6 @@ export default function SettingsMenu() {
                         Upload Documents
                       </MenuRow>
                     </button>
-                    <Link to="/admin/feedback" className={styles.menuItem} role="menuitem" onClick={() => setOpen(false)}>
-                      <MenuRow icon="star">Patient Feedback</MenuRow>
-                    </Link>
                   </>
                 )}
                 <button

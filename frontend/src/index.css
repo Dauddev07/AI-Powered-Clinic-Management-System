@@ -142,6 +142,18 @@ body {
   margin: 0;
 }
 
+/* Reserves room for PrimaryNavMobile's fixed bottom tab bar (see its own
+   comment) so it never covers the last bit of page content or the footer
+   right after it — toggled on/off the body by that component itself. Only
+   takes effect under the same 719px breakpoint the tab bar itself uses; the
+   class can be present above that width with no visible effect. */
+@media (max-width: 719px) {
+  body.has-primary-nav-mobile {
+    padding-bottom: calc(3.75rem + env(safe-area-inset-bottom, 0px));
+    box-sizing: border-box;
+  }
+}
+
 /* Only affects same-page anchor jumps (e.g. the landing page's header nav) —
    harmless everywhere else since no other route uses in-page hash links. */
 html {

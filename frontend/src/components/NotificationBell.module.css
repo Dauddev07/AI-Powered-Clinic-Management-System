@@ -24,8 +24,9 @@
   transform: translateY(-1px);
 }
 
-/* Matches homeBtn/toggleBtn's own press feedback — previously missing here,
-   the only header icon control with no active-state feedback at all. */
+/* Matches the header's other icon controls' own press feedback — previously
+   missing here, the only header icon control with no active-state feedback
+   at all. */
 .bellBtn:active {
   transform: translateY(0) scale(0.92);
 }

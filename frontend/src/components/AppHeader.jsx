@@ -3,27 +3,27 @@ import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import Logo from "./Logo";
 import NotificationBell from "./NotificationBell";
+import PrimaryNavDesktop from "./PrimaryNavDesktop";
 import SettingsMenu from "./SettingsMenu";
 import ThemeToggle from "./ThemeToggle";
 import styles from "./AppHeader.module.css";
 
 const SECTION_IDS = ["departments-heading", "why-us-heading", "how-it-works-heading", "about-heading"];
 
-// Public landing nav only now - the authenticated patient/admin nav has moved
-// to the account menu (see SettingsMenu). The brand mark (Logo) at the header's
-// left stays the same everywhere - login/register, landing, and the
-// authenticated patient/admin dashboards - rather than swapping to a
-// clinic-name text for signed-in users.
+// Public landing nav only now - the authenticated patient/admin nav lives in
+// PrimaryNavDesktop, a second row rendered inside this same <header> (see
+// below) so its height still folds into --app-header-height automatically.
+// The brand mark (Logo) at the header's left stays the same everywhere -
+// login/register, landing, and the authenticated patient/admin dashboards -
+// rather than swapping to a clinic-name text for signed-in users.
 export default function AppHeader() {
   const location = useLocation();
   const { isAuthenticated, user } = useAuth();
   const isLanding = location.pathname === "/";
   const showPublicNav = isLanding && !isAuthenticated;
-  const dashboardPath = user?.role === "admin" ? "/admin" : "/patient";
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeSection, setActiveSection] = useState(null);
-  const [homeSpinning, setHomeSpinning] = useState(false);
   const headerRef = useRef(null);
 
   // Closes the collapsible nav panel on route change.
@@ -117,133 +117,109 @@ export default function AppHeader() {
 
   return (
     <header className={styles.header} ref={headerRef}>
-      <div className={styles.headerStart}>
-        {/* Clicking this while authenticated takes the patient/admin out to
-            the public landing page (see the "Back to Dashboard" button
-            there, Landing.jsx) rather than back to their own dashboard,
-            which the home icon at the header's other end already covers. */}
-        <Link to="/" className={styles.brand}>
-          <Logo compact />
-        </Link>
-      </div>
-
-      {isAuthenticated && (
-        <div className={styles.headerEnd}>
-          {/* Right side of the header, before the home button (patient + admin). */}
-          <ThemeToggle />
-          {/* Clicking this while already on the dashboard still navigates -
-              react-router mints a fresh location.key for a Link to the
-              current path, which remounts the routed page (see App.jsx's
-              page-transition wrapper) and re-runs its data fetch, so it
-              doubles as a refresh button rather than doing nothing. The
-              spin is purely visual feedback that the click registered,
-              on top of that. */}
-          <Link
-            to={dashboardPath}
-            className={styles.homeBtn}
-            aria-label="Go to dashboard"
-            onClick={() => {
-              setHomeSpinning(false);
-              requestAnimationFrame(() => setHomeSpinning(true));
-            }}
-          >
-            <svg
-              className={homeSpinning ? styles.homeIconSpin : ""}
-              onAnimationEnd={() => setHomeSpinning(false)}
-              viewBox="0 0 24 24"
-              width="22"
-              height="22"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M4 11.5 12 4l8 7.5M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9" />
-            </svg>
+      <div className={styles.headerTop}>
+        <div className={styles.headerStart}>
+          {/* Clicking this while authenticated takes the patient/admin out to
+              the public landing page (see the "Back to Dashboard" button
+              there, Landing.jsx) rather than back to their own dashboard,
+              which PrimaryNavDesktop's own Home/Dashboard item covers. */}
+          <Link to="/" className={styles.brand}>
+            <Logo compact />
           </Link>
-          {/* Notifications only exist for patient-initiated booking events (see
-              app/services/notifications.py) - there's no admin notification type
-              yet, so the bell is patient-only rather than shown for every role. */}
-          {user?.role === "patient" && <NotificationBell />}
-          {/* Account launcher - rightmost element in the header. */}
-          <SettingsMenu />
         </div>
-      )}
 
-      {showPublicNav && (
-        <div className={styles.publicActions}>
-          {/* Before everything else on the right side of the landing header. */}
-          <ThemeToggle />
+        {isAuthenticated && (
+          <div className={styles.headerEnd}>
+            <ThemeToggle />
+            {/* Notifications only exist for patient-initiated booking events (see
+                app/services/notifications.py) - there's no admin notification type
+                yet, so the bell is patient-only rather than shown for every role. */}
+            {user?.role === "patient" && <NotificationBell />}
+            {/* Account launcher - rightmost element in the header. */}
+            <SettingsMenu />
+          </div>
+        )}
 
-          <button
-            type="button"
-            className={styles.navToggle}
-            aria-label={mobileNavOpen ? "Close menu" : "Open menu"}
-            aria-expanded={mobileNavOpen}
-            aria-controls="site-nav"
-            onClick={() => setMobileNavOpen((open) => !open)}
-          >
-            <span className={styles.navToggleBar} />
-            <span className={styles.navToggleBar} />
-            <span className={styles.navToggleBar} />
-          </button>
+        {showPublicNav && (
+          <div className={styles.publicActions}>
+            {/* Before everything else on the right side of the landing header. */}
+            <ThemeToggle />
 
-          {mobileNavOpen && (
             <button
               type="button"
-              className={styles.navBackdrop}
-              aria-label="Close menu"
-              onClick={() => setMobileNavOpen(false)}
-            />
-          )}
+              className={styles.navToggle}
+              aria-label={mobileNavOpen ? "Close menu" : "Open menu"}
+              aria-expanded={mobileNavOpen}
+              aria-controls="site-nav"
+              onClick={() => setMobileNavOpen((open) => !open)}
+            >
+              <span className={styles.navToggleBar} />
+              <span className={styles.navToggleBar} />
+              <span className={styles.navToggleBar} />
+            </button>
 
-          <nav
-            id="site-nav"
-            className={`${styles.landingNav} ${mobileNavOpen ? styles.navOpen : ""}`}
-            aria-label="Site"
-          >
-            <Link
-              to="/#departments-heading"
-              className={anchorLinkClass("departments-heading")}
-              onClick={handleAnchorClick("departments-heading")}
-            >
-              Departments
-            </Link>
-            <Link
-              to="/#why-us-heading"
-              className={anchorLinkClass("why-us-heading")}
-              onClick={handleAnchorClick("why-us-heading")}
-            >
-              Why us
-            </Link>
-            <Link
-              to="/#how-it-works-heading"
-              className={anchorLinkClass("how-it-works-heading")}
-              onClick={handleAnchorClick("how-it-works-heading")}
-            >
-              How it works
-            </Link>
-            <Link
-              to="/#about-heading"
-              className={anchorLinkClass("about-heading")}
-              onClick={handleAnchorClick("about-heading")}
-            >
-              About
-            </Link>
-          </nav>
-        </div>
-      )}
+            {mobileNavOpen && (
+              <button
+                type="button"
+                className={styles.navBackdrop}
+                aria-label="Close menu"
+                onClick={() => setMobileNavOpen(false)}
+              />
+            )}
 
-      {/* Neither authenticated nor the landing page (e.g. Login/Register) —
-          still a global, app-wide setting, so it stays available here too
-          rather than only existing on two of the app's several screens. */}
-      {!isAuthenticated && !showPublicNav && (
-        <div className={styles.publicActions}>
-          <ThemeToggle />
-        </div>
-      )}
+            <nav
+              id="site-nav"
+              className={`${styles.landingNav} ${mobileNavOpen ? styles.navOpen : ""}`}
+              aria-label="Site"
+            >
+              <Link
+                to="/#departments-heading"
+                className={anchorLinkClass("departments-heading")}
+                onClick={handleAnchorClick("departments-heading")}
+              >
+                Departments
+              </Link>
+              <Link
+                to="/#why-us-heading"
+                className={anchorLinkClass("why-us-heading")}
+                onClick={handleAnchorClick("why-us-heading")}
+              >
+                Why us
+              </Link>
+              <Link
+                to="/#how-it-works-heading"
+                className={anchorLinkClass("how-it-works-heading")}
+                onClick={handleAnchorClick("how-it-works-heading")}
+              >
+                How it works
+              </Link>
+              <Link
+                to="/#about-heading"
+                className={anchorLinkClass("about-heading")}
+                onClick={handleAnchorClick("about-heading")}
+              >
+                About
+              </Link>
+            </nav>
+          </div>
+        )}
+
+        {/* Neither authenticated nor the landing page (e.g. Login/Register) —
+            still a global, app-wide setting, so it stays available here too
+            rather than only existing on two of the app's several screens. */}
+        {!isAuthenticated && !showPublicNav && (
+          <div className={styles.publicActions}>
+            <ThemeToggle />
+          </div>
+        )}
+      </div>
+
+      {/* Second row — the always-visible destinations (Book Appointment,
+          Upcoming Appointments, Chat for patients; Doctors, Feedback for
+          admins). Nested inside this same <header> (not a sibling element)
+          so its height is included in the ResizeObserver above without any
+          extra wiring. */}
+      <PrimaryNavDesktop />
     </header>
   );
 }
