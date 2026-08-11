@@ -181,6 +181,22 @@ def test_severe_trauma_and_limb_loss_patterns_fire(message):
     assert detect_red_flag(message)
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "my leg is broken",
+        "his arm is broken",
+        "I think my wrist is broken",
+        "I broke my leg",
+        "she broke her arm falling down the stairs",
+        "my ankle is fractured",
+        "he fractured his hip",
+    ],
+)
+def test_plain_broken_bone_patterns_fire(message):
+    assert detect_red_flag(message)
+
+
 # --- bleeding: reversed word order and common misspellings --------------------------
 
 

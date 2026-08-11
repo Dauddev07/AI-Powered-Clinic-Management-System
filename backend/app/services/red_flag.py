@@ -157,6 +157,17 @@ _RED_FLAG_PATTERNS = [
     r"\bmissing\b.{0,10}\b(a|an|my|one)\b.{0,10}\b(leg|arm|hand|foot|finger|toe|limb)\b",
     r"\bcompound fracture\b",
     r"\bbone\b.{0,15}\bsticking out\b",
+    # Reported live: "my leg is broken" fell through entirely — every pattern in this
+    # section required either "compound fracture" or "sticking out" specifically, but
+    # a patient's own plain "it's broken"/"I broke my X"/"fractured" is exactly as
+    # unambiguous a severe-trauma claim and is far more common everyday phrasing than
+    # either of those two clinical terms.
+    r"\bbroken\b.{0,15}\b(leg|arm|hand|foot|ankle|wrist|hip|bone|finger|toe|rib|collarbone|jaw|nose)\b",
+    r"\b(leg|arm|hand|foot|ankle|wrist|hip|finger|toe|rib|collarbone|jaw|nose)\b.{0,10}\bis broken\b",
+    r"\bbroke\b.{0,10}\b(my|his|her|their)\b.{0,5}"
+    r"\b(leg|arm|hand|foot|ankle|wrist|hip|finger|toe|rib|collarbone|jaw|nose)\b",
+    r"\bfractured\b.{0,15}\b(leg|arm|hand|foot|ankle|wrist|hip|bone|finger|toe|rib|collarbone|jaw|nose)\b",
+    r"\b(leg|arm|hand|foot|ankle|wrist|hip|finger|toe|rib|collarbone|jaw|nose)\b.{0,10}\bis fractured\b",
     r"\bcrush(ed|ing)\b.{0,20}\b(leg|arm|hand|foot|limb|chest|head)\b",
     r"\b(leg|arm|hand|foot|limb|chest|head)\b.{0,20}\bcrush(ed|ing)\b",
     r"\bimpaled\b",
