@@ -238,6 +238,37 @@ def test_apostrophe_dropped_negation_does_not_false_fire_on_severity(message):
     assert not detect_red_flag(message)
 
 
+# --- semantic-layer veto: a confirmed word-level denial isn't overridden ------------
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # Reported live: the word-level check correctly recognizes these as denials
+        # (negation guard blocks the underlying pattern), but the semantic layer used
+        # to still fire anyway — it only measures similarity-to-exemplar and has no
+        # concept of negation, so "a car ... ran over me" reads as close to "hit by a
+        # car" regardless of the "doesnt" in front of it. See _is_confirmed_denial's
+        # own docstring in red_flag.py for why this veto is scoped narrowly (only a
+        # message the word-level layer specifically identified as a denial of one of
+        # its OWN categories) rather than firing on any negation word anywhere.
+        "a car doesnt ran over me",
+        "a car did not run over me",
+        "i wasnt hit by a car",
+    ],
+)
+def test_confirmed_denial_vetoes_the_semantic_layer(message):
+    assert not detect_red_flag(message)
+
+
+def test_confirmed_denial_veto_does_not_suppress_an_unrelated_real_emergency():
+    # The veto must never suppress a genuine, different emergency just because the
+    # same message also happens to contain an unrelated negation word — "wasnt hit
+    # by a car" is a denial, but "he is unconscious" right after it is a real,
+    # separate red flag that must still fire.
+    assert detect_red_flag("i wasnt hit by a car but he is unconscious")
+
+
 # --- bare-severity product rule: any "severe" mention is an emergency ---------------
 
 

@@ -141,9 +141,9 @@ _RED_FLAG_PATTERNS = [
     # Vehicle accidents / high-energy trauma — the mechanism itself (being struck by
     # or involved in a vehicle collision) is a red flag on its own, regardless of how
     # the patient phrases the resulting injury.
-    r"\b(hit|struck|run over|ran over)\b.{0,15}\b(by|with)\b.{0,10}\b(a |the )?(car|truck|bike|motorcycle|"
+    _NEG + r"\b(hit|struck|run over|ran over)\b.{0,15}\b(by|with)\b.{0,10}\b(a |the )?(car|truck|bike|motorcycle|"
     r"bus|vehicle)\b",
-    r"\b(car|truck|bike|motorcycle|bus|vehicle)\b.{0,15}\b(hit|struck|ran over)\b",
+    r"\b(car|truck|bike|motorcycle|bus|vehicle)\b.{0,15}" + _NEG + r"\b(hit|struck|run over|ran over)\b",
     r"\b(car|truck|bike|motorcycle|bus|vehicle|road)\s*(accident|crash|collision)\b",
     r"\bhit and run\b",
     r"\bcollided\b",
@@ -563,19 +563,72 @@ RED_FLAG_MESSAGE_EN = (
 )
 
 
+# Reported live: "a car doesnt ran over me" — the word-level check above now
+# correctly recognizes this as a denial (negation guard blocks the vehicle-accident
+# pattern), but the SEMANTIC layer still fired anyway, since it only measures
+# similarity-to-exemplar and has no concept of negation at all — "a car ... ran over
+# me" reads as close to "hit by a car" regardless of the "doesnt" in front of it.
+#
+# Fix is a TARGETED veto, not a blanket one: only skip the semantic check when the
+# word-level layer has specifically and confidently identified this exact message as
+# a denial of one of ITS OWN recognized categories (severe, broken bone, breathing,
+# bleeding, vehicle accident) — never a generic "message contains a negation word
+# somewhere" rule, which would risk suppressing a real, different emergency
+# elsewhere in the same message (e.g. "I don't know why but I was hit by a car" —
+# contains "don't" but isn't negating the accident at all).
+#
+# _BARE_DENIABLE_RE mirrors the breathing/bleeding/vehicle-accident patterns above
+# (the ones with an inline _NEG guard) but WITHOUT the guard — comparing whether
+# this bare version matches while the fully-guarded _RED_FLAG_RE finds nothing at
+# all is how we know negation is specifically what blocked it, not that the topic
+# was simply absent.
+_BARE_DENIABLE_RE = re.compile(
+    r"\bshortness of breath\b"
+    r"|\bshort of breath\b"
+    r"|\b(can'?t|cannot|can not|difficulty|struggling to|trouble)(?:\s+to)?\s*breath"
+    r"|\b(sever\w{0,4}ly|severe|heavy|heavily|uncontrolled|won'?t stop|not stopping|"
+    r"a lot|badly|profusely|excessively)\s*bleed"
+    r"|\bbleed\w*\s*(sever\w{0,4}ly|severe|heavy|heavily|a lot|a ton|so much|very much|"
+    r"won'?t stop|badly|profusely|excessively)\b"
+    r"|\b(hit|struck|run over|ran over)\b.{0,15}\b(by|with)\b.{0,10}\b(a |the )?"
+    r"(car|truck|bike|motorcycle|bus|vehicle)\b"
+    r"|\b(car|truck|bike|motorcycle|bus|vehicle)\b.{0,15}\b(hit|struck|run over|ran over)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_confirmed_denial(message: str) -> bool:
+    """True only when the word-level layer has positively identified this exact
+    message as a denial of a specific, recognized emergency category — see the
+    module comment right above this function for why the veto is scoped this
+    narrowly rather than firing on any negation word anywhere in the message."""
+    if _BARE_SEVERE_RE.search(message) and _NEGATED_SEVERE_RE.search(message):
+        return True
+    if _BROKEN_BONE_RE.search(message) and _BROKEN_BONE_NEGATED_RE.search(message):
+        return True
+    if _BARE_DENIABLE_RE.search(message) and not _RED_FLAG_RE.search(message):
+        return True
+    return False
+
+
 def detect_red_flag(message: str) -> bool:
     """True if ANY layer fires: the regex gate (exact/loose wording matches), the
     bare "severe" product rule (see _severity_stated_as_severe's own docstring), the
     broken-bone rule (see _bare_broken_bone_stated's own docstring), or the semantic
-    similarity check (paraphrases with no shared vocabulary with any regex pattern).
-    Any one alone is sufficient — this is a union, not a requirement that they all
-    agree."""
-    return (
+    similarity check (paraphrases with no shared vocabulary with any regex pattern) —
+    UNLESS the word-level layer has confirmed this exact message is a denial of one
+    of its own recognized categories, in which case the semantic layer is vetoed
+    rather than allowed to override that confirmed judgment (see
+    _is_confirmed_denial's own docstring)."""
+    if (
         bool(_RED_FLAG_RE.search(message))
         or _severity_stated_as_severe(message)
         or _bare_broken_bone_stated(message)
-        or _semantic_red_flag(message)
-    )
+    ):
+        return True
+    if _is_confirmed_denial(message):
+        return False
+    return _semantic_red_flag(message)
 
 
 def red_flag_message() -> str:
