@@ -75,9 +75,17 @@ def list_my_appointment_history(
     db: Session = Depends(get_db),
 ) -> AppointmentHistoryOut:
     """Past and cancelled appointments — everything except the still-active
-    'confirmed' state — newest first, separate from list_my_appointments' upcoming
-    list above. Same clinic_id + patient_id ownership scoping as every other
-    appointment read here; there is no client-side filtering anywhere in this stack.
+    'confirmed' state — separate from list_my_appointments' upcoming list above.
+    Same clinic_id + patient_id ownership scoping as every other appointment
+    read here; there is no client-side filtering anywhere in this stack.
+
+    Ordered by whichever actually happened most recently — cancelled_at for a
+    cancelled appointment, the slot's own end_utc for a completed one (there's
+    no cancelled_at to fall back to) — not by the appointment's original slot
+    date. Reported live: sorting by slot date put a just-cancelled appointment
+    for a far-future slot above one cancelled weeks ago for an earlier slot,
+    which reads wrong for a screen whose whole point is "what happened most
+    recently to my appointments."
     """
     clinic_id = current_user.clinic_id
     auto_complete_past_appointments(db, clinic_id)
@@ -85,6 +93,7 @@ def list_my_appointment_history(
 
     clinic = db.get(Clinic, clinic_id)
 
+    resolved_at = func.coalesce(Appointment.cancelled_at, Slot.end_utc)
     stmt = (
         select(Appointment)
         .join(Slot, Slot.id == Appointment.slot_id)
@@ -93,7 +102,7 @@ def list_my_appointment_history(
             Appointment.patient_id == current_user.id,
             Appointment.status != "confirmed",
         )
-        .order_by(Slot.start_utc.desc())
+        .order_by(resolved_at.desc())
     )
     appointments = db.execute(stmt).scalars().all()
     return AppointmentHistoryOut(
