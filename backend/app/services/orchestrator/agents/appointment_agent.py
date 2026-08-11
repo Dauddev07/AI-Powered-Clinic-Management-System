@@ -142,6 +142,22 @@ def _is_short_affirmative_reply(message: str) -> bool:
     return bool(_AFFIRMATIVE_RE.match(message.strip()))
 
 
+# Reported live: tapping a slot button on an already-shown DOCTOR_OPTIONS card sends
+# a message that both names the doctor directly AND carries the exact slot_id chosen
+# ("I'd like to book the appointment with Dr. Farhan Malik at ... (slot_id: <uuid>)."
+# — see ChatPage.jsx's selectSlot). Naming the doctor made direct_name_match_this_turn
+# True below, which routed straight into the availability-narrowing short-circuit and
+# re-showed the same card instead of ever reaching book_appointment — repeatable on
+# every tap, since the short-circuit runs before the LLM/tool-calling loop even starts
+# and has no path to booking at all. A message carrying an explicit slot_id is always
+# a booking action, never a bare availability check, regardless of what else it names.
+_EXPLICIT_SLOT_ID_RE = re.compile(r"slot_id:\s*[0-9a-f-]{8,}", re.IGNORECASE)
+
+
+def _message_has_explicit_slot_id(message: str) -> bool:
+    return bool(_EXPLICIT_SLOT_ID_RE.search(message))
+
+
 # Reported live: patient asked "show me my upcoming appointment" (one appointment
 # shown), then "can i cancel that?" — a QUESTION, not a command — and the
 # appointment was cancelled outright with no confirmation. Root cause:
@@ -960,6 +976,7 @@ def run_appointment_agent(
         resolved_match is not None
         and doctor_already_shown
         and resolved_appointment is None
+        and not _message_has_explicit_slot_id(message)
         and (
             _message_or_pending_name_disambiguation_asks_to_narrow(message, history)
             or _message_references_a_doctor_by_pronoun(message)

@@ -497,6 +497,16 @@ def is_doctor_count_or_listing_request(message: str) -> bool:
     return {"how", "many"} <= words and bool(words & _PROFESSION_TITLE_WORDS)
 
 
+# Reported live: "show me available slots for general medicine dept" was misrouted
+# to symptom triage ("how severe is this...") instead of department availability —
+# "medicine" alone is a genuine symptom-adjacent word ("I need medicine for my
+# headache"), but it's also literally half of "General Medicine", a real clinic
+# department name, and is_symptom_message() below has no way to tell those apart
+# from a bare word-in-set check. Stripped out before scanning so naming the
+# department doesn't masquerade as describing a symptom.
+_DEPARTMENT_PHRASES_CONTAINING_SYMPTOM_WORDS = ("general medicine", "family medicine")
+
+
 def is_symptom_message(message: str) -> bool:
     """True when the message mentions a symptom/complaint — used by chat.py to route
     a turn to real department-list context (see app.services.department_availability)
@@ -505,7 +515,10 @@ def is_symptom_message(message: str) -> bool:
     here only means a symptom-shaped turn gets department names instead of hospital_info
     chunks, which the triage agent needs anyway; a false negative just falls through to
     ordinary hospital_info retrieval, so neither failure mode is unsafe."""
-    words = re.findall(r"[a-z0-9]+", message.lower())
+    lowered = message.lower()
+    for phrase in _DEPARTMENT_PHRASES_CONTAINING_SYMPTOM_WORDS:
+        lowered = lowered.replace(phrase, "")
+    words = re.findall(r"[a-z0-9]+", lowered)
     return any(word in _SYMPTOM_KEYWORDS for word in words)
 
 
