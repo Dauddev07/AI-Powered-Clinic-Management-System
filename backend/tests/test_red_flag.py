@@ -193,10 +193,29 @@ def test_severe_trauma_and_limb_loss_patterns_fire(message):
         "she broke her arm falling down the stairs",
         "my ankle is fractured",
         "he fractured his hip",
+        # Reported live: these connector variants ("got broken", "just broke") still
+        # fell through the original patterns, which only matched the exact phrase
+        # "is broken"/"is fractured" in reverse order.
+        "my arm got broken",
+        "my leg got broken",
+        "my ankle just broke",
+        "my wrist feels broken",
     ],
 )
 def test_plain_broken_bone_patterns_fire(message):
     assert detect_red_flag(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "my leg is not broken",
+        "good news my arm isn't broken thankfully",
+        "my ankle is not fractured",
+    ],
+)
+def test_explicitly_denied_broken_bone_does_not_false_fire(message):
+    assert not detect_red_flag(message)
 
 
 # --- bare-severity product rule: any "severe" mention is an emergency ---------------

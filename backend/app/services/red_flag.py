@@ -170,12 +170,27 @@ _RED_FLAG_PATTERNS = [
     # a patient's own plain "it's broken"/"I broke my X"/"fractured" is exactly as
     # unambiguous a severe-trauma claim and is far more common everyday phrasing than
     # either of those two clinical terms.
+    #
+    # Reported live AGAIN: "my arm got broken"/"my leg got broken" still fell through
+    # — the reverse-order pattern below only matched the exact phrase "is broken", so
+    # any other connector ("got broken", "just broke", "feels broken") slipped past
+    # it. Body-part-then-broken/broke is now a generic proximity match with no fixed
+    # connector required, same style already used for the forward-order pattern.
+    # Negative lookbehinds on every "broken"/"broke"/"fractured" occurrence (not just
+    # the reverse-order patterns) guard against a patient's own reassurance ("my leg
+    # is not broken", "thankfully it isn't broken") — without them the word itself
+    # still matched regardless of a negation word sitting right in front of it, same
+    # failure mode as the bleeding/breathing patterns above, fixed the same way.
     r"\bbroken\b.{0,15}\b(leg|arm|hand|foot|ankle|wrist|hip|bone|finger|toe|rib|collarbone|jaw|nose)\b",
-    r"\b(leg|arm|hand|foot|ankle|wrist|hip|finger|toe|rib|collarbone|jaw|nose)\b.{0,10}\bis broken\b",
-    r"\bbroke\b.{0,10}\b(my|his|her|their)\b.{0,5}"
+    r"\b(leg|arm|hand|foot|ankle|wrist|hip|finger|toe|rib|collarbone|jaw|nose)\b.{0,15}"
+    r"(?<!not )(?<!n't )(?<!no )\bbroken\b",
+    r"(?<!not )(?<!n't )(?<!no )\bbroke\b.{0,10}\b(my|his|her|their)\b.{0,5}"
     r"\b(leg|arm|hand|foot|ankle|wrist|hip|finger|toe|rib|collarbone|jaw|nose)\b",
+    r"\b(leg|arm|hand|foot|ankle|wrist|hip|finger|toe|rib|collarbone|jaw|nose)\b.{0,15}"
+    r"(?<!not )(?<!n't )(?<!no )\bbroke\b",
     r"\bfractured\b.{0,15}\b(leg|arm|hand|foot|ankle|wrist|hip|bone|finger|toe|rib|collarbone|jaw|nose)\b",
-    r"\b(leg|arm|hand|foot|ankle|wrist|hip|finger|toe|rib|collarbone|jaw|nose)\b.{0,10}\bis fractured\b",
+    r"\b(leg|arm|hand|foot|ankle|wrist|hip|finger|toe|rib|collarbone|jaw|nose)\b.{0,15}"
+    r"(?<!not )(?<!n't )(?<!no )\bfractured\b",
     r"\bcrush(ed|ing)\b.{0,20}\b(leg|arm|hand|foot|limb|chest|head)\b",
     r"\b(leg|arm|hand|foot|limb|chest|head)\b.{0,20}\bcrush(ed|ing)\b",
     r"\bimpaled\b",
@@ -497,9 +512,9 @@ RED_FLAG_MESSAGE_EN = (
     "This may be a medical emergency. Please call 1122 or go to "
     "the nearest emergency room right away. This assistant cannot handle emergencies.\n\n"
     "While you're on your way:\n"
-    "- Stay as calm and still as possible, and avoid moving any injured area more than necessary.\n"
+    "- Stay as calm as possible and try to rest in a comfortable position, avoiding unnecessary movement.\n"
     "- Do not eat, drink, or take any medication unless a medical professional tells you to.\n"
-    "- If there is visible bleeding, apply firm, steady pressure with a clean cloth until help arrives.\n"
+    "- If there's visible bleeding or an injury, avoid moving that area and apply firm, steady pressure with a clean cloth if it's bleeding.\n"
     "- If possible, don't go alone — have someone accompany you or call an ambulance rather than driving yourself."
 )
 
