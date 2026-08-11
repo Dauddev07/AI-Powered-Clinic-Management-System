@@ -28,6 +28,11 @@ export default function PrimaryNavDesktop() {
 
   return (
     <nav className={styles.navRow} aria-label="Primary">
+      {/* Instructed live: a centered rounded "capsule" instead of a flat,
+          edge-to-edge strip — reads as its own distinct control rather than
+          just another toolbar row, and matches the floating-dock language
+          PrimaryNavMobile's bottom tab bar already uses on small screens. */}
+      <div className={styles.navCapsule}>
       {items.map((item) => {
         const active = location.pathname === item.to;
         const isHome = item.key === "home";
@@ -73,6 +78,7 @@ export default function PrimaryNavDesktop() {
           </Link>
         );
       })}
+      </div>
     </nav>
   );
 }
