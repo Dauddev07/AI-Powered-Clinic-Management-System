@@ -625,8 +625,22 @@ def _appointment_disambiguation_reply(action: str, candidates: list[dict]) -> st
     list_upcoming_appointments) — never model-generated, same principle as
     _disambiguation_marker_reply above."""
     verb = "cancel" if action == "cancel" else "reschedule"
-    names = ", ".join(f"{c['doctor_name']} ({c['department_name']}, {c['when']})" for c in candidates)
-    question = f"You have more than one upcoming appointment — which one would you like to {verb}: {names}?"
+    # Reported live: when both pending appointments are with the SAME doctor,
+    # asking "which one" by doctor name is meaningless — the answer is always
+    # that same name, so the patient's reply matched every candidate at once
+    # and the question just repeated itself forever (see _match_candidate).
+    # Ask by date/time instead in that case, since that's the only thing that
+    # actually distinguishes them.
+    doctor_names = {c["doctor_name"] for c in candidates}
+    if len(doctor_names) == 1:
+        whens = ", ".join(c["when"] for c in candidates)
+        question = (
+            f"You have more than one upcoming appointment with {candidates[0]['doctor_name']} — "
+            f"which one would you like to {verb}: {whens}?"
+        )
+    else:
+        names = ", ".join(f"{c['doctor_name']} ({c['department_name']}, {c['when']})" for c in candidates)
+        question = f"You have more than one upcoming appointment — which one would you like to {verb}: {names}?"
     payload = {"kind": "appointment", "action": action, "question": question, "candidates": candidates}
     return DOCTOR_DISAMBIGUATION_MARKER + json.dumps(payload)
 
@@ -646,14 +660,24 @@ def _match_candidate(message: str, candidates: list[dict]) -> dict | None:
     """Matches the patient's reply against exactly one candidate by doctor name
     (full name, or its last word as a plain surname reference like "the Sheikh
     one") — deliberately simple and exact rather than fuzzy, since an ambiguous or
-    failed match should re-ask (see run_appointment_agent), never guess."""
+    failed match should re-ask (see run_appointment_agent), never guess.
+
+    When two candidates share the same doctor (see _appointment_disambiguation_reply),
+    the name tier alone matches both at once and stays ambiguous on purpose — falls
+    through to matching the appointment's own "when" (date/time) text instead, which
+    is what actually distinguishes them."""
     lowered = message.lower()
-    matches = [
+    name_matches = [
         c for c in candidates
         if c["doctor_name"].strip().lower() in lowered
         or c["doctor_name"].strip().split()[-1].lower() in lowered
     ]
-    return matches[0] if len(matches) == 1 else None
+    if len(name_matches) == 1:
+        return name_matches[0]
+
+    pool = name_matches if len(name_matches) > 1 else candidates
+    when_matches = [c for c in pool if c.get("when") and c["when"].strip().lower() in lowered]
+    return when_matches[0] if len(when_matches) == 1 else None
 
 
 def _build_system_prompt(

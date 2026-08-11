@@ -233,20 +233,29 @@ function DepartmentListCard({ list, onSelectSlot, disabled }) {
 }
 
 function DoctorDisambiguationCard({ disambiguation, onSelectCandidate, disabled }) {
+  const candidates = disambiguation.candidates || [];
+  // Two appointments with the SAME doctor render identical "Dr. X — Dept" buttons
+  // otherwise — indistinguishable to tap, and the backend can only tell them apart
+  // by date/time anyway (see _match_candidate) — so show the time instead here.
+  const sameDoctor =
+    disambiguation.kind === "appointment" &&
+    candidates.length > 1 &&
+    new Set(candidates.map((c) => c.doctor_name)).size === 1;
   return (
     <div className={styles.doctorOptionsCard}>
       {disambiguation.question && <div className={styles.doctorOptionsNote}>{disambiguation.question}</div>}
       <div className={styles.doctorOptionSlots}>
-        {(disambiguation.candidates || []).map((candidate) => (
+        {candidates.map((candidate) => (
           <button
-            key={`${candidate.doctor_name}-${candidate.department_name}`}
+            key={`${candidate.doctor_name}-${candidate.department_name}-${candidate.when || ""}`}
             type="button"
             className={styles.slotOptionBtn}
             disabled={disabled}
-            onClick={() => onSelectCandidate(candidate.doctor_name, candidate.department_name)}
+            onClick={() => onSelectCandidate(candidate.doctor_name, candidate.department_name, candidate.when)}
           >
-            {candidate.doctor_name}
-            {candidate.department_name ? ` — ${candidate.department_name}` : ""}
+            {sameDoctor
+              ? candidate.when
+              : `${candidate.doctor_name}${candidate.department_name ? ` — ${candidate.department_name}` : ""}`}
           </button>
         ))}
       </div>
@@ -768,9 +777,16 @@ export default function ChatPage() {
   // doctor's exact full name back as the message text — nothing else — so
   // find_doctors_by_name's exact-match tier resolves it directly on the next turn
   // instead of re-triggering the same disambiguation. The friendlier wording only
-  // shows in the transcript (displayText), same pattern as selectSlot above.
-  const selectCandidate = (doctorName, departmentName) => {
-    submitMessage(doctorName, `I mean ${doctorName}${departmentName ? ` (${departmentName})` : ""}.`);
+  // shows in the transcript (displayText), same pattern as selectSlot above. When
+  // two candidates share a doctor (same-doctor reschedule/cancel case), the name
+  // alone can't tell them apart on the backend either — the appointment's own
+  // "when" text is included too, since that's what _match_candidate falls back to.
+  const selectCandidate = (doctorName, departmentName, when) => {
+    const whenSuffix = when ? ` on ${when}` : "";
+    submitMessage(
+      `${doctorName}${whenSuffix}`,
+      `I mean ${doctorName}${departmentName ? ` (${departmentName})` : ""}${whenSuffix}.`
+    );
   };
 
   const handleInputChange = (e) => {
