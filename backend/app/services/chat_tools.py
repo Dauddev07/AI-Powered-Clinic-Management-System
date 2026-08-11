@@ -499,6 +499,7 @@ def list_upcoming_appointments(db: Session, ctx: ClinicContext) -> list[dict]:
         results.append(
             {
                 "appointment_id": str(out.id),
+                "doctor_id": str(out.doctor_id),
                 "doctor_name": out.doctor_name,
                 "department_name": out.department_name,
                 "when": _format_when(out.start_utc, tz),

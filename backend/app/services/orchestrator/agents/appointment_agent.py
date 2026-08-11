@@ -60,6 +60,7 @@ action gets a real guarantee, not just a prompt instruction it might not follow.
 """
 import json
 import re
+import uuid
 from datetime import date
 
 from sqlalchemy.orm import Session
@@ -816,6 +817,47 @@ def run_appointment_agent(
     # cancels once _pending_cancel_confirmation above sees an explicit "yes".
     if resolved_appointment is not None and resolved_appointment_action == "cancel":
         return _cancel_confirmation_reply(resolved_appointment, _message_is_a_capability_question(message))
+
+    # Reported live: "reschedule my appointment with Dr. X" correctly resolved
+    # WHICH appointment (resolved_appointment above), but get_department_availability
+    # has no doctor_id parameter exposed to the LLM at all — its only tool-callable
+    # shape is department-wide — so the model's only option was to show the ENTIRE
+    # department's doctors, not just the one being rescheduled. Skipped once the
+    # message already carries the slot the patient picked (explicit slot_id) — this
+    # is a "show me options" step, and re-firing it on that later turn would re-show
+    # the same card forever instead of ever reaching reschedule_appointment, the
+    # same loop already fixed for a fresh booking's slot-pick step.
+    if (
+        resolved_appointment is not None
+        and resolved_appointment_action == "reschedule"
+        and not _message_has_explicit_slot_id(message)
+    ):
+        forced_window = resolve_bare_weekday_window(message)
+        earliest_date = date.fromisoformat(forced_window[0]) if forced_window else None
+        latest_date = date.fromisoformat(forced_window[1]) if forced_window else None
+        time_window = resolve_time_of_day_window(message)
+        earliest_time, latest_time = time_window if time_window else (None, None)
+        availability = get_department_availability(
+            db,
+            ctx.clinic_id,
+            resolved_appointment["department_name"],
+            doctor_id=uuid.UUID(resolved_appointment["doctor_id"]),
+            earliest_date=earliest_date,
+            latest_date=latest_date,
+            earliest_time=earliest_time,
+            latest_time=latest_time,
+        )
+        if not availability.doctors:
+            if availability.next_available_when is not None:
+                tz = _clinic_timezone(db, ctx.clinic_id)
+                return (
+                    f"{resolved_appointment['doctor_name']} doesn't have any open slots in that "
+                    f"window. Their earliest available slot is "
+                    f"{_format_when(availability.next_available_when, tz)}. Would you like me to "
+                    "reschedule to that instead, or check a different day?"
+                )
+            return f"{resolved_appointment['doctor_name']} doesn't have any open slots right now. Please check back later."
+        return _doctor_options_payload(db, ctx.clinic_id, availability)
 
     # Symptom-vs-department mismatch check: only for a fresh booking-department
     # reference, never for a cancel/reschedule action already resolved above (that's
