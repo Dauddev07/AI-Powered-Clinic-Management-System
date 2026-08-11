@@ -193,9 +193,31 @@ export default function Landing() {
             the existing glows, so desktop is untouched. */}
         <div className={styles.heroTopVignette} aria-hidden="true" />
         <div className={styles.heroSpotlight} aria-hidden="true" />
-        <div className={styles.heroFloatDot1} aria-hidden="true" />
-        <div className={styles.heroFloatDot2} aria-hidden="true" />
-        <div className={styles.heroFloatDot3} aria-hidden="true" />
+
+        {/* Instructed live: no more 3D shapes or circles in the mobile
+            background (the three floating rings this used to have) — a
+            continuously flowing ECG-style pulse line instead, one repeating
+            unit with exactly two peaks. The path is drawn twice back to
+            back (0-400 and 400-800 in the viewBox) and the whole svg is
+            translated by exactly -50% of its own rendered width in a CSS
+            keyframe — since that's always exactly one 400-wide repeat unit
+            regardless of the actual screen width, the loop point is
+            invisible with no per-breakpoint tuning needed. */}
+        <div className={styles.heroPulseLine} aria-hidden="true">
+          <svg
+            className={styles.heroPulseSvg}
+            viewBox="0 0 800 60"
+            preserveAspectRatio="none"
+          >
+            <path
+              className={styles.heroPulsePath}
+              vectorEffect="non-scaling-stroke"
+              fill="none"
+              d="M0,30 L60,30 L75,6 L90,54 L105,30 L165,30 L180,6 L195,54 L210,30 L400,30
+                 M400,30 L460,30 L475,6 L490,54 L505,30 L565,30 L580,6 L595,54 L610,30 L800,30"
+            />
+          </svg>
+        </div>
 
         {/* Instructed live to add a genuine background "3D" treatment
             (a first pass using small floating gradient spheres was

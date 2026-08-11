@@ -150,9 +150,7 @@
    these exist instead of just repositioning the desktop glows in place. */
 .heroTopVignette,
 .heroSpotlight,
-.heroFloatDot1,
-.heroFloatDot2,
-.heroFloatDot3 {
+.heroPulseLine {
   display: none;
   position: absolute;
   z-index: 0;
@@ -189,41 +187,56 @@
   background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 45%, transparent), transparent 70%);
 }
 
-/* Three small blurred rings scattered around the content — a light, minimal
-   echo of the desktop visual's floating feature badges, without their card
-   chrome or copy; purely a texture, sized and blurred so none of them ever
-   compete with the actual content. */
-.heroFloatDot1,
-.heroFloatDot2,
-.heroFloatDot3 {
-  border-radius: 50%;
-  border: 1.5px solid color-mix(in srgb, var(--app-accent) 35%, transparent);
-  filter: blur(0.5px);
+/* A continuously flowing ECG/pulse trace instead of the earlier floating
+   circles — a monitor-style line reads as "alive" the way a static shape
+   never does, and it's a natural fit for a clinic booking hero. .heroPulseSvg
+   is rendered at 200% width holding two identical 400-wide repeats of the
+   same two-peak waveform back to back; animating it to exactly -50% of its
+   own width lines the second repeat up perfectly with where the first one
+   started, so the loop has no visible seam at any screen width. The mask on
+   the wrapper fades both ends so the line doesn't just cut off at the
+   viewport edges. */
+.heroPulseLine {
+  left: 0;
+  right: 0;
+  top: 20%;
+  height: 56px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
+  mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
 }
 
-.heroFloatDot1 {
-  top: 8%;
-  right: 8%;
-  width: 34px;
-  height: 34px;
-  opacity: 0.5;
+.heroPulseSvg {
+  display: block;
+  width: 200%;
+  height: 100%;
+  animation: hero-pulse-flow 7s linear infinite;
 }
 
-.heroFloatDot2 {
-  top: 22%;
-  left: 6%;
-  width: 18px;
-  height: 18px;
-  background: color-mix(in srgb, var(--app-accent) 16%, transparent);
+.heroPulsePath {
+  stroke: var(--app-accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   opacity: 0.55;
 }
 
-.heroFloatDot3 {
-  bottom: 14%;
-  right: 12%;
-  width: 24px;
-  height: 24px;
-  opacity: 0.4;
+@keyframes hero-pulse-flow {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    /* Exactly one repeat unit (400 of the svg's 800-wide viewBox) — always
+       50% of the rendered width regardless of the container's actual pixel
+       size, which is what keeps the loop seamless at every screen width. */
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heroPulseSvg {
+    animation: none;
+  }
 }
 
 .heroCard {
@@ -1035,9 +1048,7 @@
 
   .heroTopVignette,
   .heroSpotlight,
-  .heroFloatDot1,
-  .heroFloatDot2,
-  .heroFloatDot3 {
+  .heroPulseLine {
     display: block;
   }
 
