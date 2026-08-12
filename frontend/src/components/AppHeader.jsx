@@ -131,6 +131,23 @@ export default function AppHeader() {
         {isAuthenticated && (
           <div className={styles.headerEnd}>
             <ThemeToggle />
+            {/* Reported live: on the chat page under 720px, BOTH PrimaryNavDesktop
+                (hidden below 720px) and PrimaryNavMobile (deliberately hidden on
+                the chat page itself, see its own comment — it's a full-bleed
+                surface with its own bottom input bar) are gone, leaving no way
+                back to the patient's actual dashboard short of the header's brand
+                logo, which intentionally goes to the public landing page instead
+                (see the Link above). This is the one remaining way back to Home
+                in that specific gap — hidden everywhere else (CSS, see
+                .chatHomeBtn) since every other screen already has one of the two
+                nav surfaces above. */}
+            {user?.role === "patient" && location.pathname === "/patient/chat" && (
+              <Link to="/patient" className={styles.chatHomeBtn} aria-label="Home">
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M4 11.5 12 4l8 7.5M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9" />
+                </svg>
+              </Link>
+            )}
             {/* Notifications only exist for patient-initiated booking events (see
                 app/services/notifications.py) - there's no admin notification type
                 yet, so the bell is patient-only rather than shown for every role. */}

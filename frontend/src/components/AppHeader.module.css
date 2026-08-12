@@ -55,6 +55,26 @@
   flex: none;
 }
 
+/* Only ever rendered on the chat page (see AppHeader.jsx's own comment on the
+   gap this closes) — hidden here means "not on a small screen", not "not on
+   the chat page" (that part's already handled in JSX). Matches
+   NotificationBell's .bellBtn sizing/color so the two sit as a matched pair. */
+.chatHomeBtn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  color: var(--app-accent);
+}
+
+@media (max-width: 719px) {
+  .chatHomeBtn {
+    display: inline-flex;
+  }
+}
+
 /* Groups the theme toggle with the hamburger/nav-links block at the header's
    far right on the public landing header — mirrors .headerEnd's role for the
    authenticated view. margin-left: auto (rather than relying solely on
