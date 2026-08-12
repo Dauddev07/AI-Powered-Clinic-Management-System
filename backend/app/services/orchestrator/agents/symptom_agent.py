@@ -48,7 +48,6 @@ from app.services.message_classifier import (
     is_symptom_message,
     needs_path2_screening,
 )
-from app.services.nearby_hospitals import nearby_hospitals_block
 from app.services.orchestrator.symptom_hints import (
     departments_hinted_by_patient_symptom_words,
     unsupported_symptom_labels,
@@ -329,8 +328,6 @@ def run_symptom_agent(
     message: str,
     language: str,
     history: list[ConversationMemory],
-    lat: float | None = None,
-    lng: float | None = None,
 ) -> str:
     department_names = list_active_department_names(db, ctx.clinic_id)
 
@@ -558,14 +555,5 @@ def run_symptom_agent(
                 _get_department_availability_impl(db, ctx, name, note=extra_notes[name]) for name in missing
             ]
             reply = combine_department_availability_results([reply, *extra_results])
-
-    # A genuine PATH 1 emergency reply (see _looks_like_a_valid_emergency_reply's own
-    # docstring) gets the same "nearest emergency hospitals" block as the deterministic
-    # red_flag guard in app.services.chat — this is the OTHER of the only two moments
-    # the system ever concludes "this is an emergency" (see that module's own
-    # docstring). Every branch above only mutates a marker-prefixed (department-card)
-    # reply, never this one, so checking here at the end is safe.
-    if _looks_like_a_valid_emergency_reply(reply):
-        reply += nearby_hospitals_block(lat, lng)
 
     return reply

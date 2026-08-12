@@ -31,7 +31,6 @@ from app.services.chat_markers import (
 from app.services.diagnosis_guard import enforce_no_diagnosis
 from app.services.language import detect_language
 from app.services.memory_summary import reset_patient_summary
-from app.services.nearby_hospitals import nearby_hospitals_block
 from app.services.orchestrator.agents.appointment_agent import run_appointment_agent
 from app.services.orchestrator.agents.general_info_agent import run_general_info_agent
 from app.services.orchestrator.agents.symptom_agent import run_symptom_agent
@@ -181,21 +180,15 @@ class GuardOutcome:
     red_flag: bool = False
 
 
-def _red_flag_guard(message: str, lat: float | None, lng: float | None) -> GuardOutcome | None:
+def _red_flag_guard(message: str) -> GuardOutcome | None:
     """Emergency detection runs before anything else — a real emergency
     short-circuits triage, booking, and KB retrieval entirely and returns the
     urgent routing message immediately. A prompt instruction alone is not a
     guarantee, so this is a plain server-side check (regex, bare-severity, and
     semantic layers — see app.services.red_flag's own module docstring), not
-    something the LLM is asked to decide.
-
-    lat/lng (patient device coordinates, optional — see ChatRequest) get appended
-    as a "nearest emergency hospitals" block via app.services.nearby_hospitals;
-    silently skipped when absent or when the lookup fails, never blocking this
-    reply (see that module's own docstring)."""
+    something the LLM is asked to decide."""
     if detect_red_flag(message):
-        reply = red_flag_message() + nearby_hospitals_block(lat, lng)
-        return GuardOutcome(reply=reply, red_flag=True)
+        return GuardOutcome(reply=red_flag_message(), red_flag=True)
     return None
 
 
@@ -206,9 +199,9 @@ def _red_flag_guard(message: str, lat: float | None, lng: float | None) -> Guard
 _PRE_AGENT_GUARDS: tuple = (_red_flag_guard,)
 
 
-def _run_pre_agent_guards(message: str, lat: float | None, lng: float | None) -> GuardOutcome | None:
+def _run_pre_agent_guards(message: str) -> GuardOutcome | None:
     for guard in _PRE_AGENT_GUARDS:
-        outcome = guard(message, lat, lng)
+        outcome = guard(message)
         if outcome is not None:
             return outcome
     return None
@@ -236,17 +229,12 @@ def _run_post_agent_guards(reply: str, language: str) -> str:
 
 
 def handle_chat_message(
-    db: Session,
-    ctx: ClinicContext,
-    message: str,
-    session_id: uuid.UUID | None,
-    lat: float | None = None,
-    lng: float | None = None,
+    db: Session, ctx: ClinicContext, message: str, session_id: uuid.UUID | None
 ) -> ChatTurnResult:
     session_id = session_id or uuid.uuid4()
     language = detect_language(message)
 
-    pre_guard_outcome = _run_pre_agent_guards(message, lat, lng)
+    pre_guard_outcome = _run_pre_agent_guards(message)
     if pre_guard_outcome is not None:
         _save_message(db, ctx, session_id, "user", message)
         _save_message(db, ctx, session_id, "assistant", pre_guard_outcome.reply, red_flag=pre_guard_outcome.red_flag)
@@ -286,9 +274,7 @@ def handle_chat_message(
     # prompt's CONVERSATIONAL EXCEPTION + retrieval, same as before).
     intent = classify_agent_intent(message, history)
     if intent == SYMPTOM_GENERAL:
-        reply = run_symptom_agent(
-            db, ctx, message, language, _trim_history(history, SYMPTOM_AGENT_HISTORY_LIMIT), lat, lng
-        )
+        reply = run_symptom_agent(db, ctx, message, language, _trim_history(history, SYMPTOM_AGENT_HISTORY_LIMIT))
     elif intent == APPOINTMENT:
         reply = run_appointment_agent(
             db, ctx, message, language, _trim_history(history, APPOINTMENT_AGENT_HISTORY_LIMIT)
