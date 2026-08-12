@@ -1032,23 +1032,28 @@ export default function ChatPage() {
         <button type="button" className={styles.sidebarBackdrop} onClick={() => setSidebarOpen(false)} aria-label="Close chat history" />
       )}
 
-      {/* Large-screen-only reopen affordance — irrelevant/hidden below 900px,
-          where the topBar's own hamburger button already does this job. */}
-      {sidebarCollapsed && (
-        <button
-          type="button"
-          className={styles.expandSidebarBtn}
-          onClick={() => setSidebarCollapsed(false)}
-          aria-label="Show chat history"
-        >
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <rect x="3" y="4" width="18" height="16" rx="2.5" />
-            <line x1="9" y1="4" x2="9" y2="20" />
-          </svg>
-        </button>
-      )}
-
       <div className={styles.main}>
+        {/* Large-screen-only reopen affordance, in normal document flow (not
+            floated) so it can never overlap the disclaimer banner or anything
+            else below it — reported live: an absolutely-positioned version sat
+            cramped right on top of the disclaimer bar. Irrelevant/hidden below
+            900px, where the topBar's own hamburger button already does this job. */}
+        {sidebarCollapsed && (
+          <div className={styles.expandSidebarBar}>
+            <button
+              type="button"
+              className={styles.expandSidebarBtn}
+              onClick={() => setSidebarCollapsed(false)}
+              aria-label="Show chat history"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="16" rx="2.5" />
+                <line x1="9" y1="4" x2="9" y2="20" />
+              </svg>
+            </button>
+          </div>
+        )}
+
         <div className={styles.topBar}>
           <button type="button" className={styles.sidebarToggle} onClick={() => setSidebarOpen(true)} aria-label="Show chat history">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

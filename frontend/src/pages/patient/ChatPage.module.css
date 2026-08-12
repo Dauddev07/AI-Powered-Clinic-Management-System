@@ -76,8 +76,41 @@
   color: var(--app-text-title);
 }
 
-.expandSidebarBtn {
+/* Its own row, in normal flow, ABOVE the topBar/disclaimer — rendered
+   whenever sidebarCollapsed is true, but that flag also gets set on mobile
+   (the close button sets it unconditionally alongside sidebarOpen — see its
+   own comment in the JSX, since JS has no cheap way to know the current CSS
+   breakpoint). display: none below 900px is what actually keeps this
+   large-screen-only, rather than the JSX condition alone. */
+.expandSidebarBar {
   display: none;
+}
+
+@media (min-width: 900px) {
+  .expandSidebarBar {
+    flex-shrink: 0;
+    display: flex;
+    padding: 0.7rem 1rem 0;
+  }
+}
+
+.expandSidebarBtn {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid var(--app-border);
+  background: none;
+  color: var(--app-text-subtitle);
+  cursor: pointer;
+}
+
+.expandSidebarBtn:hover {
+  border-color: var(--app-accent);
+  color: var(--app-text-title);
 }
 
 /* Large-screen collapse only — MUST stay scoped to this media query. Below
@@ -92,30 +125,6 @@
     width: 0;
     border-right: none;
     overflow: hidden;
-  }
-
-  .expandSidebarBtn {
-    display: flex;
-    position: absolute;
-    top: 0.9rem;
-    left: 0.9rem;
-    z-index: 5;
-    flex-shrink: 0;
-    width: 38px;
-    height: 38px;
-    align-items: center;
-    justify-content: center;
-    border-radius: 10px;
-    border: 1px solid var(--app-border);
-    background: var(--app-bg-card);
-    color: var(--app-text-subtitle);
-    cursor: pointer;
-    box-shadow: 0 2px 8px var(--app-shadow);
-  }
-
-  .expandSidebarBtn:hover {
-    border-color: var(--app-accent);
-    color: var(--app-text-title);
   }
 }
 
