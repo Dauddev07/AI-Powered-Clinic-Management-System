@@ -24,7 +24,7 @@ def send_chat_message(
     ctx: ClinicContext = Depends(get_clinic_context),
     db: Session = Depends(get_db),
 ) -> ChatResponse:
-    result = handle_chat_message(db, ctx, payload.message.strip(), payload.session_id)
+    result = handle_chat_message(db, ctx, payload.message.strip(), payload.session_id, payload.lat, payload.lng)
     return ChatResponse(session_id=result.session_id, reply=result.reply, red_flag=result.red_flag)
 
 

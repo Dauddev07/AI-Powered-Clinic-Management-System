@@ -1,10 +1,20 @@
 import { apiFetch } from "./client";
 
-export function sendChatMessage(message, sessionId) {
+// coords (optional) is { lat, lng } — the patient's device location, only ever used
+// server-side to attach a "nearest emergency hospitals" block when this particular
+// message turns out to be classified as an emergency (see
+// app.services.nearby_hospitals). Harmless to send on every message: the backend
+// silently ignores it otherwise.
+export function sendChatMessage(message, sessionId, coords) {
   return apiFetch("/chat", {
     method: "POST",
     auth: true,
-    body: { message, session_id: sessionId || undefined },
+    body: {
+      message,
+      session_id: sessionId || undefined,
+      lat: coords?.lat ?? undefined,
+      lng: coords?.lng ?? undefined,
+    },
   });
 }
 

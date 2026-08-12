@@ -7,6 +7,11 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     session_id: uuid.UUID | None = None
+    # Optional patient coordinates, sent by the frontend only at the moment a message
+    # is about to be classified as an emergency (see app.services.nearby_hospitals) —
+    # never required, and silently unused for every non-emergency turn.
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lng: float | None = Field(default=None, ge=-180, le=180)
 
 
 class ChatResponse(BaseModel):

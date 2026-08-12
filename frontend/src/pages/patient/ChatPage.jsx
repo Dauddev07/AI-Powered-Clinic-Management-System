@@ -513,6 +513,13 @@ export default function ChatPage() {
   // replaced wholesale (initial load, switching sessions, New Chat) so a
   // stale index from a previous thread can never disable an unrelated card.
   const [usedCardIndices, setUsedCardIndices] = useState(() => new Set());
+  // Captured once, silently, on first mount of this page — never a blocking prompt
+  // shown by us; the browser's own native permission dialog is the only ask. If
+  // denied or unsupported, this just stays null and every message is sent without
+  // it — the backend only uses it at all when a message turns out to be an
+  // emergency (see app/services/nearby_hospitals.py's own docstring for why this
+  // is asked here, contextually, rather than on the public landing page).
+  const [coords, setCoords] = useState(null);
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const topRef = useRef(null);
@@ -555,6 +562,15 @@ export default function ChatPage() {
     fetchMyProfile()
       .then((data) => setFirstName((data.full_name || "").trim().split(/\s+/)[0] || null))
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => {}, // denied or unavailable — coords stays null, no retry, no error shown
+      { timeout: 8000, maximumAge: 300000 },
+    );
   }, []);
 
   useEffect(() => {
@@ -720,7 +736,7 @@ export default function ChatPage() {
     setSending(true);
     setPendingThreadToken(threadToken);
 
-    sendChatMessage(text, activeSessionId)
+    sendChatMessage(text, activeSessionId, coords)
       .then((res) => {
         // Only paint the reply (and switch the active session/localStorage to it)
         // into the currently-displayed thread if the patient hasn't since
