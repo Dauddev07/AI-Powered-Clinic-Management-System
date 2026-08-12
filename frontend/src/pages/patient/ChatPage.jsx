@@ -661,8 +661,13 @@ export default function ChatPage() {
   // stripping, etc.) needs to know text arrived via speech rather than typing.
   // interimResults is on so the box fills in live as the patient talks, rather
   // than staying blank until they stop — closer to how dictation feels on a phone
-  // keyboard. Stops itself on a natural pause (continuous: false) so there's no
-  // need to also detect silence manually.
+  // keyboard.
+  //
+  // Reported live: continuous: false made the mic auto-close on the first pause
+  // in speech (e.g. a mid-sentence breath), before the patient meant to stop —
+  // it should only close when THEY tap it again. continuous: true keeps the
+  // session open across pauses; the only things that end it now are the mic
+  // button being tapped again, sending the message, or navigating away.
   const toggleListening = () => {
     if (!speechRecognitionSupported || sending) return;
 
@@ -675,7 +680,7 @@ export default function ChatPage() {
     const recognition = new SpeechRecognitionCtor();
     recognition.lang = "en-US";
     recognition.interimResults = true;
-    recognition.continuous = false;
+    recognition.continuous = true;
 
     recognition.onresult = (event) => {
       let transcript = "";
