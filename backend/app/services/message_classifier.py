@@ -553,6 +553,56 @@ def _preceding_assistant_turn_looks_like_a_question(history) -> bool:
 _CANCEL_ACTION_WORDS = frozenset({"cancel", "cancellation", "cancelled", "canceling", "cancelling"})
 _RESCHEDULE_ACTION_WORDS = frozenset({"reschedule", "rescheduling", "postpone", "postponing"})
 
+
+def _levenshtein_at_most(a: str, b: str, max_dist: int) -> bool:
+    """True if the edit distance between a and b is <= max_dist. A plain O(len(a) *
+    len(b)) DP is more than fast enough here — every caller passes single words no
+    longer than ~15 characters, never full messages."""
+    if abs(len(a) - len(b)) > max_dist:
+        return False
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        curr = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+        prev = curr
+    return prev[len(b)] <= max_dist
+
+
+# Reported live: "reshedule my upcmoing appointment" (a typo'd "reschedule") didn't
+# trigger the same deterministic appointment-ambiguity handoff a correctly-spelled
+# "reschedule" does (see appointment_agent._detect_action_intent) — an exact word-set
+# match has no tolerance for the single dropped/transposed letter a patient typing
+# quickly produces all the time. Distance <= 2 absorbs a realistic one-or-two-letter
+# typo (a dropped letter, or a transposition, which plain Levenshtein counts as 2
+# single-character edits) — the length-difference short-circuit inside
+# _levenshtein_at_most already rules out short, unrelated words matching by
+# coincidence, since every word in these two vocabularies is 6+ letters long.
+_ACTION_WORD_FUZZY_MAX_DIST = 2
+
+# A real, genuinely unrelated word can still land within the fuzzy distance above by
+# coincidence — "cancer"/"cancers"/"cancerous" are exactly one substitution away from
+# "cancel", so a patient mentioning a cancer diagnosis or worry (a real, sensitive
+# medical topic, not a booking action at all) would otherwise wrongly trigger the
+# cancel-appointment handoff. Excluded from fuzzy matching specifically (never from
+# the exact-match check above, which "cancer" could never satisfy anyway) rather than
+# tightening the distance threshold generally, which would just as easily reopen the
+# original typo gap this fuzzy matching exists to close.
+_FUZZY_MATCH_EXCLUDE = frozenset({"cancer", "cancers", "cancerous"})
+
+
+def _fuzzy_word_in(word: str, vocabulary: frozenset[str]) -> bool:
+    if word in _FUZZY_MATCH_EXCLUDE:
+        return False
+    return any(_levenshtein_at_most(word, candidate, _ACTION_WORD_FUZZY_MAX_DIST) for candidate in vocabulary)
+
+
+def _fuzzy_words_intersect(words: set[str], vocabulary: frozenset[str]) -> bool:
+    if words & vocabulary:
+        return True
+    return any(_fuzzy_word_in(word, vocabulary) for word in words)
+
 # Booking-action intent vocabulary for needs_booking_action_tools() below —
 # deliberately broad/over-inclusive, same fail-safe philosophy as
 # _KNOWLEDGE_KEYWORDS: binding book_appointment/reschedule_appointment/

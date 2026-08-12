@@ -7,6 +7,9 @@ from app.services.message_classifier import (
     CONVERSATIONAL,
     KNOWLEDGE_SEEKING,
     PERSONAL_RECALL,
+    _CANCEL_ACTION_WORDS,
+    _RESCHEDULE_ACTION_WORDS,
+    _fuzzy_words_intersect,
     _heuristic_classify,
     classify_message_intent,
     is_department_list_request,
@@ -629,3 +632,54 @@ def test_is_department_scope_question_true_for_scope_phrasings(message):
 )
 def test_is_department_scope_question_false_for_unrelated_messages(message):
     assert is_department_scope_question(message) is False
+
+
+# --- fuzzy action-word matching (typo tolerance for cancel/reschedule) --------------
+
+
+@pytest.mark.parametrize(
+    "word,vocabulary",
+    [
+        ("reshedule", _RESCHEDULE_ACTION_WORDS),
+        ("rescedule", _RESCHEDULE_ACTION_WORDS),
+        ("reschedul", _RESCHEDULE_ACTION_WORDS),
+        ("cancle", _CANCEL_ACTION_WORDS),
+        ("cnacel", _CANCEL_ACTION_WORDS),
+    ],
+)
+def test_fuzzy_words_intersect_absorbs_realistic_typos(word, vocabulary):
+    # Reported live: "reshedule my upcmoing appointment" didn't get the same
+    # deterministic appointment-ambiguity handoff a correctly-spelled "reschedule"
+    # does — exact word-set matching has no tolerance for a dropped/transposed
+    # letter.
+    assert _fuzzy_words_intersect({word}, vocabulary)
+
+
+def test_fuzzy_words_intersect_exact_match_still_works():
+    assert _fuzzy_words_intersect({"reschedule"}, _RESCHEDULE_ACTION_WORDS)
+    assert _fuzzy_words_intersect({"cancel"}, _CANCEL_ACTION_WORDS)
+
+
+@pytest.mark.parametrize(
+    "word",
+    [
+        # A real, unrelated word landing within the fuzzy distance by pure
+        # coincidence — "cancer" is exactly one substitution away from "cancel",
+        # and a patient mentioning a cancer diagnosis/worry is a real, sensitive
+        # medical topic, not a cancel-appointment request.
+        "cancer",
+        "cancers",
+        "cancerous",
+    ],
+)
+def test_fuzzy_words_intersect_excludes_cancer_from_cancel_match(word):
+    assert not _fuzzy_words_intersect({word}, _CANCEL_ACTION_WORDS)
+
+
+@pytest.mark.parametrize(
+    "word",
+    ["appointment", "book", "the", "weather", "available", "hello"],
+)
+def test_fuzzy_words_intersect_does_not_false_fire_on_unrelated_words(word):
+    assert not _fuzzy_words_intersect({word}, _RESCHEDULE_ACTION_WORDS)
+    assert not _fuzzy_words_intersect({word}, _CANCEL_ACTION_WORDS)

@@ -89,6 +89,7 @@ from app.services.message_classifier import (
     _CANCEL_ACTION_WORDS,
     _RESCHEDULE_ACTION_WORDS,
     DEPARTMENT_TITLE_HINTS,
+    _fuzzy_words_intersect,
     _preceding_assistant_turn_looks_like_a_question,
 )
 from app.services.orchestrator.symptom_hints import departments_hinted_by_patient_symptom_words
@@ -376,11 +377,18 @@ def _detect_action_intent(message: str) -> str | None:
     system): a false positive here would trigger the appointment-ambiguity handoff
     below for an unrelated message, and a false negative just falls through to the
     LLM exactly as before this handoff existed, so there's no safety asymmetry
-    pushing this one broader."""
+    pushing this one broader.
+
+    Reported live: "reshedule my upcmoing appointment" (a typo'd "reschedule")
+    didn't get this same deterministic handoff a correctly-spelled message does —
+    exact word-set matching has no tolerance for a dropped/transposed letter.
+    Fuzzy (edit-distance) matching via message_classifier._fuzzy_words_intersect
+    absorbs that without loosening this into a broad keyword list — see its own
+    comment for why the distance threshold stays safe against false positives."""
     words = set(re.findall(r"[a-z0-9']+", message.lower()))
-    if words & _CANCEL_KEYWORDS:
+    if _fuzzy_words_intersect(words, _CANCEL_KEYWORDS):
         return "cancel"
-    if words & _RESCHEDULE_KEYWORDS:
+    if _fuzzy_words_intersect(words, _RESCHEDULE_KEYWORDS):
         return "reschedule"
     return None
 
