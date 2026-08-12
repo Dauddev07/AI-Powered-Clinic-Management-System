@@ -55,6 +55,32 @@ _REQUEST_TIMEOUT_SECONDS = 4.0
 _MAX_RESULTS = 3
 _EARTH_RADIUS_KM = 6371.0
 
+# Reported live: a broken-leg emergency reply surfaced an eye hospital as the
+# "nearest emergency hospital" — technically the closest amenity=hospital node, but
+# useless for that patient, since a single-specialty hospital isn't equipped to
+# treat an unrelated trauma case walking in. OSM's own emergency=yes tag (present
+# on the SAME node, "does this place have a general emergency department") is the
+# real signal to rank on, not raw distance — but it's community-edited and often
+# missing even on hospitals that do have one, so it can only be used to PREFER a
+# result, never to exclude the rest outright (a genuine nearest-hospital case with
+# no tag at all must still show up rather than nothing). The name-keyword check
+# below is a second, cruder signal for the same thing, for the (common) case where
+# emergency=yes isn't tagged either way but the hospital's own name already gives
+# away that it's a single-specialty facility a general/trauma emergency shouldn't
+# be routed to.
+_SPECIALTY_NAME_KEYWORDS = (
+    "eye", "ophthalm", "dental", "dentistry", "maternity", "gynae", "obstetric",
+    "children", "child ", "pediatric", "paediatric", "psychiatric", "mental health",
+    "cancer", "oncology", "cardiac", "cardiology", "diabetic", "dermatology",
+    "skin", "ent ", "e.n.t", "leprosy", "tb ", "tuberculosis", "chest disease",
+    "rehabilitation", "physiotherapy", "homeopath", "dialysis",
+)
+
+
+def _is_specialty_named(name: str) -> bool:
+    lowered = name.lower()
+    return any(keyword in lowered for keyword in _SPECIALTY_NAME_KEYWORDS)
+
 
 def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
@@ -132,10 +158,19 @@ def find_nearby_hospitals(lat: float, lng: float) -> list[dict]:
                 "name": name,
                 "distance_km": _haversine_km(lat, lng, coords[0], coords[1]),
                 "phone": _element_phone(tags),
+                # True when OSM explicitly confirms a general emergency department
+                # (never inferred from absence of the tag — see _SPECIALTY_NAME_
+                # KEYWORDS' own comment on why untagged still needs the name check).
+                "has_emergency_dept": tags.get("emergency") == "yes",
+                "is_specialty": _is_specialty_named(name),
             }
         )
 
-    hospitals.sort(key=lambda h: h["distance_km"])
+    # Ranked general-emergency-capable-and-not-single-specialty first, then by
+    # distance within each tier — never drops a hospital just for lacking the
+    # emergency tag or reading as specialty-named, only reorders (see this
+    # function's own module-level comment on why exclusion isn't safe here).
+    hospitals.sort(key=lambda h: (h["is_specialty"], not h["has_emergency_dept"], h["distance_km"]))
     return hospitals[:_MAX_RESULTS]
 
 

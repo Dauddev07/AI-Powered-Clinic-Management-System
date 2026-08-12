@@ -43,6 +43,44 @@ def test_find_nearby_hospitals_sorts_nearest_first(monkeypatch):
     assert results[1]["phone"] is None
 
 
+def test_find_nearby_hospitals_ranks_general_hospital_above_closer_specialty_one(monkeypatch):
+    # Reported live: a broken-leg emergency surfaced the nearest hospital by raw
+    # distance alone, which happened to be an Eye Hospital — not equipped for
+    # unrelated trauma. A same-distance-ish General Hospital tagged emergency=yes
+    # should now outrank the closer but single-specialty one.
+    _mock_overpass_response(
+        monkeypatch,
+        [
+            {"tags": {"name": "Lions Eye Hospital"}, "lat": 31.5205, "lon": 74.3588},
+            {"tags": {"name": "City General Hospital", "emergency": "yes"}, "lat": 31.530, "lon": 74.370},
+        ],
+    )
+    results = find_nearby_hospitals(31.5204, 74.3587)
+    assert results[0]["name"] == "City General Hospital"
+    assert results[1]["name"] == "Lions Eye Hospital"
+
+
+def test_find_nearby_hospitals_prefers_emergency_tagged_over_untagged_same_specialty_class(monkeypatch):
+    _mock_overpass_response(
+        monkeypatch,
+        [
+            {"tags": {"name": "Sunrise Hospital"}, "lat": 31.5205, "lon": 74.3588},
+            {"tags": {"name": "Riverside Hospital", "emergency": "yes"}, "lat": 31.530, "lon": 74.370},
+        ],
+    )
+    results = find_nearby_hospitals(31.5204, 74.3587)
+    assert results[0]["name"] == "Riverside Hospital"
+
+
+def test_find_nearby_hospitals_still_returns_specialty_hospital_when_its_the_only_option(monkeypatch):
+    _mock_overpass_response(
+        monkeypatch,
+        [{"tags": {"name": "Lions Eye Hospital"}, "lat": 31.521, "lon": 74.359}],
+    )
+    results = find_nearby_hospitals(31.5204, 74.3587)
+    assert results[0]["name"] == "Lions Eye Hospital"
+
+
 def test_find_nearby_hospitals_reads_way_center_tag(monkeypatch):
     _mock_overpass_response(
         monkeypatch,
