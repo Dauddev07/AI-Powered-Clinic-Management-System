@@ -81,5 +81,20 @@ class Settings(BaseSettings):
     # worst-case lateness under a minute.
     APPOINTMENT_REMINDER_INTERVAL_MINUTES: int = 1
 
+    # Web Push (app/services/push_notifications.py) — a one-time-generated VAPID
+    # keypair, not a per-clinic secret. VAPID_PRIVATE_KEY_B64 is the PEM private key
+    # base64-encoded into one line so it survives being pasted into a single-line env
+    # var the same way every other secret here does; VAPID_PUBLIC_KEY is the raw
+    # public key the frontend calls PushManager.subscribe() with — safe to expose,
+    # same as any other public key. VAPID_CONTACT_EMAIL is required by the Web Push
+    # protocol itself (RFC 8292) so a push service has a way to contact the sender
+    # about abuse — not used for anything else. All three default to "" so a clinic
+    # that hasn't generated keys yet just has push silently disabled (see
+    # push_notifications.py's own "never break the caller" pattern) rather than the
+    # app failing to start.
+    VAPID_PRIVATE_KEY_B64: str = ""
+    VAPID_PUBLIC_KEY: str = ""
+    VAPID_CONTACT_EMAIL: str = ""
+
 
 settings = Settings()

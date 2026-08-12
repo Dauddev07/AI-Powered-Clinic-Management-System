@@ -492,3 +492,54 @@
     animation: none;
   }
 }
+
+.pushRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 1.1rem;
+  border-top: 1px solid var(--app-border);
+  flex-wrap: wrap;
+}
+
+.pushRowText {
+  font-size: var(--font-size-caption);
+  color: var(--app-text-label);
+}
+
+.pushBtn {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  color: var(--app-link);
+  font-weight: 600;
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+  padding: 0.3rem 0.7rem;
+}
+
+.pushBtn:hover:not(:disabled) {
+  border-color: var(--app-accent);
+}
+
+.pushBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.pushNote {
+  margin: 0;
+  padding: 0.7rem 1.1rem;
+  border-top: 1px solid var(--app-border);
+  font-size: var(--font-size-caption);
+  color: var(--app-text-subtitle);
+}
+
+.pushError {
+  width: 100%;
+  margin: 0.3rem 0 0;
+  font-size: var(--font-size-caption);
+  color: var(--app-error-text);
+}
