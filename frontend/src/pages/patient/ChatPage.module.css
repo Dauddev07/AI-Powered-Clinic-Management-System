@@ -90,7 +90,14 @@
   .expandSidebarBar {
     flex-shrink: 0;
     display: flex;
-    padding: 0.7rem 1rem 0;
+    align-items: center;
+    padding: 0.7rem 1rem;
+    /* Its own strip, same treatment as .topBar (the mobile equivalent) — a
+       solid background + bottom border is what actually separates it from
+       the disclaimer's warm-tinted banner below, rather than the two blending
+       into what read as one continuous yellow area. */
+    background: var(--app-bg-card);
+    border-bottom: 1px solid var(--app-border);
   }
 }
 
