@@ -204,6 +204,28 @@ _RED_FLAG_PATTERNS = [
     r"\b(severed|detached)\b.{0,25}\b(leg|arm|hand|foot|finger|toe|limb)\b",
     r"\b(leg|arm|hand|foot|finger|toe|limb)\b.{0,25}\b(severed|detached|cut off|chopped off|torn off|ripped off)\b",
     r"\bmissing\b.{0,10}\b(a|an|my|one)\b.{0,10}\b(leg|arm|hand|foot|finger|toe|limb)\b",
+    # Decapitation / head or neck severed / body bisected — same shape as the limb
+    # patterns directly above, but the leg/arm/hand/foot/finger/toe/limb word list
+    # there never included head or neck, so "my head got detached from my body"
+    # fell through entirely (matched no pattern at all, only reached the LLM/
+    # semantic layer inconsistently). These are unambiguous regardless of how
+    # implausible the message sounds typed out (see this file's own module
+    # docstring on treating unambiguous categories as deterministic regardless of
+    # context) — kept as their own patterns rather than folded into the limb list
+    # above so "head"/"neck" don't have to be added to every unrelated limb rule.
+    r"\bdecapitat\w*\b",
+    r"\bhead\b.{0,25}\b(severed|detached|cut off|chopped off|torn off|ripped off|separated)\b",
+    r"\b(severed|detached|cut off|chopped off|torn off|ripped off|separated)\b.{0,25}\bhead\b",
+    r"\bneck\b.{0,25}\b(severed|snapped|detached|broken)\b",
+    r"\b(severed|snapped|detached|broken)\b.{0,25}\bneck\b",
+    # Scoped to "body"/"torso"/"waist" nearby, or a person-reference ("i was",
+    # "he got") right before the verb — a bare "cut/split/sliced in half" alone
+    # would false-fire on something like "cut my sandwich in half", which has
+    # nothing to do with an injury at all.
+    r"\b(body|torso|waist)\b.{0,15}\b(cut|split|sliced|torn)\b.{0,10}\bin half\b",
+    r"\b(i|he|she|they)\b.{0,5}\b(was|were|got)\b.{0,15}\b(cut|split|sliced|torn)\b.{0,10}\bin half\b",
+    r"\b(i|he|she|they)\b.{0,5}\b(was|were|got)\b.{0,15}\bcut\b.{0,10}\binto (two|2) (pieces|parts|halves)\b",
+    r"\bspine\b.{0,20}\b(severed|snapped|broken in (two|half))\b",
     r"\bcompound fracture\b",
     r"\bbone\b.{0,15}\bsticking out\b",
     # Broken/fractured bones are handled separately below (see

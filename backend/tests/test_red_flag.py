@@ -187,6 +187,48 @@ def test_severe_trauma_and_limb_loss_patterns_fire(message):
 @pytest.mark.parametrize(
     "message",
     [
+        "my head got detached from my body",
+        "my head is detached",
+        "i got decapitated",
+        "my head was cut off",
+        "his head got chopped off",
+        "my body was cut in half",
+        "i was cut in half",
+        "he was split in half",
+        "my neck is severed",
+        "my neck snapped",
+        "my spine got severed",
+        "my spine is broken in half",
+        "my head is separated from my neck",
+    ],
+)
+def test_decapitation_and_body_bisection_patterns_fire(message):
+    assert detect_red_flag(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "i cut the apple into two pieces",
+        "my shirt was torn in half",
+    ],
+)
+def test_bare_cut_in_half_without_a_body_reference_does_not_regex_fire(message):
+    # Scoping check for the patterns above — a bare "cut/torn in half" or "cut
+    # into two pieces" with no body/torso/waist word and no personal pronoun
+    # right before the verb must not match on food/object phrasing. Checked
+    # against the regex layer directly (not detect_red_flag) since the separate
+    # semantic layer has its own known, pre-existing, unrelated false-positive
+    # drift on some everyday cut/slice phrasing — see this file's other
+    # documented pre-existing semantic-layer failures.
+    from app.services.red_flag import _RED_FLAG_RE
+
+    assert not _RED_FLAG_RE.search(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
         "my leg is broken",
         "his arm is broken",
         "I think my wrist is broken",
