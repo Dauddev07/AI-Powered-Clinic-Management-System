@@ -4,24 +4,14 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.api.notifications import (
-    get_push_public_key,
-    list_my_notifications,
-    mark_all_notifications_read,
-    mark_notification_read,
-    subscribe_to_push,
-    unsubscribe_from_push,
-)
-from app.core.config import settings
+from app.api.notifications import list_my_notifications, mark_all_notifications_read, mark_notification_read
 from app.models.appointment import Appointment
 from app.models.clinic import Clinic
 from app.models.department import Department
 from app.models.doctor import Doctor
 from app.models.notification import Notification
-from app.models.push_subscription import PushSubscription
 from app.models.slot import Slot
 from app.models.user import User
-from app.schemas.notification import PushSubscriptionIn, PushSubscriptionKeysIn, PushUnsubscribeIn
 from app.services import booking_engine
 from app.services.notifications import create_notification, format_appointment_datetime
 
@@ -271,58 +261,3 @@ def test_mark_all_notifications_read_clears_unread_count(db, clinic, patient):
 
     assert result.unread_count == 0
     assert all(n.read_at is not None for n in result.notifications)
-
-
-def test_get_push_public_key_returns_configured_key(monkeypatch):
-    monkeypatch.setattr(settings, "VAPID_PUBLIC_KEY", "some-public-key")
-    assert get_push_public_key().public_key == "some-public-key"
-
-
-def test_get_push_public_key_empty_when_not_configured(monkeypatch):
-    monkeypatch.setattr(settings, "VAPID_PUBLIC_KEY", "")
-    assert get_push_public_key().public_key == ""
-
-
-def _push_payload(endpoint: str) -> PushSubscriptionIn:
-    return PushSubscriptionIn(
-        endpoint=endpoint, keys=PushSubscriptionKeysIn(p256dh="fake-p256dh", auth="fake-auth")
-    )
-
-
-def test_subscribe_to_push_creates_a_row(db, clinic, patient):
-    subscribe_to_push(
-        payload=_push_payload("https://fcm.googleapis.com/fcm/send/new-endpoint"),
-        current_user=patient, db=db,
-    )
-    row = db.query(PushSubscription).filter(PushSubscription.user_id == patient.id).one()
-    assert row.endpoint == "https://fcm.googleapis.com/fcm/send/new-endpoint"
-    assert row.clinic_id == clinic.id
-
-
-def test_subscribe_to_push_is_idempotent_by_endpoint(db, patient):
-    endpoint = "https://fcm.googleapis.com/fcm/send/same-endpoint"
-    subscribe_to_push(payload=_push_payload(endpoint), current_user=patient, db=db)
-    subscribe_to_push(payload=_push_payload(endpoint), current_user=patient, db=db)
-
-    rows = db.query(PushSubscription).filter(PushSubscription.endpoint == endpoint).all()
-    assert len(rows) == 1
-
-
-def test_unsubscribe_from_push_removes_the_row(db, patient):
-    endpoint = "https://fcm.googleapis.com/fcm/send/to-remove"
-    subscribe_to_push(payload=_push_payload(endpoint), current_user=patient, db=db)
-
-    unsubscribe_from_push(payload=PushUnsubscribeIn(endpoint=endpoint), current_user=patient, db=db)
-
-    remaining = db.query(PushSubscription).filter(PushSubscription.endpoint == endpoint).one_or_none()
-    assert remaining is None
-
-
-def test_unsubscribe_from_push_does_not_remove_another_patients_subscription(db, patient, other_patient):
-    endpoint = "https://fcm.googleapis.com/fcm/send/belongs-to-other"
-    subscribe_to_push(payload=_push_payload(endpoint), current_user=other_patient, db=db)
-
-    unsubscribe_from_push(payload=PushUnsubscribeIn(endpoint=endpoint), current_user=patient, db=db)
-
-    remaining = db.query(PushSubscription).filter(PushSubscription.endpoint == endpoint).one_or_none()
-    assert remaining is not None

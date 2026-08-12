@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { fetchMyNotifications, markAllNotificationsRead, markNotificationRead } from "../api/notifications";
-import { disablePushNotifications, enablePushNotifications, getPushStatus } from "../pushNotifications";
 import styles from "./NotificationBell.module.css";
 
 // Where clicking a notification takes the patient — booked/rescheduled point at
@@ -113,54 +112,6 @@ function groupByDay(notifications) {
   return Array.from(groups.entries());
 }
 
-// Renders whatever's actionable for the CURRENT push status — never more than
-// one row, so this reads as a single, obvious control rather than a settings
-// wall. "unsupported" renders nothing at all (see pushNotifications.js's own
-// "just don't offer it" pattern, same as the speech-to-text mic button).
-function PushToggleRow({ status, busy, error, onEnable, onDisable }) {
-  if (status === "unsupported" || status === null) return null;
-
-  if (status === "unavailable-needs-home-screen") {
-    return (
-      <p className={styles.pushNote}>
-        To get appointment reminders on iPhone, add this app to your Home Screen first: tap the Share icon in
-        Safari → "Add to Home Screen." Then reopen it from there.
-      </p>
-    );
-  }
-
-  if (status === "denied") {
-    return (
-      <p className={styles.pushNote}>
-        Notifications are blocked for this site. To turn them on, allow notifications in your browser's site
-        settings, then reload the page.
-      </p>
-    );
-  }
-
-  if (status === "granted") {
-    return (
-      <div className={styles.pushRow}>
-        <span className={styles.pushRowText}>Phone notifications are on</span>
-        <button type="button" className={styles.pushBtn} onClick={onDisable} disabled={busy}>
-          {busy ? "…" : "Turn off"}
-        </button>
-      </div>
-    );
-  }
-
-  // "not-subscribed"
-  return (
-    <div className={styles.pushRow}>
-      <span className={styles.pushRowText}>Get reminders on your phone</span>
-      <button type="button" className={styles.pushBtn} onClick={onEnable} disabled={busy}>
-        {busy ? "…" : "Enable"}
-      </button>
-      {error && <p className={styles.pushError}>{error}</p>}
-    </div>
-  );
-}
-
 function BellSkeletonRow() {
   return (
     <div className={styles.skeletonRow} aria-hidden="true">
@@ -184,9 +135,6 @@ export default function NotificationBell() {
   const [notifications, setNotifications] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
-  const [pushStatus, setPushStatus] = useState(null);
-  const [pushBusy, setPushBusy] = useState(false);
-  const [pushError, setPushError] = useState(null);
   const panelRef = useRef(null);
   const launcherRef = useRef(null);
 
@@ -234,45 +182,6 @@ export default function NotificationBell() {
   useEffect(() => {
     if (!open) setShowUnreadOnly(false);
   }, [open]);
-
-  // Checked fresh every time the panel opens (not once on mount) — the patient
-  // may have changed the browser's notification permission in another tab, or
-  // this may be the first open after installing the app to their Home Screen.
-  useEffect(() => {
-    if (!open) return;
-    setPushError(null);
-    getPushStatus()
-      .then(setPushStatus)
-      .catch(() => setPushStatus("unsupported"));
-  }, [open]);
-
-  const handleEnablePush = async () => {
-    setPushBusy(true);
-    setPushError(null);
-    try {
-      await enablePushNotifications();
-      setPushStatus("granted");
-    } catch (err) {
-      setPushError(err.message || "Couldn't enable notifications.");
-      const status = await getPushStatus().catch(() => null);
-      if (status) setPushStatus(status);
-    } finally {
-      setPushBusy(false);
-    }
-  };
-
-  const handleDisablePush = async () => {
-    setPushBusy(true);
-    try {
-      await disablePushNotifications();
-      setPushStatus("not-subscribed");
-    } catch {
-      // Leave status as "granted" — the subscription may still be active
-      // server-side; the patient can just try again.
-    } finally {
-      setPushBusy(false);
-    }
-  };
 
   const handleItemClick = async (notification) => {
     if (!notification.read_at) {
@@ -434,14 +343,6 @@ export default function NotificationBell() {
               ));
             })()}
           </div>
-
-          <PushToggleRow
-            status={pushStatus}
-            busy={pushBusy}
-            error={pushError}
-            onEnable={handleEnablePush}
-            onDisable={handleDisablePush}
-          />
         </div>
       )}
     </div>

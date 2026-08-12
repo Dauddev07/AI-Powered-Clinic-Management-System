@@ -31,7 +31,6 @@ from app.models.audit_log import AuditLog
 from app.models.clinic import Clinic
 from app.services.appointment_reminders import send_due_reminders_for_clinic
 from app.services.appointments import auto_complete_past_appointments
-from app.services.push_notifications import send_push_for_notification
 from app.services.slots import regenerate_slots_for_clinic
 
 logger = logging.getLogger(__name__)
@@ -152,10 +151,6 @@ def run_appointment_reminder_tick() -> None:
                         clinic.id,
                         len(created),
                     )
-                    # Push only AFTER commit succeeds — see send_push_for_
-                    # notification's own docstring on why.
-                    for notification in created:
-                        send_push_for_notification(db, notification)
             except Exception:
                 db.rollback()
                 logger.exception("scheduled_appointment_reminders failed for clinic=%s", clinic.id)

@@ -12,7 +12,6 @@ from app.models.ingestion_log import IngestionLog
 from app.models.kb_document import KBDocument
 from app.models.notification import Notification
 from app.models.patient_memory_profile import PatientMemoryProfile
-from app.models.push_subscription import PushSubscription
 from app.models.slot import Slot
 from app.models.user import User
 
@@ -31,7 +30,6 @@ __all__ = [
     "KBDocument",
     "Notification",
     "PatientMemoryProfile",
-    "PushSubscription",
     "Slot",
     "User",
 ]

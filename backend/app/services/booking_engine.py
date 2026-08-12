@@ -32,7 +32,6 @@ from app.models.slot import Slot
 from app.schemas.appointment import AppointmentOut
 from app.services.appointments import auto_complete_past_appointments
 from app.services.notifications import create_notification, format_appointment_datetime
-from app.services.push_notifications import send_push_for_notification
 
 DAILY_DEPARTMENT_BOOKING_CAP = 2
 
@@ -219,7 +218,7 @@ def cancel_appointment(db: Session, clinic_id: uuid.UUID, patient_id: uuid.UUID,
     appointment.cancelled_at = datetime.now(timezone.utc)
     slot.status = "open"
     doctor = db.get(Doctor, appointment.doctor_id)
-    notification = create_notification(
+    create_notification(
         db,
         clinic_id=clinic_id,
         user_id=patient_id,
@@ -232,9 +231,6 @@ def cancel_appointment(db: Session, clinic_id: uuid.UUID, patient_id: uuid.UUID,
     )
     db.commit()
     db.refresh(appointment)
-    # Push only AFTER commit succeeds — see send_push_for_notification's own
-    # docstring on why it's never called from inside create_notification itself.
-    send_push_for_notification(db, notification)
     return appointment
 
 
@@ -336,7 +332,7 @@ def reschedule_appointment(
                 f"Your appointment with {new_doctor.full_name} has been rescheduled to "
                 f"{format_appointment_datetime(new_slot.start_utc, clinic.timezone)}."
             )
-        notification = create_notification(
+        create_notification(
             db,
             clinic_id=clinic_id,
             user_id=patient_id,
@@ -354,7 +350,4 @@ def reschedule_appointment(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This slot is no longer available.")
 
     db.refresh(appointment)
-    # Push only AFTER commit succeeds — see send_push_for_notification's own
-    # docstring on why it's never called from inside create_notification itself.
-    send_push_for_notification(db, notification)
     return appointment

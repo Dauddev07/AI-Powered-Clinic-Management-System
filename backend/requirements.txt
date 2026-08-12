@@ -25,4 +25,3 @@ langchain-groq
 groq
 rank_bm25
 langsmith
-pywebpush
