@@ -502,6 +502,14 @@ export default function ChatPage() {
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Separate from sidebarOpen on purpose: sidebarOpen is the MOBILE overlay
+  // toggle (hidden by default, slides in over the chat as a backdrop-dismissible
+  // panel — see the <900px CSS). On large screens the sidebar is a permanent
+  // column with no such overlay, so it needs its own "is it collapsed" concept,
+  // independent of and irrelevant to the mobile one. Reported live: there was no
+  // way to close the history panel at all on a large screen, unlike ChatGPT-style
+  // layouts where the rail can be collapsed to give the chat more width.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [sending, setSending] = useState(false);
   // Which thread (by viewedThreadTokenRef value, see below) the in-flight send
@@ -930,7 +938,10 @@ export default function ChatPage() {
 
   return (
     <div className={styles.page}>
-      <aside className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`} aria-label="Chat history">
+      <aside
+        className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""} ${sidebarCollapsed ? styles.sidebarCollapsed : ""}`}
+        aria-label="Chat history"
+      >
         <div className={styles.sidebarHeader}>
           <button type="button" className={styles.newChatBtn} onClick={startNewChat}>
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -941,7 +952,14 @@ export default function ChatPage() {
           <button
             type="button"
             className={styles.sidebarCloseBtn}
-            onClick={() => setSidebarOpen(false)}
+            // Sets BOTH states — each only has a visual effect at its own
+            // breakpoint (sidebarOpen's CSS is inert at >=900px, sidebarCollapsed's
+            // is inert below it), so one button correctly closes the panel on
+            // whichever layout is currently active without needing to branch here.
+            onClick={() => {
+              setSidebarOpen(false);
+              setSidebarCollapsed(true);
+            }}
             aria-label="Close chat history"
           >
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1012,6 +1030,22 @@ export default function ChatPage() {
 
       {sidebarOpen && (
         <button type="button" className={styles.sidebarBackdrop} onClick={() => setSidebarOpen(false)} aria-label="Close chat history" />
+      )}
+
+      {/* Large-screen-only reopen affordance — irrelevant/hidden below 900px,
+          where the topBar's own hamburger button already does this job. */}
+      {sidebarCollapsed && (
+        <button
+          type="button"
+          className={styles.expandSidebarBtn}
+          onClick={() => setSidebarCollapsed(false)}
+          aria-label="Show chat history"
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="2.5" />
+            <line x1="9" y1="4" x2="9" y2="20" />
+          </svg>
+        </button>
       )}
 
       <div className={styles.main}>
