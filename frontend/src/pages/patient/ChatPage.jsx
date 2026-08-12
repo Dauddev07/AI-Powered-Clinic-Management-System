@@ -63,6 +63,16 @@ const SUGGESTIONS = [
 // up either way, without changing what's actually sent or stored.
 const SLOT_ID_SUFFIX_RE = /\s*\(slot_id:\s*[0-9a-f-]{36}\)\.?\s*$/i;
 
+// Surfaced only for the mic errors a patient can actually do something about
+// (permission blocked, no mic hardware found) — other codes ("no-speech",
+// "aborted", a network blip) are transient/self-explanatory from context and
+// don't need their own message, they just silently reset to idle.
+const MIC_ERROR_MESSAGES = {
+  "not-allowed": "Microphone access is blocked for this site. To use voice input, allow it in your browser's site settings, then reload the page.",
+  "service-not-allowed": "Microphone access is blocked for this site. To use voice input, allow it in your browser's site settings, then reload the page.",
+  "audio-capture": "No microphone was found on this device.",
+};
+
 function stripSlotId(content) {
   return content.replace(SLOT_ID_SUFFIX_RE, ".");
 }
@@ -524,6 +534,7 @@ export default function ChatPage() {
   // simply never rendered when the constructor isn't present rather than shown
   // disabled with an explanation nobody asked for.
   const [listening, setListening] = useState(false);
+  const [micError, setMicError] = useState(null);
   const recognitionRef = useRef(null);
   const speechRecognitionSupported =
     typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -676,6 +687,7 @@ export default function ChatPage() {
       return;
     }
 
+    setMicError(null);
     const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognitionCtor();
     recognition.lang = "en-US";
@@ -690,9 +702,11 @@ export default function ChatPage() {
       setInput(transcript);
       requestAnimationFrame(resizeTextarea);
     };
-    recognition.onerror = () => {
+    recognition.onerror = (event) => {
       recognitionRef.current = null;
       setListening(false);
+      const message = MIC_ERROR_MESSAGES[event.error];
+      if (message) setMicError(message);
     };
     recognition.onend = () => {
       recognitionRef.current = null;
@@ -893,6 +907,7 @@ export default function ChatPage() {
   const handleInputChange = (e) => {
     setInput(e.target.value);
     resizeTextarea();
+    if (micError) setMicError(null);
   };
 
   const handleKeyDown = (e) => {
@@ -1147,6 +1162,11 @@ export default function ChatPage() {
               Listening… voice is transcribed by your browser's speech service, not stored by this app.
             </p>
           )}
+          {/* Reported live: tapping the mic after permission was blocked (e.g. the
+              patient chose "Never allow") failed completely silently — the button
+              flashed and did nothing, with no way to tell why. This is the only
+              feedback the patient gets for that case. */}
+          {!listening && micError && <p className={styles.micErrorNote}>{micError}</p>}
         </form>
       </div>
 
