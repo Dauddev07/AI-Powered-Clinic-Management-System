@@ -1128,9 +1128,14 @@ export default function ChatPage() {
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              placeholder="Type a message…"
+              placeholder={listening ? "Listening…" : "Type a message…"}
               rows={1}
-              disabled={sending}
+              // Reported live: typing was still possible while the mic was
+              // listening — the next speech-recognition result would overwrite
+              // the box wholesale (see toggleListening's onresult), silently
+              // discarding whatever had just been typed. Only one input mode at
+              // a time avoids that.
+              disabled={sending || listening}
               aria-label="Chat message"
             />
             {speechRecognitionSupported && (
