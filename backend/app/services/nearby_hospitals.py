@@ -116,31 +116,37 @@ def _element_phone(tags: dict) -> str | None:
     return tags.get("phone") or tags.get("contact:phone")
 
 
-# Reported live from Render's own logs: the first mirror failed with
-# "[Errno 101] Network is unreachable" — not a timeout, not a rejection, an
-# immediate routing failure. That specific error is the signature of a container
-# with no IPv6 egress route trying to connect to a host that publishes an IPv6
-# (AAAA) address, which overpass-api.de does — the OS picks that address first and
-# the connection attempt fails instantly, before any HTTP-level response is even
-# possible. binding the local socket to "0.0.0.0" (an IPv4-only wildcard address)
-# forces httpx to only ever attempt IPv4 connections, sidestepping the whole class
-# of failure regardless of which mirror or network environment this runs in next.
-_transport = httpx.HTTPTransport(local_address="0.0.0.0")
-
-
+# Reported live from Render's own logs: forcing local_address="0.0.0.0" (IPv4-only)
+# turned mirror #1's error from "[Errno 101] Network is unreachable" into
+# "[Errno -9] Address family for hostname not supported" — i.e. Render's resolver
+# has no usable IPv4 address for that host at all, so forcing IPv4 didn't fix
+# anything, it just changed which step failed. Reverted: forcing a specific family
+# was a guess that turned out wrong, and risked breaking a mirror that might
+# otherwise succeed over whichever family the OS's own dual-stack connection logic
+# (which already tries every resolved address, not just the first) picks.
+#
+# except is intentionally broad (Exception, not just httpx.HTTPError/ValueError):
+# reported live that mirror #3 produced neither a logged failure NOR a hospital
+# block, meaning it very likely raised something outside that narrower tuple —
+# never allowed to escape this function regardless of what it is, per this
+# module's own "must never break the emergency reply" rule, but now always logged
+# (including the exception's own type name) so a genuinely new failure mode shows
+# up in Render's logs instead of vanishing silently again.
 def _query_overpass(lat: float, lng: float) -> list[dict] | None:
     """Tries each mirror in _OVERPASS_URLS in order, returning the first
     successfully-parsed elements list, or None if every mirror failed (logged as a
     warning per mirror so a real outage/blocking pattern is visible in Render's
     logs instead of silently vanishing into an empty reply)."""
-    with httpx.Client(transport=_transport, timeout=_REQUEST_TIMEOUT_SECONDS) as client:
+    with httpx.Client(timeout=_REQUEST_TIMEOUT_SECONDS) as client:
         for url in _OVERPASS_URLS:
             try:
                 response = client.post(url, data={"data": _overpass_query(lat, lng)}, headers=_REQUEST_HEADERS)
                 response.raise_for_status()
-                return response.json().get("elements", [])
-            except (httpx.HTTPError, ValueError) as exc:
-                logger.warning("nearby_hospitals: mirror %s failed: %s", url, exc)
+                elements = response.json().get("elements", [])
+                logger.info("nearby_hospitals: mirror %s succeeded with %d elements", url, len(elements))
+                return elements
+            except Exception as exc:
+                logger.warning("nearby_hospitals: mirror %s failed: %s: %s", url, type(exc).__name__, exc)
     return None
 
 
