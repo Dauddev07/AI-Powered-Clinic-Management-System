@@ -685,19 +685,46 @@ export default function ChatPage() {
       setInput(transcript);
       requestAnimationFrame(resizeTextarea);
     };
-    recognition.onerror = () => setListening(false);
-    recognition.onend = () => setListening(false);
+    recognition.onerror = () => {
+      recognitionRef.current = null;
+      setListening(false);
+    };
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      setListening(false);
+    };
 
     recognitionRef.current = recognition;
     setListening(true);
     recognition.start();
   };
 
+  // Reported live: calling recognition.stop() alone wasn't enough — Chrome sends
+  // the audio to its own server for the FINAL transcription, and that response can
+  // arrive a moment AFTER stop() returns, so onresult still fired once more,
+  // refilling the input right after it had just been cleared on send. Detaching
+  // the handlers (not just stopping) means a late-arriving result has nothing left
+  // to call into, regardless of how long the network round-trip takes.
+  const silenceListening = () => {
+    const recognition = recognitionRef.current;
+    if (!recognition) return;
+    recognition.onresult = null;
+    recognition.onerror = null;
+    recognition.onend = null;
+    try {
+      recognition.stop();
+    } catch {
+      // Already stopped/ended on its own — nothing left to do.
+    }
+    recognitionRef.current = null;
+    setListening(false);
+  };
+
   // Stops any in-progress dictation if the patient navigates away mid-recording
   // (e.g. switches sessions) — a recognition session left running with no visible
   // mic indicator would otherwise keep listening in the background.
   useEffect(() => {
-    return () => recognitionRef.current?.stop();
+    return () => silenceListening();
   }, []);
 
   const selectSession = (sessionId) => {
@@ -824,11 +851,9 @@ export default function ChatPage() {
     e.preventDefault();
     const trimmed = input.trim();
     if (!trimmed || sending) return;
-    // Reported live: sending while dictation was still active (or right as it was
-    // wrapping up) let one more onresult event land AFTER the input was cleared
-    // below, refilling the box with the just-sent text — stopping first means no
-    // further onresult can fire once the clear happens.
-    recognitionRef.current?.stop();
+    // See silenceListening's own comment — a plain .stop() alone wasn't enough,
+    // since a final transcription result can still arrive after it returns.
+    silenceListening();
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     submitMessage(trimmed);
