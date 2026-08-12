@@ -824,6 +824,11 @@ export default function ChatPage() {
     e.preventDefault();
     const trimmed = input.trim();
     if (!trimmed || sending) return;
+    // Reported live: sending while dictation was still active (or right as it was
+    // wrapping up) let one more onresult event land AFTER the input was cleared
+    // below, refilling the box with the just-sent text — stopping first means no
+    // further onresult can fire once the clear happens.
+    recognitionRef.current?.stop();
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     submitMessage(trimmed);
