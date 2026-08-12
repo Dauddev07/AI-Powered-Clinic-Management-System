@@ -31,10 +31,19 @@ logger = logging.getLogger(__name__)
 # issue. Mitigated by trying a short list of independently-run public mirrors in
 # order and using the first one that responds successfully, rather than depending
 # on any single instance's cloud-IP policy.
+#
+# Ordered by what actually works from Render, not alphabetically or by
+# popularity: overpass-api.de and overpass.kumi.systems have failed outright on
+# EVERY real request logged from Render so far (ConnectError / ReadTimeout —
+# looks like a genuine routing/blocking issue specific to Render's network, not a
+# transient blip), while overpass.osm.ch is the only one that has ever actually
+# connected. Putting it first means the common case skips ~2x the per-mirror
+# timeout of guaranteed-fail attempts before reaching the one that works — if
+# Render's route to the other two ever recovers, they're still tried as fallback.
 _OVERPASS_URLS = (
+    "https://overpass.osm.ch/api/interpreter",
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
-    "https://overpass.osm.ch/api/interpreter",
 )
 _SEARCH_RADIUS_METERS = 5000
 # Verified live: overpass-api.de's Apache config 406s a request with no User-Agent
