@@ -518,6 +518,15 @@ export default function ChatPage() {
   const topRef = useRef(null);
   const initialScrollDoneRef = useRef(false);
   const textareaRef = useRef(null);
+  // Speech-to-text dictation for the message box — browser-native (Web Speech API),
+  // no backend involvement at all. Only Chrome/Edge/Safari ship a working
+  // implementation as of this writing (Firefox doesn't), so the mic button is
+  // simply never rendered when the constructor isn't present rather than shown
+  // disabled with an explanation nobody asked for.
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef(null);
+  const speechRecognitionSupported =
+    typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
   // Bumped every time the visibly-displayed thread changes (New Chat, switching
   // sessions in the sidebar) so an in-flight sendChatMessage from a thread the
   // patient has since navigated away from can't paint its reply into whatever
@@ -646,6 +655,50 @@ export default function ChatPage() {
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   };
+
+  // Toggling the mic: starts dictation into the SAME input box the patient would
+  // otherwise type into, so nothing downstream (submitMessage, the slot-id
+  // stripping, etc.) needs to know text arrived via speech rather than typing.
+  // interimResults is on so the box fills in live as the patient talks, rather
+  // than staying blank until they stop — closer to how dictation feels on a phone
+  // keyboard. Stops itself on a natural pause (continuous: false) so there's no
+  // need to also detect silence manually.
+  const toggleListening = () => {
+    if (!speechRecognitionSupported || sending) return;
+
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+
+    recognition.onresult = (event) => {
+      let transcript = "";
+      for (let i = 0; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      setInput(transcript);
+      requestAnimationFrame(resizeTextarea);
+    };
+    recognition.onerror = () => setListening(false);
+    recognition.onend = () => setListening(false);
+
+    recognitionRef.current = recognition;
+    setListening(true);
+    recognition.start();
+  };
+
+  // Stops any in-progress dictation if the patient navigates away mid-recording
+  // (e.g. switches sessions) — a recognition session left running with no visible
+  // mic indicator would otherwise keep listening in the background.
+  useEffect(() => {
+    return () => recognitionRef.current?.stop();
+  }, []);
 
   const selectSession = (sessionId) => {
     setSidebarOpen(false);
@@ -1030,6 +1083,21 @@ export default function ChatPage() {
               disabled={sending}
               aria-label="Chat message"
             />
+            {speechRecognitionSupported && (
+              <button
+                type="button"
+                className={`${styles.micBtn} ${listening ? styles.micBtnActive : ""}`}
+                onClick={toggleListening}
+                disabled={sending}
+                aria-label={listening ? "Stop voice input" : "Start voice input"}
+                aria-pressed={listening}
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="9" y="2" width="6" height="12" rx="3" />
+                  <path d="M5 10a7 7 0 0 0 14 0M12 19v3" />
+                </svg>
+              </button>
+            )}
             <button type="submit" className={styles.sendBtn} disabled={sending || !input.trim()} aria-label="Send message">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M22 2 11 13M22 2 15 22l-4-9-9-4 20-7Z" />

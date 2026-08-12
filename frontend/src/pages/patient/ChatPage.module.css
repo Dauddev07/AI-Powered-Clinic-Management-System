@@ -968,12 +968,61 @@
   cursor: not-allowed;
 }
 
+.micBtn {
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid var(--app-border);
+  background: var(--app-input-bg);
+  color: var(--app-text-label);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.micBtn:hover:not(:disabled) {
+  color: var(--app-text-heading);
+  border-color: var(--app-accent);
+}
+
+.micBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.micBtnActive {
+  background: var(--app-error-text);
+  border-color: var(--app-error-text);
+  color: #fff;
+  animation: micPulse 1.4s ease-in-out infinite;
+}
+
+.micBtnActive:hover:not(:disabled) {
+  color: #fff;
+  border-color: var(--app-error-text);
+}
+
+@keyframes micPulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--app-error-text) 45%, transparent); }
+  50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--app-error-text) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .micBtnActive {
+    animation: none;
+  }
+}
+
 @media (max-width: 480px) {
   .inputBar {
     padding: 0.65rem 0.75rem;
   }
 
-  .sendBtn {
+  .sendBtn,
+  .micBtn {
     width: 38px;
     height: 38px;
   }
