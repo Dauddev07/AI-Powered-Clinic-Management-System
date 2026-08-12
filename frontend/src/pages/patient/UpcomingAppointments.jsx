@@ -10,6 +10,7 @@ import {
 import { ApiError } from "../../api/client";
 import StatusBadge from "../../components/StatusBadge";
 import EmptyState from "../../components/EmptyState";
+import Modal from "../../components/Modal";
 import Skeleton from "../../components/Skeleton";
 import { useToast } from "../../components/ToastContext";
 import { useReveal } from "../../hooks/useReveal";
@@ -65,6 +66,11 @@ export default function UpcomingAppointments() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [busyId, setBusyId] = useState(null);
+  // Holds the full appointment object (not just an id) while the confirmation
+  // modal is open, so the modal's own copy can name the doctor/time being
+  // cancelled rather than a generic "are you sure?" with no specifics.
+  const [pendingCancel, setPendingCancel] = useState(null);
+  const [cancelError, setCancelError] = useState(null);
   const [rescheduleTargetId, setRescheduleTargetId] = useState(null);
   const [rescheduleOptions, setRescheduleOptions] = useState([]);
   // True when rescheduleOptions had to fall back to other doctors' soonest slots
@@ -96,17 +102,23 @@ export default function UpcomingAppointments() {
     setRescheduleError(null);
   };
 
-  const handleCancel = async (id) => {
+  const confirmCancel = async () => {
+    if (!pendingCancel) return;
+    const id = pendingCancel.id;
     setBusyId(id);
-    setError(null);
+    setCancelError(null);
     try {
       await cancelAppointment(id);
       showToast("Appointment cancelled.");
       closeReschedule();
+      setPendingCancel(null);
       await load();
     } catch (err) {
-      // Surfaced verbatim — this is where the no-same-day-cancellation refusal shows up.
-      setError(err instanceof ApiError ? err.detail || err.message : "Cancel failed.");
+      // Kept inside the modal (not the page behind it) — this is where the
+      // no-same-day-cancellation refusal shows up, and the patient shouldn't
+      // lose the confirmation's context (which appointment, that they were
+      // mid-cancel) while reading why it failed.
+      setCancelError(err instanceof ApiError ? err.detail || err.message : "Cancel failed.");
     } finally {
       setBusyId(null);
     }
@@ -223,7 +235,10 @@ export default function UpcomingAppointments() {
                             <button
                               type="button"
                               className={styles.dangerBtn}
-                              onClick={() => handleCancel(a.id)}
+                              onClick={() => {
+                                setCancelError(null);
+                                setPendingCancel(a);
+                              }}
                               disabled={busyId === a.id}
                             >
                               {busyId === a.id ? "Working…" : "Cancel"}
@@ -286,6 +301,33 @@ export default function UpcomingAppointments() {
           </div>
         )}
       </div>
+
+      <Modal open={!!pendingCancel} onClose={() => setPendingCancel(null)} title="Cancel appointment">
+        <p className={styles.modalIntro}>
+          Cancel your appointment with <strong>{pendingCancel?.doctor_name}</strong> on{" "}
+          <strong>{pendingCancel ? formatDateTime(pendingCancel.start_utc, clinicTimezone) : ""}</strong>? This
+          cannot be undone.
+        </p>
+        {cancelError && <p className={styles.errorText}>{cancelError}</p>}
+        <div className={styles.modalActions}>
+          <button
+            type="button"
+            className={styles.modalCancelBtn}
+            onClick={() => setPendingCancel(null)}
+            disabled={busyId === pendingCancel?.id}
+          >
+            Keep appointment
+          </button>
+          <button
+            type="button"
+            className={styles.modalDangerBtn}
+            onClick={confirmCancel}
+            disabled={busyId === pendingCancel?.id}
+          >
+            {busyId === pendingCancel?.id ? "Cancelling…" : "Cancel appointment"}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

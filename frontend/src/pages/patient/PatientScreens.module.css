@@ -282,6 +282,68 @@
   cursor: not-allowed;
 }
 
+.modalIntro {
+  margin: 0 0 1.1rem;
+  color: var(--app-text-body);
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.modalCancelBtn {
+  padding: 0.6rem 1.1rem;
+  border-radius: 12px;
+  border: 1px solid var(--app-border);
+  background: none;
+  color: var(--app-text-body);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modalCancelBtn:hover:not(:disabled) {
+  background: var(--app-neutral-bg);
+}
+
+.modalDangerBtn {
+  padding: 0.6rem 1.1rem;
+  border-radius: 12px;
+  border: none;
+  background: var(--app-error-text);
+  color: var(--app-bg-page);
+  font-size: var(--font-size-label);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.modalDangerBtn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.modalCancelBtn:disabled,
+.modalDangerBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+  .modalActions {
+    flex-direction: column-reverse;
+  }
+
+  .modalCancelBtn,
+  .modalDangerBtn {
+    width: 100%;
+    text-align: center;
+  }
+}
+
 .linkBtn {
   background: none;
   border: none;
