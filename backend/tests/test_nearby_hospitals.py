@@ -69,6 +69,28 @@ def test_find_nearby_hospitals_caps_at_three(monkeypatch):
     assert len(find_nearby_hospitals(31.5204, 74.3587)) == 3
 
 
+def test_find_nearby_hospitals_falls_back_to_next_mirror_when_first_fails(monkeypatch):
+    calls = []
+
+    class _FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"elements": [{"tags": {"name": "Mirror 2 Hospital"}, "lat": 31.521, "lon": 74.359}]}
+
+    def _fake_post(url, *args, **kwargs):
+        calls.append(url)
+        if len(calls) == 1:
+            raise httpx.ConnectError("blocked")
+        return _FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", _fake_post)
+    results = find_nearby_hospitals(31.5204, 74.3587)
+    assert len(calls) == 2
+    assert results[0]["name"] == "Mirror 2 Hospital"
+
+
 def test_find_nearby_hospitals_returns_empty_on_network_error(monkeypatch):
     def _raise(*args, **kwargs):
         raise httpx.ConnectError("boom")
