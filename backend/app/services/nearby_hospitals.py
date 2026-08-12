@@ -36,11 +36,17 @@ logger = logging.getLogger(__name__)
 # popularity: overpass-api.de and overpass.kumi.systems have failed outright on
 # EVERY real request logged from Render so far (ConnectError / ReadTimeout —
 # looks like a genuine routing/blocking issue specific to Render's network, not a
-# transient blip), while overpass.osm.ch is the only one that has ever actually
-# connected. Putting it first means the common case skips ~2x the per-mirror
-# timeout of guaranteed-fail attempts before reaching the one that works — if
-# Render's route to the other two ever recovers, they're still tried as fallback.
+# transient blip). Their FOSSGIS-hosted infrastructure (Germany) is a different
+# problem from overpass.osm.ch, which connects fine from Render but was found
+# (tested directly, even at a 50km radius) to carry NO Pakistan data at all — a
+# regional/partial extract, not full-planet. maps.mail.ru's mirror was verified to
+# have full real data for this exact area (83 elements, matching overpass-api.de's
+# own count) and sits on entirely different infrastructure (Russia, not Germany),
+# giving it a real chance of being reachable from Render where the .de-hosted ones
+# aren't. Put first for that reason — the others stay as fallback in case Render's
+# routing to any of them ever changes.
 _OVERPASS_URLS = (
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass.osm.ch/api/interpreter",
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
