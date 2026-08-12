@@ -2111,6 +2111,50 @@ def test_run_appointment_agent_unambiguous_doctor_name_proceeds_to_the_llm(monke
     assert result == "some reply"
 
 
+def test_run_appointment_agent_tells_the_patient_plainly_when_a_named_doctor_does_not_exist(
+    monkeypatch, db, ctx, doctor
+):
+    # Reported live: "dr ahmed rana in pulmonology dept" (no such doctor at this
+    # clinic — "doctor" fixture is "Dr. Ahmed Khan", unrelated) silently showed the
+    # WHOLE Pulmonology department's real doctors instead of telling the patient
+    # plainly that "Dr. Ahmed Rana" isn't here. Must never reach the LLM at all —
+    # same "never silently substitute a different doctor" principle as the
+    # ambiguous-name short-circuit above.
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called when the named doctor doesn't exist")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "dr ahmed rana in pulmonology dept", "en", []
+    )
+
+    assert "Ahmed Rana" in result
+    assert "couldn't find a doctor" in result.lower()
+
+
+def test_run_appointment_agent_generic_doctor_availability_question_falls_through_normally(
+    monkeypatch, db, ctx, doctor
+):
+    # "is there a doctor available in Cardiology" names no SPECIFIC doctor — must
+    # NOT be misread as an attempted (and failed) name match; falls through to the
+    # normal agent loop exactly like before this fix.
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["called"] = True
+        return "some reply"
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "is there a doctor available in Cardiology", "en", []
+    )
+
+    assert captured.get("called") is True
+    assert result == "some reply"
+
+
 def test_run_appointment_agent_renders_resolved_single_match_department_into_the_prompt(
     monkeypatch, db, ctx, doctor
 ):

@@ -155,6 +155,45 @@ def _is_short_affirmative_reply(message: str) -> bool:
 # a booking action, never a bare availability check, regardless of what else it names.
 _EXPLICIT_SLOT_ID_RE = re.compile(r"slot_id:\s*[0-9a-f-]{8,}", re.IGNORECASE)
 
+# Reported live: "dr ahmed rana in pulmonology dept" (no such doctor at this clinic)
+# silently showed the WHOLE Pulmonology department's real doctors (Dr. Babar Ali —
+# a completely different person) instead of telling the patient plainly that
+# "Dr. Ahmed Rana" isn't here. Root cause: handoff step 1's zero-matches case is
+# documented (see this module's own docstring) as "no doctor-name reference in this
+# message at all" and falls through silently — but zero matches from
+# find_doctors_by_name means EITHER that, OR the patient plainly attempted a name
+# that just doesn't exist, and those two cases need very different replies. This
+# regex distinguishes them: "dr"/"doctor" (case-insensitive, "dr" or "dr.") followed
+# by real name-like words is a genuine attempt; nothing captured, or only filler
+# words like "available"/"free"/"in" right after the title (as in "is there a doctor
+# available in Pulmonology" — a real, generic availability question, not a specific
+# name), is not.
+_DOCTOR_TITLE_RE = re.compile(r"\b(?:dr\.?|doctor)\s+([a-z][a-z'\-]*(?:\s+[a-z][a-z'\-]*){0,4})", re.IGNORECASE)
+_NAME_ATTEMPT_STOPWORDS = frozenset({
+    "available", "free", "here", "there", "today", "tomorrow", "please", "who",
+    "is", "are", "am", "can", "could", "would", "will", "in", "at", "for", "near",
+    "working", "open", "busy", "appointment", "appointments", "slot", "slots",
+    "schedule", "scheduled", "book", "booking", "the", "a", "an", "any", "some",
+    "this", "that", "department", "dept", "clinic",
+})
+
+
+def _extract_attempted_doctor_name(message: str) -> str | None:
+    """The leading run of non-filler words right after "dr"/"doctor" in the
+    message, or None if nothing there looks like an attempted name — see the
+    comment on _DOCTOR_TITLE_RE above for why this distinction matters."""
+    match = _DOCTOR_TITLE_RE.search(message)
+    if not match:
+        return None
+    name_words: list[str] = []
+    for word in re.findall(r"[a-z']+", match.group(1).lower()):
+        if word in _NAME_ATTEMPT_STOPWORDS:
+            break
+        name_words.append(word)
+        if len(name_words) >= 4:
+            break
+    return " ".join(name_words) if name_words else None
+
 
 def _message_has_explicit_slot_id(message: str) -> bool:
     return bool(_EXPLICIT_SLOT_ID_RE.search(message))
@@ -965,6 +1004,22 @@ def run_appointment_agent(
             return _disambiguation_marker_reply(matches)
         resolved_match = matches[0] if matches else None
         direct_name_match_this_turn = resolved_match is not None
+
+        # Reported live: "dr ahmed rana in pulmonology dept" (no such doctor at this
+        # clinic) silently showed the whole Pulmonology department instead — see
+        # _extract_attempted_doctor_name's own comment. Only fires on a genuine
+        # zero-match attempted name; never overrides an actual match above, and
+        # never fires for a message with no "dr"/"doctor" name attempt at all (e.g.
+        # "book me an appointment in Pulmonology" correctly falls through as before).
+        if resolved_match is None:
+            attempted_name = _extract_attempted_doctor_name(message)
+            if attempted_name is not None:
+                return (
+                    f"I couldn't find a doctor named \"{attempted_name.title()}\" at this clinic. "
+                    "Could you double-check the spelling, or let me know which department you'd "
+                    "like to see instead?"
+                )
+
         if (
             resolved_match is None
             and _is_short_affirmative_reply(message)
