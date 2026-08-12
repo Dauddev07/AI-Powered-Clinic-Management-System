@@ -917,6 +917,14 @@
   margin: 0 auto;
 }
 
+.micPrivacyNote {
+  max-width: 900px;
+  margin: 0.4rem auto 0;
+  padding: 0 0.2rem;
+  font-size: var(--font-size-caption);
+  color: var(--app-text-subtitle);
+}
+
 .input {
   flex: 1;
   resize: none;

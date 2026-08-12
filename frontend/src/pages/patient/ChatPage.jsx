@@ -1104,6 +1104,14 @@ export default function ChatPage() {
               </svg>
             </button>
           </div>
+          {/* Shown only while actively recording, not at rest — a privacy disclosure
+              only matters at the moment it's actually relevant, and showing it
+              permanently would just be noise on every other visit to this screen. */}
+          {listening && (
+            <p className={styles.micPrivacyNote}>
+              Listening… voice is transcribed by your browser's speech service, not stored by this app.
+            </p>
+          )}
         </form>
       </div>
 
