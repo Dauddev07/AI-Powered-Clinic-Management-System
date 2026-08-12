@@ -132,11 +132,24 @@ def _element_phone(tags: dict) -> str | None:
 # module's own "must never break the emergency reply" rule, but now always logged
 # (including the exception's own type name) so a genuinely new failure mode shows
 # up in Render's logs instead of vanishing silently again.
+#
+# Reported live: on Render, mirrors #1/#2 fail outright (see the comment above),
+# so mirror #3 is effectively the only one that ever gets a chance — and it
+# answered successfully but with ZERO elements for a real Lahore location that
+# mirror #1 (from a different network) found 3 real hospitals for. Public Overpass
+# mirrors are independently-run and don't all replicate from OSM at the same
+# frequency, so coverage genuinely differs between them. An empty-but-successful
+# response is therefore NOT treated as final here — it's remembered as a fallback,
+# but every remaining mirror still gets tried in case one of them actually has
+# data for this area; only returned if nothing else ever finds anything.
 def _query_overpass(lat: float, lng: float) -> list[dict] | None:
-    """Tries each mirror in _OVERPASS_URLS in order, returning the first
-    successfully-parsed elements list, or None if every mirror failed (logged as a
-    warning per mirror so a real outage/blocking pattern is visible in Render's
-    logs instead of silently vanishing into an empty reply)."""
+    """Tries every mirror in _OVERPASS_URLS in order, returning the first
+    NON-EMPTY successfully-parsed elements list. If every mirror either fails or
+    succeeds with zero results, returns an empty list if at least one succeeded
+    (a real "nothing nearby" answer), or None if every single one failed outright
+    (a real lookup failure) — the caller treats both the same way (append
+    nothing), but the distinction is preserved for logging clarity."""
+    best_empty_result: list[dict] | None = None
     with httpx.Client(timeout=_REQUEST_TIMEOUT_SECONDS) as client:
         for url in _OVERPASS_URLS:
             try:
@@ -151,10 +164,12 @@ def _query_overpass(lat: float, lng: float) -> list[dict] | None:
                 # Logged at WARNING purely so it's guaranteed visible under the
                 # app's current logging setup, not because a success is a warning.
                 logger.warning("nearby_hospitals: mirror %s succeeded with %d elements", url, len(elements))
-                return elements
+                if elements:
+                    return elements
+                best_empty_result = elements
             except Exception as exc:
                 logger.warning("nearby_hospitals: mirror %s failed: %s: %s", url, type(exc).__name__, exc)
-    return None
+    return best_empty_result
 
 
 def find_nearby_hospitals(lat: float, lng: float) -> list[dict]:

@@ -129,6 +129,50 @@ def test_find_nearby_hospitals_falls_back_to_next_mirror_when_first_fails(monkey
     assert results[0]["name"] == "Mirror 2 Hospital"
 
 
+def test_find_nearby_hospitals_keeps_trying_mirrors_after_an_empty_but_successful_one(monkeypatch):
+    # Reported live: mirror #1/#2 failed outright on Render, and mirror #3
+    # answered successfully but with zero elements for an area another mirror
+    # (from a different network) had real data for — public Overpass mirrors
+    # don't all replicate at the same pace, so an empty SUCCESS must not be
+    # treated as final while there's still an untried mirror that might have data.
+    calls = []
+
+    class _EmptyResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"elements": []}
+
+    class _RealResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"elements": [{"tags": {"name": "Mirror 3 Hospital"}, "lat": 31.521, "lon": 74.359}]}
+
+    def _fake_post(self, url, *args, **kwargs):
+        calls.append(url)
+        return _EmptyResponse() if len(calls) < 3 else _RealResponse()
+
+    monkeypatch.setattr(httpx.Client, "post", _fake_post)
+    results = find_nearby_hospitals(31.5204, 74.3587)
+    assert len(calls) == 3
+    assert results[0]["name"] == "Mirror 3 Hospital"
+
+
+def test_find_nearby_hospitals_returns_empty_when_every_mirror_succeeds_but_finds_nothing(monkeypatch):
+    class _EmptyResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"elements": []}
+
+    monkeypatch.setattr(httpx.Client, "post", lambda self, *a, **k: _EmptyResponse())
+    assert find_nearby_hospitals(31.5204, 74.3587) == []
+
+
 def test_find_nearby_hospitals_returns_empty_on_network_error(monkeypatch):
     def _raise(self, *args, **kwargs):
         raise httpx.ConnectError("boom")
