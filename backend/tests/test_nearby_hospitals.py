@@ -23,10 +23,10 @@ def _mock_overpass_response(monkeypatch, elements):
         def json(self):
             return {"elements": elements}
 
-    def _fake_post(*args, **kwargs):
+    def _fake_post(self, *args, **kwargs):
         return _FakeResponse()
 
-    monkeypatch.setattr(httpx, "post", _fake_post)
+    monkeypatch.setattr(httpx.Client, "post", _fake_post)
 
 
 def test_find_nearby_hospitals_sorts_nearest_first(monkeypatch):
@@ -117,23 +117,23 @@ def test_find_nearby_hospitals_falls_back_to_next_mirror_when_first_fails(monkey
         def json(self):
             return {"elements": [{"tags": {"name": "Mirror 2 Hospital"}, "lat": 31.521, "lon": 74.359}]}
 
-    def _fake_post(url, *args, **kwargs):
+    def _fake_post(self, url, *args, **kwargs):
         calls.append(url)
         if len(calls) == 1:
             raise httpx.ConnectError("blocked")
         return _FakeResponse()
 
-    monkeypatch.setattr(httpx, "post", _fake_post)
+    monkeypatch.setattr(httpx.Client, "post", _fake_post)
     results = find_nearby_hospitals(31.5204, 74.3587)
     assert len(calls) == 2
     assert results[0]["name"] == "Mirror 2 Hospital"
 
 
 def test_find_nearby_hospitals_returns_empty_on_network_error(monkeypatch):
-    def _raise(*args, **kwargs):
+    def _raise(self, *args, **kwargs):
         raise httpx.ConnectError("boom")
 
-    monkeypatch.setattr(httpx, "post", _raise)
+    monkeypatch.setattr(httpx.Client, "post", _raise)
     assert find_nearby_hospitals(31.5204, 74.3587) == []
 
 
@@ -142,7 +142,7 @@ def test_find_nearby_hospitals_returns_empty_on_http_status_error(monkeypatch):
         def raise_for_status(self):
             raise httpx.HTTPStatusError("boom", request=None, response=None)
 
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: _FakeResponse())
+    monkeypatch.setattr(httpx.Client, "post", lambda self, *a, **k: _FakeResponse())
     assert find_nearby_hospitals(31.5204, 74.3587) == []
 
 
@@ -173,5 +173,8 @@ def test_nearby_hospitals_block_falls_back_to_1122_when_no_phone_listed(monkeypa
 
 
 def test_nearby_hospitals_block_never_raises_on_lookup_failure(monkeypatch):
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: (_ for _ in ()).throw(httpx.TimeoutException("boom")))
+    def _raise(self, *args, **kwargs):
+        raise httpx.TimeoutException("boom")
+
+    monkeypatch.setattr(httpx.Client, "post", _raise)
     assert nearby_hospitals_block(31.5204, 74.3587) == ""
