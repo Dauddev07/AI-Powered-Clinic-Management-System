@@ -143,7 +143,14 @@ def _query_overpass(lat: float, lng: float) -> list[dict] | None:
                 response = client.post(url, data={"data": _overpass_query(lat, lng)}, headers=_REQUEST_HEADERS)
                 response.raise_for_status()
                 elements = response.json().get("elements", [])
-                logger.info("nearby_hospitals: mirror %s succeeded with %d elements", url, len(elements))
+                # WARNING, not INFO: the app never configures a root log level (no
+                # logging.basicConfig anywhere), so INFO-level records are silently
+                # dropped by Python's default WARNING threshold — reported live,
+                # this line never appeared in Render's logs even on a real success,
+                # making a genuine success indistinguishable from a silent failure.
+                # Logged at WARNING purely so it's guaranteed visible under the
+                # app's current logging setup, not because a success is a warning.
+                logger.warning("nearby_hospitals: mirror %s succeeded with %d elements", url, len(elements))
                 return elements
             except Exception as exc:
                 logger.warning("nearby_hospitals: mirror %s failed: %s: %s", url, type(exc).__name__, exc)
