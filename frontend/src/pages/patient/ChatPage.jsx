@@ -942,6 +942,26 @@ export default function ChatPage() {
         className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""} ${sidebarCollapsed ? styles.sidebarCollapsed : ""}`}
         aria-label="Chat history"
       >
+        {/* Large-screen-only collapsed rail — a thin vertical strip (not a
+            horizontal bar) running the full height of the sidebar's own
+            position, same idea as VS Code's collapsed sidebar. Only visible
+            via CSS when .sidebarCollapsed is applied AND the screen is
+            >=900px (see the CSS — sidebarCollapsed also gets set on mobile,
+            where this must stay hidden). */}
+        <div className={styles.collapsedRail}>
+          <button
+            type="button"
+            className={styles.expandSidebarBtn}
+            onClick={() => setSidebarCollapsed(false)}
+            aria-label="Show chat history"
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2.5" />
+              <line x1="9" y1="4" x2="9" y2="20" />
+            </svg>
+          </button>
+        </div>
+
         <div className={styles.sidebarHeader}>
           <button type="button" className={styles.newChatBtn} onClick={startNewChat}>
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1033,27 +1053,6 @@ export default function ChatPage() {
       )}
 
       <div className={styles.main}>
-        {/* Large-screen-only reopen affordance, in normal document flow (not
-            floated) so it can never overlap the disclaimer banner or anything
-            else below it — reported live: an absolutely-positioned version sat
-            cramped right on top of the disclaimer bar. Irrelevant/hidden below
-            900px, where the topBar's own hamburger button already does this job. */}
-        {sidebarCollapsed && (
-          <div className={styles.expandSidebarBar}>
-            <button
-              type="button"
-              className={styles.expandSidebarBtn}
-              onClick={() => setSidebarCollapsed(false)}
-              aria-label="Show chat history"
-            >
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <rect x="3" y="4" width="18" height="16" rx="2.5" />
-                <line x1="9" y1="4" x2="9" y2="20" />
-              </svg>
-            </button>
-          </div>
-        )}
-
         <div className={styles.topBar}>
           <button type="button" className={styles.sidebarToggle} onClick={() => setSidebarOpen(true)} aria-label="Show chat history">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
