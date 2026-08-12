@@ -28,10 +28,23 @@ export function isStandalone() {
   return window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
 }
 
-// True when notifications are structurally possible right now — false either
-// because the browser has no Push API at all, or because it's iOS Safari and the
-// app hasn't been added to the Home Screen yet (see the two functions above).
+// Product decision: notifications are only offered on phones/tablets, never on
+// desktop/laptop browsers — a laptop is rarely in-hand at the exact moment a
+// reminder fires the way a phone is, and offering it everywhere would mean
+// supporting a control that mostly just adds clutter on desktop without adding
+// real value there. Checked via userAgent (there's no dedicated "is this a
+// touch/mobile device" browser API) — matches iOS phones/tablets, Android
+// phones/tablets, and other common tablet UAs.
+export function isMobileOrTablet() {
+  return /iphone|ipad|ipod|android|tablet|silk|kindle|playbook/i.test(navigator.userAgent);
+}
+
+// True when notifications are structurally possible right now — false when the
+// device isn't a phone/tablet (see isMobileOrTablet above), the browser has no
+// Push API at all, or it's iOS Safari and the app hasn't been added to the Home
+// Screen yet (see isIOS/isStandalone above).
 export function pushNotificationsAvailable() {
+  if (!isMobileOrTablet()) return false;
   const hasApi = "serviceWorker" in navigator && "PushManager" in window;
   if (!hasApi) return false;
   if (isIOS() && !isStandalone()) return false;
@@ -47,6 +60,7 @@ function urlBase64ToUint8Array(base64) {
 
 // Returns "granted" | "denied" | "unsupported" | "unavailable-needs-home-screen".
 export async function getPushStatus() {
+  if (!isMobileOrTablet()) return "unsupported";
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) return "unsupported";
   if (isIOS() && !isStandalone()) return "unavailable-needs-home-screen";
   if (Notification.permission === "denied") return "denied";
@@ -60,6 +74,10 @@ export async function getPushStatus() {
 // genuine unexpected failure — the caller is expected to catch and show an
 // inline message, same pattern as the mic's MIC_ERROR_MESSAGES.
 export async function enablePushNotifications() {
+  if (!isMobileOrTablet()) {
+    throw new Error("Notifications are only available on phones and tablets.");
+  }
+
   const { public_key: publicKey } = await fetchPushPublicKey();
   if (!publicKey) {
     throw new Error("Notifications aren't configured for this clinic yet.");
