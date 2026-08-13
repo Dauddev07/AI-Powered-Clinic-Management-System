@@ -114,6 +114,15 @@ export default function ForgotPassword() {
     return () => clearTimeout(id);
   }, [step]);
 
+  // The patient has likely scrolled down by this point (mobile keyboard pushing
+  // the OTP boxes up while typing, the otp/verified screens above it) — land the
+  // new-password screen at the top instead of wherever that scroll happened to
+  // leave the page, so its heading is actually visible right away.
+  useEffect(() => {
+    if (step !== "reset") return;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [step]);
+
   const codeExpired = step === "otp" && secondsLeft <= 0;
   const canResend = step === "otp" && resendCooldown <= 0;
 
@@ -338,7 +347,16 @@ export default function ForgotPassword() {
 
               {submitting && (
                 <div className={styles.verifyingRow}>
-                  <span className={styles.verifyingCube} aria-hidden="true" />
+                  <div className={styles.cubeScene} aria-hidden="true">
+                    <div className={styles.cube}>
+                      <span className={`${styles.cubeFace} ${styles.cubeFront}`} />
+                      <span className={`${styles.cubeFace} ${styles.cubeBack}`} />
+                      <span className={`${styles.cubeFace} ${styles.cubeRight}`} />
+                      <span className={`${styles.cubeFace} ${styles.cubeLeft}`} />
+                      <span className={`${styles.cubeFace} ${styles.cubeTop}`} />
+                      <span className={`${styles.cubeFace} ${styles.cubeBottom}`} />
+                    </div>
+                  </div>
                   <span className={styles.fieldHint}>Verifying…</span>
                 </div>
               )}
