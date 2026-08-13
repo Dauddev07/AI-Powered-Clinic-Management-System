@@ -15,32 +15,32 @@
 html[data-theme="dark"] {
   color-scheme: dark;
 
-  --app-bg-page: #1c1d1f;
+  --app-bg-page: #18191b;
   --app-bg-card: #212224;
-  --app-surface: #26272a;
-  --app-text-title: #c3c5c9;
-  --app-text-heading: #c3c5c9;
-  --app-text-subtitle: #7c7e83;
-  --app-text-label: #9fa1a6;
-  --app-text-body: #adafb4;
-  --app-border: #2c2d30;
+  --app-surface: #27282b;
+  --app-text-title: #e6e7e9;
+  --app-text-heading: #e6e7e9;
+  --app-text-subtitle: #8f9196;
+  --app-text-label: #b4b6bb;
+  --app-text-body: #c2c4c8;
+  --app-border: #34363a;
   --app-input-bg: #1c1d1f;
-  --app-input-text: #c3c5c9;
-  --app-input-placeholder: #6a6c70;
-  --app-accent: #87977f;
-  --app-accent-hover: #9aab91;
-  --app-accent-bg: #2a332a;
-  --app-accent-text: #dfe0e3;
-  --app-link: #9aab91;
-  --app-error-bg: #271f1f;
-  --app-error-text: #b98c8c;
-  --app-error-border: #453232;
-  --app-success-bg: #2c3d2f;
-  --app-success-text: #a8d1ad;
-  --app-success-border: #3d5442;
-  --app-warning-bg: #28241c;
-  --app-warning-text: #c4a877;
-  --app-warning-border: #443a28;
+  --app-input-text: #e6e7e9;
+  --app-input-placeholder: #75777c;
+  --app-accent: #77a877;
+  --app-accent-hover: #8fc794;
+  --app-accent-bg: #2b3a2c;
+  --app-accent-text: #ecfdee;
+  --app-link: #8fc794;
+  --app-error-bg: #2c1f1f;
+  --app-error-text: #d1908f;
+  --app-error-border: #4d3535;
+  --app-success-bg: #2b4530;
+  --app-success-text: #b8e0bd;
+  --app-success-border: #446049;
+  --app-warning-bg: #2c2619;
+  --app-warning-text: #d4b885;
+  --app-warning-border: #4d422c;
   /* Dedicated, further-darkened pair for the chat page's permanent disclaimer
      banner (see ChatPage.module.css .disclaimer) — the raw --app-warning-*
      tokens above read as too bright/glaring for a banner that's ALWAYS
@@ -50,14 +50,14 @@ html[data-theme="dark"] {
      isn't a problem a light page has, so no extra darkening is needed there. */
   --app-warning-banner-bg: color-mix(in srgb, var(--app-warning-bg) 85%, black);
   --app-warning-banner-text: color-mix(in srgb, var(--app-warning-text) 85%, black);
-  --app-neutral-bg: #26272a;
-  --app-neutral-text: #918f96;
-  --app-neutral-border: #38363a;
-  --app-info-bg: #1c2126;
-  --app-info-text: #8a9dab;
-  --app-info-border: #2e3944;
-  --app-shadow: rgba(0, 0, 0, 0.24);
-  --app-overlay: rgba(0, 0, 0, 0.5);
+  --app-neutral-bg: #27282b;
+  --app-neutral-text: #a3a1a8;
+  --app-neutral-border: #403e42;
+  --app-info-bg: #1e262c;
+  --app-info-text: #9bb0c2;
+  --app-info-border: #34424e;
+  --app-shadow: rgba(0, 0, 0, 0.32);
+  --app-overlay: rgba(0, 0, 0, 0.55);
 }
 
 /* Warm off-white (not stark white) with the same sage-green brand accent,

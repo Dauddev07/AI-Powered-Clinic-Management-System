@@ -61,6 +61,38 @@
    near-black card — deepened the tints and shadow here specifically so the
    banner reads as a deliberate highlight, not a flat white box, without
    touching dark theme's already-working balance. */
+/* Dark theme already read fine at the original tints, but asked for "a bit
+   better" too — a smaller nudge than light theme's fix above (that one was
+   correcting a real washed-out problem; this is just extra polish). */
+html[data-theme="dark"] .banner {
+  background:
+    radial-gradient(
+      ellipse 70% 60% at 2% 100%,
+      color-mix(in srgb, var(--app-info-text) 22%, transparent),
+      transparent 72%
+    ) padding-box,
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--app-accent) 20%, var(--app-bg-card)),
+      var(--app-bg-card) 62%
+    ) padding-box,
+    conic-gradient(
+      from var(--banner-angle),
+      color-mix(in srgb, var(--app-accent) 80%, transparent),
+      color-mix(in srgb, var(--app-info-text) 65%, transparent),
+      color-mix(in srgb, var(--app-accent) 80%, transparent)
+    ) border-box;
+  box-shadow: 0 12px 34px color-mix(in srgb, var(--app-accent) 20%, var(--app-shadow));
+}
+
+html[data-theme="dark"] .banner::after {
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--app-accent) 38%, transparent),
+    transparent 72%
+  );
+}
+
 html[data-theme="light"] .banner {
   background:
     radial-gradient(
