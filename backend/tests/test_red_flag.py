@@ -209,6 +209,40 @@ def test_decapitation_and_body_bisection_patterns_fire(message):
 @pytest.mark.parametrize(
     "message",
     [
+        "i am having brain hambrige",
+        "i am having brain hemorrhage",
+        "i think i have a brain hemorrhage",
+        "brain hemmorage",
+        "braine hemorage",
+        "i have a brain haemorrhage",
+        "i am hemorrhaging",
+        "i am bleeding in my brain",
+        "my brain is bleeding",
+        "there is blood in my brain",
+        "he has a hambrige in his head",
+        "i think i have a skull hemorrhage",
+    ],
+)
+def test_brain_hemorrhage_and_common_typos_fire(message):
+    assert detect_red_flag(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "i had a hamburger for lunch",
+        "i think i have hemorrhoids",
+    ],
+)
+def test_brain_hemorrhage_patterns_do_not_false_fire_on_unrelated_words(message):
+    from app.services.red_flag import _RED_FLAG_RE
+
+    assert not _RED_FLAG_RE.search(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
         "i cut the apple into two pieces",
         "my shirt was torn in half",
     ],

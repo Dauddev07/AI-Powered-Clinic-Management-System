@@ -160,22 +160,11 @@ export default function ForgotPassword() {
     }
   };
 
-  const handleVerifyCode = async (e) => {
-    e.preventDefault();
+  const verifyCode = async (code) => {
     setError(null);
-
-    if (codeExpired) {
-      setError("This code has expired. Request a new one.");
-      return;
-    }
-    if (otp.length < 6) {
-      setError("Enter the full 6-digit code.");
-      return;
-    }
-
     setSubmitting(true);
     try {
-      await verifyResetOtp(email, otp);
+      await verifyResetOtp(email, code);
       setStep("verified");
     } catch (err) {
       setError(err instanceof ApiError ? err.detail || err.message : "Something went wrong.");
@@ -183,6 +172,16 @@ export default function ForgotPassword() {
       setSubmitting(false);
     }
   };
+
+  // Auto-verifies the moment all 6 boxes are filled — no separate "Verify code"
+  // button to press. Depends on the otp string itself, not just its length, so a
+  // failed attempt (code unchanged) doesn't loop-retry; it only fires again once
+  // the patient actually edits a digit, producing a new 6-character value.
+  useEffect(() => {
+    if (step !== "otp" || codeExpired || submitting || otp.length !== 6) return;
+    verifyCode(otp);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otp, step, codeExpired]);
 
   const handleResetPassword = async (e) => {
     e.preventDefault();
@@ -297,46 +296,42 @@ export default function ForgotPassword() {
               </div>
             )}
 
-            <form onSubmit={handleVerifyCode}>
-              <div className={styles.field}>
-                <label htmlFor="otp-0">
-                  Verification code<span className={styles.requiredMark}>*</span>
-                </label>
-                <OtpInput value={otp} onChange={setOtp} disabled={codeExpired} />
+            <div className={styles.field}>
+              <label htmlFor="otp-0">
+                Verification code<span className={styles.requiredMark}>*</span>
+              </label>
+              <OtpInput value={otp} onChange={setOtp} disabled={codeExpired || submitting} />
 
-                <div className={styles.otpMeta}>
-                  {!codeExpired && (
-                    <span
-                      className={`${styles.expiryPill} ${secondsLeft <= 60 ? styles.expiryPillUrgent : ""}`}
-                    >
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <circle cx="12" cy="12" r="9" />
-                        <path d="M12 7v5l3.5 2" />
-                      </svg>
-                      Expires in {formatCountdown(secondsLeft)}
-                    </span>
-                  )}
-                  <span className={styles.resendText}>
-                    {canResend ? (
-                      <button
-                        type="button"
-                        onClick={handleResendCode}
-                        className={styles.linkButton}
-                        disabled={submitting}
-                      >
-                        Resend code
-                      </button>
-                    ) : (
-                      <>Resend code in {formatCountdown(resendCooldown)}</>
-                    )}
+              <div className={styles.otpMeta}>
+                {!codeExpired && (
+                  <span
+                    className={`${styles.expiryPill} ${secondsLeft <= 60 ? styles.expiryPillUrgent : ""}`}
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 7v5l3.5 2" />
+                    </svg>
+                    Expires in {formatCountdown(secondsLeft)}
                   </span>
-                </div>
+                )}
+                <span className={styles.resendText}>
+                  {canResend ? (
+                    <button
+                      type="button"
+                      onClick={handleResendCode}
+                      className={styles.linkButton}
+                      disabled={submitting}
+                    >
+                      Resend code
+                    </button>
+                  ) : (
+                    <>Resend code in {formatCountdown(resendCooldown)}</>
+                  )}
+                </span>
               </div>
 
-              <button className={styles.submit} type="submit" disabled={submitting || codeExpired}>
-                {submitting ? "Verifying…" : "Verify code"}
-              </button>
-            </form>
+              {submitting && <p className={styles.fieldHint}>Verifying…</p>}
+            </div>
 
             <div className={styles.footer}>
               <button type="button" onClick={restart} className={styles.linkButton}>

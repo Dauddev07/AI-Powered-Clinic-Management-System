@@ -124,6 +124,21 @@ _RED_FLAG_PATTERNS = [
     r"\bstroke\b",
     r"\bcan'?t speak\b",
     r"\bsudden confusion\b",
+    # Brain/intracranial hemorrhage — bare-matched (no severity qualifier needed)
+    # the same way "stroke" above is, since a hemorrhage is never a minor complaint
+    # regardless of location. The first pattern is a typo-tolerant fuzzy match for
+    # "hemorrhage"/"haemorrhage" covering the common ways it gets misspelled in a
+    # hurry (hemorhage, hemmorhage, hemorrhage, hemorrhaging, ...) rather than an
+    # enumerated list, same technique as the "sever\w{0,4}ly" fuzzy match above.
+    # Reported live: "brain hambrige" (a much rougher phonetic misspelling the fuzzy
+    # pattern doesn't reach) is handled as its own literal, scoped to brain/head
+    # context so a bare "hambrige" typo of some unrelated word can't false-fire.
+    r"\bh[ae]e?m+or{1,2}h?ag(?:e|ing)\w*\b",
+    r"\b(brain|cerebral|intracranial|skull)\b.{0,15}\bbleed\w*\b",
+    r"\bbleed\w*\b.{0,15}\b(brain|cerebral|intracranial|skull)\b",
+    r"\bblood\b.{0,15}\bin\b.{0,10}\b(my|his|her|the)\b.{0,5}\b(brain|head|skull)\b",
+    r"\b(brain|head|skull)\b.{0,20}\b(hambrige|hambridge|humbridge|hambrage)\b",
+    r"\b(hambrige|hambridge|humbridge|hambrage)\b.{0,20}\b(brain|head|skull)\b",
     # Severe bleeding — both word orders ("severe bleeding" and "bleeding severely"),
     # everyday (non-clinical) severity phrasing ("bleeding very much", "bleeding a
     # ton", "bleeding so much"), and a FUZZY match for "severe(ly)" (\bsever\w{0,4}ly\b)
