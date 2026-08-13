@@ -20,6 +20,10 @@ export function forgotPassword(email) {
   return apiFetch("/auth/forgot-password", { method: "POST", body: { email } });
 }
 
+export function verifyResetOtp(email, otp) {
+  return apiFetch("/auth/verify-reset-otp", { method: "POST", body: { email, otp } });
+}
+
 export function resetPassword(email, otp, newPassword) {
   return apiFetch("/auth/reset-password", {
     method: "POST",

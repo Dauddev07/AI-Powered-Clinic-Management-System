@@ -59,7 +59,13 @@ def request_password_reset(db: Session, email: str) -> tuple[User, str] | None:
     return user, code
 
 
-def apply_password_reset(db: Session, email: str, code: str, new_password: str) -> None:
+def _find_user_and_checked_otp(db: Session, email: str, code: str) -> tuple[User, PasswordResetOtp]:
+    """Shared by verify_otp and apply_password_reset — both need the identical
+    "is this code currently usable" check, just followed by different actions on
+    success. Raises InvalidOrExpiredOtp for every failure case (unknown email,
+    no/used/expired/locked-out OTP, wrong code) so none of them are distinguishable
+    from each other by a caller.
+    """
     user = db.execute(
         select(User).where(User.email == email.lower(), User.is_active.is_(True))
     ).scalars().first()
@@ -84,6 +90,22 @@ def apply_password_reset(db: Session, email: str, code: str, new_password: str) 
         otp.attempts += 1
         db.commit()
         raise InvalidOrExpiredOtp()
+
+    return user, otp
+
+
+def verify_otp(db: Session, email: str, code: str) -> None:
+    """Checks the code without consuming it — backs the "Verify code" step the
+    frontend shows before ever asking for a new password. The code is re-checked
+    again (and only then marked used) in apply_password_reset, since a separate,
+    unauthenticated "verify" call earlier in the flow isn't something the final
+    password change should ever trust blindly.
+    """
+    _find_user_and_checked_otp(db, email, code)
+
+
+def apply_password_reset(db: Session, email: str, code: str, new_password: str) -> None:
+    user, otp = _find_user_and_checked_otp(db, email, code)
 
     user.hashed_password = hash_password(new_password)
     # Same invalidation as change-password: any token issued before now is rejected

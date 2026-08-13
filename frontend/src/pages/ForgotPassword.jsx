@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { forgotPassword, resetPassword } from "../api/auth";
+import { forgotPassword, resetPassword, verifyResetOtp } from "../api/auth";
 import { ApiError } from "../api/client";
 import PasswordInput from "../components/PasswordInput";
 import { useReveal } from "../hooks/useReveal";
@@ -11,6 +11,10 @@ import styles from "./ForgotPassword.module.css";
 // cooldown checks are the real enforcement either way.
 const OTP_TTL_SECONDS = 5 * 60;
 const RESEND_COOLDOWN_SECONDS = 60;
+// How long the "code verified" checkmark stays on screen before advancing to the
+// password step — long enough to register as a deliberate confirmation, short
+// enough not to feel like a stall.
+const VERIFIED_PAUSE_MS = 1100;
 
 function formatCountdown(seconds) {
   const m = Math.floor(seconds / 60);
@@ -22,16 +26,12 @@ function OtpInput({ value, onChange, disabled }) {
   const digits = value.split("");
   const inputRefs = useRef([]);
 
-  const setDigit = (index, char) => {
-    const next = value.split("");
-    next[index] = char;
-    onChange(next.join("").slice(0, 6));
-  };
-
   const handleChange = (index) => (e) => {
     const raw = e.target.value.replace(/\D/g, "");
     if (!raw) {
-      setDigit(index, "");
+      const next = value.split("");
+      next[index] = "";
+      onChange(next.join("").slice(0, 6));
       return;
     }
     // Handles a full paste landing in one box (raw can be multiple digits) as well
@@ -46,8 +46,7 @@ function OtpInput({ value, onChange, disabled }) {
       cursor += 1;
     }
     onChange(next.join("").slice(0, 6));
-    const focusIndex = Math.min(cursor, 5);
-    inputRefs.current[focusIndex]?.focus();
+    inputRefs.current[Math.min(cursor, 5)]?.focus();
   };
 
   const handleKeyDown = (index) => (e) => {
@@ -82,9 +81,8 @@ export default function ForgotPassword() {
   const navigate = useNavigate();
   const revealRef = useReveal();
 
-  // "request" — just an email field, sends the code.
-  // "reset" — code + new password fields, shown once a code has been sent.
-  const [step, setStep] = useState("request");
+  // email -> otp -> verified (brief, auto-advances) -> reset
+  const [step, setStep] = useState("email");
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -96,19 +94,36 @@ export default function ForgotPassword() {
   const [resendCooldown, setResendCooldown] = useState(RESEND_COOLDOWN_SECONDS);
 
   useEffect(() => {
-    if (step !== "reset" || secondsLeft <= 0) return undefined;
+    if (step !== "otp" || secondsLeft <= 0) return undefined;
     const id = setInterval(() => setSecondsLeft((s) => s - 1), 1000);
     return () => clearInterval(id);
   }, [step, secondsLeft]);
 
   useEffect(() => {
-    if (step !== "reset" || resendCooldown <= 0) return undefined;
+    if (step !== "otp" || resendCooldown <= 0) return undefined;
     const id = setInterval(() => setResendCooldown((s) => s - 1), 1000);
     return () => clearInterval(id);
   }, [step, resendCooldown]);
 
-  const codeExpired = step === "reset" && secondsLeft <= 0;
-  const canResend = step === "reset" && resendCooldown <= 0;
+  // "verified" is a transitional beat, not a screen the patient acts on — it
+  // always moves itself forward after a short pause.
+  useEffect(() => {
+    if (step !== "verified") return undefined;
+    const id = setTimeout(() => setStep("reset"), VERIFIED_PAUSE_MS);
+    return () => clearTimeout(id);
+  }, [step]);
+
+  const codeExpired = step === "otp" && secondsLeft <= 0;
+  const canResend = step === "otp" && resendCooldown <= 0;
+
+  const restart = () => {
+    setStep("email");
+    setOtp("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setNotice(null);
+    setError(null);
+  };
 
   const handleRequestCode = async (e) => {
     e.preventDefault();
@@ -121,7 +136,7 @@ export default function ForgotPassword() {
       setNotice("If an account exists for this email, a verification code has been sent.");
       setSecondsLeft(OTP_TTL_SECONDS);
       setResendCooldown(RESEND_COOLDOWN_SECONDS);
-      setStep("reset");
+      setStep("otp");
     } catch (err) {
       setError(err instanceof ApiError ? err.detail || err.message : "Something went wrong.");
     } finally {
@@ -145,7 +160,7 @@ export default function ForgotPassword() {
     }
   };
 
-  const handleResetPassword = async (e) => {
+  const handleVerifyCode = async (e) => {
     e.preventDefault();
     setError(null);
 
@@ -157,6 +172,22 @@ export default function ForgotPassword() {
       setError("Enter the full 6-digit code.");
       return;
     }
+
+    setSubmitting(true);
+    try {
+      await verifyResetOtp(email, otp);
+      setStep("verified");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail || err.message : "Something went wrong.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    setError(null);
+
     if (newPassword.length < 8) {
       setError("New password must be at least 8 characters.");
       return;
@@ -168,6 +199,9 @@ export default function ForgotPassword() {
 
     setSubmitting(true);
     try {
+      // otp was already confirmed valid in the "verify" step — re-submitted here
+      // (not re-entered by the patient) because the backend re-checks it before
+      // ever touching the password, rather than trusting an earlier, separate call.
       await resetPassword(email, otp, newPassword);
       navigate("/login", { replace: true, state: { resetSuccess: true } });
     } catch (err) {
@@ -180,7 +214,7 @@ export default function ForgotPassword() {
   return (
     <div className={styles.page}>
       <div className={`${styles.card} reveal`} ref={revealRef}>
-        {step === "request" ? (
+        {step === "email" && (
           <>
             <div className={styles.icon}>
               <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -190,7 +224,7 @@ export default function ForgotPassword() {
             </div>
             <h1 className={styles.title}>Forgot password</h1>
             <p className={styles.subtitle}>
-              Enter your account email and we&apos;ll send you a 6-digit verification code.
+              Enter your account email and we&apos;ll send a 6-digit verification code to it.
             </p>
 
             {error && (
@@ -218,8 +252,14 @@ export default function ForgotPassword() {
                 {submitting ? "Sending…" : "Send code"}
               </button>
             </form>
+
+            <div className={styles.footer}>
+              <Link to="/login">Back to log in</Link>
+            </div>
           </>
-        ) : (
+        )}
+
+        {step === "otp" && (
           <>
             <div className={styles.icon}>
               <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -257,7 +297,7 @@ export default function ForgotPassword() {
               </div>
             )}
 
-            <form onSubmit={handleResetPassword}>
+            <form onSubmit={handleVerifyCode}>
               <div className={styles.field}>
                 <label htmlFor="otp-0">
                   Verification code<span className={styles.requiredMark}>*</span>
@@ -293,8 +333,49 @@ export default function ForgotPassword() {
                 </div>
               </div>
 
-              <div className={styles.divider} />
+              <button className={styles.submit} type="submit" disabled={submitting || codeExpired}>
+                {submitting ? "Verifying…" : "Verify code"}
+              </button>
+            </form>
 
+            <div className={styles.footer}>
+              <button type="button" onClick={restart} className={styles.linkButton}>
+                Use a different email
+              </button>
+            </div>
+          </>
+        )}
+
+        {step === "verified" && (
+          <div className={styles.verifiedWrap}>
+            <div className={styles.verifiedCheck}>
+              <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M5 12.5 9.5 17 19 7" />
+              </svg>
+            </div>
+            <p className={styles.verifiedText}>Code verified</p>
+          </div>
+        )}
+
+        {step === "reset" && (
+          <>
+            <div className={styles.icon}>
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="5" y="10.5" width="14" height="9" rx="2.2" />
+                <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+                <circle cx="12" cy="15" r="1.4" />
+              </svg>
+            </div>
+            <h1 className={styles.title}>Set a new password</h1>
+            <p className={styles.subtitle}>Choose a new password for your account.</p>
+
+            {error && (
+              <div className={styles.error} role="alert">
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleResetPassword}>
               <div className={styles.field}>
                 <label htmlFor="newPassword">
                   New password<span className={styles.requiredMark}>*</span>
@@ -320,31 +401,12 @@ export default function ForgotPassword() {
                   autoComplete="new-password"
                 />
               </div>
-              <button className={styles.submit} type="submit" disabled={submitting || codeExpired}>
+              <button className={styles.submit} type="submit" disabled={submitting}>
                 {submitting ? "Resetting…" : "Reset password"}
               </button>
             </form>
-
-            <div className={styles.footer}>
-              <button
-                type="button"
-                onClick={() => {
-                  setStep("request");
-                  setNotice(null);
-                  setError(null);
-                  setOtp("");
-                }}
-                className={styles.linkButton}
-              >
-                Use a different email
-              </button>
-            </div>
           </>
         )}
-
-        <div className={styles.footer}>
-          <Link to="/login">Back to log in</Link>
-        </div>
       </div>
     </div>
   );

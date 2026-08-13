@@ -19,6 +19,7 @@ from app.schemas.auth import (
     TokenResponse,
     UserPublicOut,
     UserWithClinicOut,
+    VerifyResetOtpRequest,
 )
 from app.services.password_reset import (
     InvalidOrExpiredOtp,
@@ -26,6 +27,7 @@ from app.services.password_reset import (
     apply_password_reset,
     request_password_reset,
     send_otp_email,
+    verify_otp,
 )
 
 # Identical wording regardless of whether the email actually has an account, or
@@ -163,6 +165,22 @@ def forgot_password(
         background_tasks.add_task(send_otp_email, user, code)
 
     return _FORGOT_PASSWORD_GENERIC_RESPONSE
+
+
+@router.post("/verify-reset-otp")
+def verify_reset_otp(payload: VerifyResetOtpRequest, db: Session = Depends(get_db)) -> dict:
+    """Lets the frontend show its "code verified ✓" step before ever collecting a
+    new password — doesn't consume the code (see verify_otp's own docstring); the
+    actual /reset-password call re-checks it before applying anything.
+    """
+    try:
+        verify_otp(db, payload.email, payload.otp)
+    except InvalidOrExpiredOtp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That code is invalid or has expired. Please request a new one.",
+        )
+    return {"status": "verified"}
 
 
 @router.post("/reset-password")

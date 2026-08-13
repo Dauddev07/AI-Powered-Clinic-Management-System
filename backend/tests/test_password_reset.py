@@ -12,6 +12,7 @@ from app.services.password_reset import (
     OtpCooldownActive,
     apply_password_reset,
     request_password_reset,
+    verify_otp,
 )
 
 
@@ -136,3 +137,28 @@ def test_apply_password_reset_locks_out_after_max_attempts(db):
 def test_apply_password_reset_rejects_unknown_email(db):
     with pytest.raises(InvalidOrExpiredOtp):
         apply_password_reset(db, "nobody@example.com", "123456", "NewPass456")
+
+
+def test_verify_otp_succeeds_without_consuming_the_code(db):
+    clinic = _clinic(db)
+    user = _user(db, clinic, email="verifyonly@example.com")
+
+    _, code = request_password_reset(db, "verifyonly@example.com")
+    verify_otp(db, "verifyonly@example.com", code)
+
+    # Not marked used, and still usable afterward for the real reset.
+    row = db.query(PasswordResetOtp).filter_by(user_id=user.id).one()
+    assert row.used is False
+
+    apply_password_reset(db, "verifyonly@example.com", code, "NewPass456")
+    db.refresh(row)
+    assert row.used is True
+
+
+def test_verify_otp_rejects_wrong_code(db):
+    clinic = _clinic(db)
+    _user(db, clinic, email="verifywrong@example.com")
+
+    request_password_reset(db, "verifywrong@example.com")
+    with pytest.raises(InvalidOrExpiredOtp):
+        verify_otp(db, "verifywrong@example.com", "000000")
