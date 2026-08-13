@@ -70,7 +70,7 @@ function OtpInput({ value, onChange, disabled, verifying }) {
           value={digits[i] || ""}
           onChange={handleChange(i)}
           onKeyDown={handleKeyDown(i)}
-          autoComplete={i === 0 ? "one-time-code" : "off"}
+          autoComplete="off"
           aria-label={`Digit ${i + 1} of verification code`}
         />
       ))}
