@@ -100,7 +100,9 @@ export default function Login() {
                 autoComplete="current-password"
               />
               <span className={styles.fieldHint}>
-                <Link to="/forgot-password">Forgot password?</Link>
+                <Link to="/forgot-password" state={{ email }}>
+                  Forgot password?
+                </Link>
               </span>
             </div>
             <button className={styles.submit} type="submit" disabled={submitting}>
