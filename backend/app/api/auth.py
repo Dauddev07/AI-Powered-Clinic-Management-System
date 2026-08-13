@@ -21,6 +21,7 @@ from app.schemas.auth import (
     UserWithClinicOut,
     VerifyResetOtpRequest,
 )
+from app.services.email import send_welcome_email
 from app.services.password_reset import (
     InvalidOrExpiredOtp,
     OtpCooldownActive,
@@ -70,7 +71,7 @@ def get_my_account(current_user: User = Depends(get_current_user), db: Session =
 
 
 @router.post("/register", response_model=UserPublicOut, status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> User:
+def register(payload: RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)) -> User:
     clinic = db.get(Clinic, payload.clinic_id)
     if clinic is None or not clinic.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clinic not found")
@@ -108,6 +109,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> User:
             detail="An account with this email already exists for this clinic",
         )
     db.refresh(user)
+    background_tasks.add_task(send_welcome_email, to=user.email, full_name=user.full_name)
     return user
 
 
