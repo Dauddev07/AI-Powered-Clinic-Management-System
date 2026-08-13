@@ -56,6 +56,32 @@
   }
 }
 
+/* Light theme's white card background made the accent washes/border ring
+   read as barely-there next to dark theme's much higher contrast against a
+   near-black card — deepened the tints and shadow here specifically so the
+   banner reads as a deliberate highlight, not a flat white box, without
+   touching dark theme's already-working balance. */
+html[data-theme="light"] .banner {
+  background:
+    radial-gradient(
+      ellipse 70% 60% at 2% 100%,
+      color-mix(in srgb, var(--app-info-text) 26%, transparent),
+      transparent 72%
+    ) padding-box,
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--app-accent) 22%, var(--app-bg-card)),
+      var(--app-bg-card) 62%
+    ) padding-box,
+    conic-gradient(
+      from var(--banner-angle),
+      color-mix(in srgb, var(--app-accent) 85%, transparent),
+      color-mix(in srgb, var(--app-info-text) 70%, transparent),
+      color-mix(in srgb, var(--app-accent) 85%, transparent)
+    ) border-box;
+  box-shadow: 0 12px 34px color-mix(in srgb, var(--app-accent) 16%, var(--app-shadow));
+}
+
 /* The corner glow — sits behind .text (z-index below), bleeding off the
    card's own edge so it reads as depth rather than a pasted-on shape. */
 .banner::after {
@@ -73,6 +99,14 @@
   );
   z-index: 0;
   pointer-events: none;
+}
+
+html[data-theme="light"] .banner::after {
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--app-accent) 42%, transparent),
+    transparent 72%
+  );
 }
 
 .text {
