@@ -29,7 +29,7 @@
 }
 
 /* Reported live: on a short/narrow phone screen the page content runs all the
-   way to the bottom edge, so FloatingChatButton (fixed bottom-left, see its
+   way to the bottom edge, so FloatingChatButton (fixed bottom-right, see its
    own module.css) ends up sitting directly on top of the last card's text
    ("0 Upcoming" etc.) instead of floating in empty space below it. Reserving
    room here — sized to the button's own small-screen footprint (54px + 1rem

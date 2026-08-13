@@ -1,11 +1,11 @@
 .wrapper {
   position: fixed;
-  left: 1.5rem;
+  right: 1.5rem;
   bottom: 1.5rem;
   z-index: 70;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: 0.7rem;
 }
 
@@ -176,15 +176,15 @@
 .tooltip::after {
   content: "";
   position: absolute;
-  left: 22px;
+  right: 22px;
   bottom: -6px;
   width: 12px;
   height: 12px;
   background: inherit;
-  border-left: 1px solid color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
+  border-right: 1px solid color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
   border-bottom: 1px solid color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
-  transform: rotate(-45deg);
-  border-radius: 0 0 0 3px;
+  transform: rotate(45deg);
+  border-radius: 0 0 3px 0;
 }
 
 .tooltipVisible {
