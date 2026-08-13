@@ -100,7 +100,15 @@ export default function Register() {
 
     const errs = validate();
     setFieldErrors(errs);
-    if (Object.keys(errs).length > 0) return;
+    if (Object.keys(errs).length > 0) {
+      // Field errors render next to their own field, but on a long form the
+      // patient may have scrolled well past the top banner area / earlier
+      // fields by the time they hit submit — land back at the top so the
+      // first invalid field is actually visible instead of silently below
+      // the fold.
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -120,6 +128,10 @@ export default function Register() {
     } catch (err) {
       // Backend is authoritative: surface its message verbatim, including 409 duplicates.
       setError(err instanceof ApiError ? err.detail || err.message : "Something went wrong.");
+      // Same reasoning as the validation-error branch above — a backend error
+      // (duplicate email, phone already registered, etc.) renders in the banner
+      // at the top of the form, which the patient may have scrolled well past.
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
       setSubmitting(false);
     }
