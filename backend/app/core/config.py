@@ -50,6 +50,25 @@ class Settings(BaseSettings):
     # huggingface.co/settings/tokens if you hit rate limiting.
     HF_TOKEN: str = ""
 
+    # Transactional email (password-reset OTP for now — see app/services/email.py and
+    # app/services/password_reset.py). Gmail SMTP with an account-level App Password,
+    # not a general-purpose provider — fine at this app's current volume, see the
+    # 500/day Gmail cap noted in password_reset.py's own docstring.
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_NAME: str = "QuickCheck Clinic"
+
+    # How long a password-reset OTP stays valid after being emailed.
+    PASSWORD_RESET_OTP_TTL_MINUTES: int = 5
+    # Failed-guess cap per OTP before it's invalidated and a new one must be requested —
+    # without this, 6 digits (1,000,000 possibilities) is brute-forceable.
+    PASSWORD_RESET_OTP_MAX_ATTEMPTS: int = 5
+    # Minimum time between two OTP requests for the same email, so the "send code"
+    # endpoint can't be used to spam a stranger's inbox.
+    PASSWORD_RESET_OTP_RESEND_COOLDOWN_SECONDS: int = 60
+
     DEFAULT_SLOT_MINUTES: int = 30
     RETRIEVAL_SIMILARITY_THRESHOLD: float = 0.5
 

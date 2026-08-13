@@ -85,6 +85,25 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    otp: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    new_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def password_complexity(cls, value: str) -> str:
+        if not re.search(r"[A-Za-z]", value):
+            raise ValueError("Password must contain at least one letter")
+        if not re.search(r"[0-9]", value):
+            raise ValueError("Password must contain at least one number")
+        return value
+
+
 class UserPublicOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

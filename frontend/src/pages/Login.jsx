@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { ApiError } from "../api/client";
 import { decodeJwtPayload } from "../auth/jwt";
@@ -11,11 +11,21 @@ import styles from "./Login.module.css";
 export default function Login() {
   const { login, sessionMessage, setSessionMessage } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const register = useReveal();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Set by ForgotPassword's navigate() after a successful reset — a one-time
+  // router-state flag rather than sessionMessage, so it can't survive a refresh
+  // and get shown again out of context.
+  useEffect(() => {
+    if (location.state?.resetSuccess) {
+      setSessionMessage("Password reset — please log in with your new password.");
+    }
+  }, [location.state, setSessionMessage]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -89,6 +99,9 @@ export default function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
               />
+              <span className={styles.fieldHint}>
+                <Link to="/forgot-password">Forgot password?</Link>
+              </span>
             </div>
             <button className={styles.submit} type="submit" disabled={submitting}>
               {submitting ? "Logging in…" : "Log in"}

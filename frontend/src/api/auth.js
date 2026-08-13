@@ -16,6 +16,17 @@ export function changePassword(oldPassword, newPassword) {
   });
 }
 
+export function forgotPassword(email) {
+  return apiFetch("/auth/forgot-password", { method: "POST", body: { email } });
+}
+
+export function resetPassword(email, otp, newPassword) {
+  return apiFetch("/auth/reset-password", {
+    method: "POST",
+    body: { email, otp, new_password: newPassword },
+  });
+}
+
 export function fetchPublicClinics() {
   return apiFetch("/clinics/public-list");
 }

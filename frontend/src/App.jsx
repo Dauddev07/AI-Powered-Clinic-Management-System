@@ -8,6 +8,7 @@ import PrimaryNavMobile from "./components/PrimaryNavMobile";
 import { ToastProvider } from "./components/ToastContext";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
+import ForgotPassword from "./pages/ForgotPassword";
 import Register from "./pages/Register";
 import ChangePassword from "./pages/ChangePassword";
 import AdminHome from "./pages/AdminHome";
@@ -57,6 +58,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/register" element={<Register />} />
           <Route
             path="/change-password"

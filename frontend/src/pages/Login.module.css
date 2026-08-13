@@ -148,6 +148,12 @@
   color: var(--app-text-subtitle);
 }
 
+.fieldHint a {
+  color: var(--app-link);
+  font-weight: 600;
+  text-decoration: none;
+}
+
 .field input,
 .field select {
   width: 100%;

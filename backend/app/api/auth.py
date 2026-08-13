@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -12,12 +12,28 @@ from app.models.clinic import Clinic
 from app.models.user import User
 from app.schemas.auth import (
     ChangePasswordRequest,
+    ForgotPasswordRequest,
     LoginRequest,
     RegisterRequest,
+    ResetPasswordRequest,
     TokenResponse,
     UserPublicOut,
     UserWithClinicOut,
 )
+from app.services.password_reset import (
+    InvalidOrExpiredOtp,
+    OtpCooldownActive,
+    apply_password_reset,
+    request_password_reset,
+    send_otp_email,
+)
+
+# Identical wording regardless of whether the email actually has an account, or
+# whether a code was already sent moments ago — never lets a caller distinguish
+# "no such account" from "check your inbox" (account enumeration).
+_FORGOT_PASSWORD_GENERIC_RESPONSE = {
+    "status": "If an account exists for this email, a verification code has been sent."
+}
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -122,3 +138,40 @@ def change_password(
     current_user.password_changed_at = datetime.now(timezone.utc).replace(microsecond=0)
     db.commit()
     return {"status": "password changed"}
+
+
+@router.post("/forgot-password")
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> dict:
+    try:
+        result = request_password_reset(db, payload.email)
+    except OtpCooldownActive:
+        # The only place this flow deviates from a flat generic response — but only
+        # ever reached for an email that DOES have an account (see
+        # request_password_reset's own docstring), so it can't be used to probe for
+        # account existence; it just tells a real, already-requesting user to wait.
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="A code was already sent recently — please wait a minute before requesting another.",
+        )
+
+    if result is not None:
+        user, code = result
+        background_tasks.add_task(send_otp_email, user, code)
+
+    return _FORGOT_PASSWORD_GENERIC_RESPONSE
+
+
+@router.post("/reset-password")
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        apply_password_reset(db, payload.email, payload.otp, payload.new_password)
+    except InvalidOrExpiredOtp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That code is invalid or has expired. Please request a new one.",
+        )
+    return {"status": "password reset"}
