@@ -506,6 +506,16 @@ _BENIGN_EXEMPLARS: tuple[str, ...] = (
     "what is my name and what have I told you before",
     "what are your clinic hours",
     "thanks, that's helpful",
+    # Regression: "i got a cut on my hand" and "i cut a cut on my finger when i was
+    # cutting apple" both scored highest against the "stabbed with a knife" exemplar
+    # (0.76 and 0.69) — an ordinary kitchen/paper cut sits closer to that exemplar in
+    # embedding space than to anything else in this bank, purely on shared "cut"/
+    # "knife" vocabulary rather than any actual severity signal, so the margin layer
+    # didn't suppress it. These anchor the benign side of exactly that same topic so
+    # the margin can tell the two apart.
+    "I got a small cut on my hand while cutting vegetables",
+    "I cut my finger a little while slicing an apple",
+    "I have a small paper cut",
 )
 
 _exemplar_vectors = np.array(embed_texts(list(_EXEMPLARS)))

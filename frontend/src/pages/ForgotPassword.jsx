@@ -22,7 +22,7 @@ function formatCountdown(seconds) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function OtpInput({ value, onChange, disabled }) {
+function OtpInput({ value, onChange, disabled, verifying }) {
   const digits = value.split("");
   const inputRefs = useRef([]);
 
@@ -61,7 +61,8 @@ function OtpInput({ value, onChange, disabled }) {
         <input
           key={i}
           ref={(el) => (inputRefs.current[i] = el)}
-          className={styles.otpDigit}
+          className={`${styles.otpDigit} ${verifying ? styles.otpDigitVerifying : ""}`}
+          style={verifying ? { animationDelay: `${i * 90}ms` } : undefined}
           type="text"
           inputMode="numeric"
           maxLength={6}
@@ -300,7 +301,12 @@ export default function ForgotPassword() {
               <label htmlFor="otp-0">
                 Verification code<span className={styles.requiredMark}>*</span>
               </label>
-              <OtpInput value={otp} onChange={setOtp} disabled={codeExpired || submitting} />
+              <OtpInput
+                value={otp}
+                onChange={setOtp}
+                disabled={codeExpired || submitting}
+                verifying={submitting}
+              />
 
               <div className={styles.otpMeta}>
                 {!codeExpired && (
@@ -330,7 +336,12 @@ export default function ForgotPassword() {
                 </span>
               </div>
 
-              {submitting && <p className={styles.fieldHint}>Verifying…</p>}
+              {submitting && (
+                <div className={styles.verifyingRow}>
+                  <span className={styles.verifyingCube} aria-hidden="true" />
+                  <span className={styles.fieldHint}>Verifying…</span>
+                </div>
+              )}
             </div>
 
             <div className={styles.footer}>
