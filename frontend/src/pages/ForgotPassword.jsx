@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { forgotPassword, resetPassword, verifyResetOtp } from "../api/auth";
 import { ApiError } from "../api/client";
 import PasswordInput from "../components/PasswordInput";
@@ -79,21 +79,11 @@ function OtpInput({ value, onChange, disabled }) {
 
 export default function ForgotPassword() {
   const navigate = useNavigate();
-  const location = useLocation();
   const revealRef = useReveal();
 
-  // The email the patient already typed into Login's own field, carried over via
-  // router state (see Login.jsx's Link) — when present, this page never asks for
-  // it again: it sends the code immediately and jumps straight to the otp step.
-  // Only falls back to asking when someone lands here with no email in hand (e.g.
-  // navigating to /forgot-password directly) — there's no other way to know which
-  // account to send a code to without it.
-  const knownEmail = location.state?.email?.trim() || "";
-
-  // email -> sending (auto, only when knownEmail exists) -> otp ->
-  // verified (brief, auto-advances) -> reset
-  const [step, setStep] = useState(knownEmail ? "sending" : "email");
-  const [email, setEmail] = useState(knownEmail);
+  // email -> otp -> verified (brief, auto-advances) -> reset
+  const [step, setStep] = useState("email");
+  const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -102,33 +92,6 @@ export default function ForgotPassword() {
   const [submitting, setSubmitting] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(OTP_TTL_SECONDS);
   const [resendCooldown, setResendCooldown] = useState(RESEND_COOLDOWN_SECONDS);
-
-  useEffect(() => {
-    if (step !== "sending") return;
-    let cancelled = false;
-    (async () => {
-      try {
-        await forgotPassword(email);
-        if (cancelled) return;
-        setNotice("A verification code has been sent to your registered email.");
-        setSecondsLeft(OTP_TTL_SECONDS);
-        setResendCooldown(RESEND_COOLDOWN_SECONDS);
-        setStep("otp");
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof ApiError ? err.detail || err.message : "Something went wrong.");
-        // Falls back to the plain email-entry screen so the patient isn't stuck —
-        // e.g. a network hiccup on this one automatic attempt shouldn't dead-end them.
-        setStep("email");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // Intentionally runs once (on mount, when starting from "sending") — email is
-    // the value carried over from Login and never changes while this step is active.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
 
   useEffect(() => {
     if (step !== "otp" || secondsLeft <= 0) return undefined;
@@ -251,13 +214,6 @@ export default function ForgotPassword() {
   return (
     <div className={styles.page}>
       <div className={`${styles.card} reveal`} ref={revealRef}>
-        {step === "sending" && (
-          <div className={styles.verifiedWrap}>
-            <div className={styles.spinner} aria-hidden="true" />
-            <p className={styles.verifiedText}>Sending code to your registered email…</p>
-          </div>
-        )}
-
         {step === "email" && (
           <>
             <div className={styles.icon}>
