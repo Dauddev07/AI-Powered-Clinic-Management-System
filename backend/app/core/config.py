@@ -51,14 +51,15 @@ class Settings(BaseSettings):
     HF_TOKEN: str = ""
 
     # Transactional email (password-reset OTP for now — see app/services/email.py and
-    # app/services/password_reset.py). Gmail SMTP with an account-level App Password,
-    # not a general-purpose provider — fine at this app's current volume, see the
-    # 500/day Gmail cap noted in password_reset.py's own docstring.
-    SMTP_HOST: str = "smtp.gmail.com"
-    SMTP_PORT: int = 587
-    SMTP_USER: str = ""
-    SMTP_PASSWORD: str = ""
-    SMTP_FROM_NAME: str = "QuickCheck Clinic"
+    # app/services/password_reset.py). Sent via Brevo's HTTP API rather than raw SMTP —
+    # Render blocks outbound connections on SMTP ports (25/465/587) on its free/starter
+    # tiers to prevent spam abuse, so smtplib works locally but fails in production with
+    # "Network is unreachable". Brevo's API runs over plain HTTPS (443), which isn't
+    # blocked, and its free tier (300 emails/day) needs no domain — only the sender
+    # email verified in Brevo's dashboard.
+    BREVO_API_KEY: str = ""
+    BREVO_SENDER_EMAIL: str = ""
+    BREVO_SENDER_NAME: str = "QuickCheck Clinic"
 
     # How long a password-reset OTP stays valid after being emailed.
     PASSWORD_RESET_OTP_TTL_MINUTES: int = 5

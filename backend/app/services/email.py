@@ -1,41 +1,51 @@
-"""Transactional email via Gmail SMTP (see Settings.SMTP_* in app/core/config.py — an
-account-level App Password, not a general-purpose provider like Resend/SendGrid).
-Fine at this app's current volume: Gmail's free-account cap is ~500 sends/day.
+"""Transactional email via Brevo's HTTP API (see Settings.BREVO_* in
+app/core/config.py). Not raw SMTP — Render blocks outbound SMTP ports on its
+free/starter tiers (spam-abuse prevention), so smtplib works locally but fails in
+production with "Network is unreachable". Brevo's API runs over plain HTTPS, which
+isn't blocked, and its free tier (300 emails/day) needs no domain — only the sender
+email verified in Brevo's own dashboard.
 
-Called from a FastAPI BackgroundTask (see app/api/auth.py) so the SMTP round-trip
+Called from a FastAPI BackgroundTask (see app/api/auth.py) so the HTTP round-trip
 never adds latency to the request that triggered it.
 """
 import logging
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+
+import httpx
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+_BREVO_SEND_URL = "https://api.brevo.com/v3/smtp/email"
+
 
 def send_email(*, to: str, subject: str, html_body: str) -> None:
-    if not settings.SMTP_USER or not settings.SMTP_PASSWORD:
-        # Local dev without SMTP configured shouldn't crash the request that
+    if not settings.BREVO_API_KEY or not settings.BREVO_SENDER_EMAIL:
+        # Local dev without Brevo configured shouldn't crash the request that
         # triggered the email — log and no-op instead.
-        logger.warning("SMTP not configured — skipping email to %s (%s)", to, subject)
+        logger.warning("Brevo not configured — skipping email to %s (%s)", to, subject)
         return
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_USER}>"
-    msg["To"] = to
-    msg.attach(MIMEText(html_body, "html"))
-
     try:
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as server:
-            server.starttls()
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.send_message(msg)
+        response = httpx.post(
+            _BREVO_SEND_URL,
+            headers={
+                "api-key": settings.BREVO_API_KEY,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            json={
+                "sender": {"name": settings.BREVO_SENDER_NAME, "email": settings.BREVO_SENDER_EMAIL},
+                "to": [{"email": to}],
+                "subject": subject,
+                "htmlContent": html_body,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
     except Exception:
         # Best-effort: the OTP/notification is still valid even if the email fails to
-        # send (e.g. a transient SMTP hiccup) — surface it in logs, not to the patient.
+        # send (e.g. a transient API hiccup) — surface it in logs, not to the patient.
         logger.exception("Failed to send email to %s (%s)", to, subject)
 
 
