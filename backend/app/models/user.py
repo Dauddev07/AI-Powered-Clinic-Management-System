@@ -33,6 +33,14 @@ class User(Base):
     # Set true by the Superadmin CLI when creating an admin with a temporary password,
     # forcing a change on first login (Day 3, Day 9).
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # False only for a patient who just self-registered (see app/api/auth.py's
+    # register()) and hasn't yet completed OTP email verification — login is blocked
+    # until then (app/api/deps.py's get_current_user doesn't gate on this; login
+    # itself does, since a blocked account should never get a token in the first
+    # place). server_default "true" so every pre-existing row (admins created via the
+    # CLI, all patients registered before this column existed) is grandfathered in as
+    # already verified rather than retroactively locked out.
+    email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     # NULL until the first password change. Any JWT whose `iat` predates this timestamp
     # is rejected in get_current_user, so changing a password immediately invalidates
     # every token issued before the change (see app/api/deps.py).

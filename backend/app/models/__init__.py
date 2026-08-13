@@ -8,6 +8,7 @@ from app.models.department import Department
 from app.models.doctor import Doctor
 from app.models.doctor_leave_date import DoctorLeaveDate
 from app.models.doctor_shift import DoctorShift
+from app.models.email_verification_otp import EmailVerificationOtp
 from app.models.ingestion_log import IngestionLog
 from app.models.kb_document import KBDocument
 from app.models.notification import Notification
@@ -27,6 +28,7 @@ __all__ = [
     "Doctor",
     "DoctorLeaveDate",
     "DoctorShift",
+    "EmailVerificationOtp",
     "IngestionLog",
     "KBDocument",
     "Notification",

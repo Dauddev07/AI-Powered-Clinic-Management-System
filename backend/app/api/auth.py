@@ -15,13 +15,23 @@ from app.schemas.auth import (
     ForgotPasswordRequest,
     LoginRequest,
     RegisterRequest,
+    ResendVerificationRequest,
     ResetPasswordRequest,
     TokenResponse,
     UserPublicOut,
     UserWithClinicOut,
+    VerifyEmailRequest,
     VerifyResetOtpRequest,
 )
 from app.services.email import send_welcome_email
+from app.services.email_verification import (
+    InvalidOrExpiredOtp as InvalidOrExpiredVerificationOtp,
+    OtpCooldownActive as VerificationOtpCooldownActive,
+    request_email_verification,
+    send_verification_for_new_registration,
+    send_verification_otp_email,
+    verify_email as apply_email_verification,
+)
 from app.services.password_reset import (
     InvalidOrExpiredOtp,
     OtpCooldownActive,
@@ -36,6 +46,9 @@ from app.services.password_reset import (
 # "no such account" from "check your inbox" (account enumeration).
 _FORGOT_PASSWORD_GENERIC_RESPONSE = {
     "status": "If an account exists for this email, a verification code has been sent."
+}
+_RESEND_VERIFICATION_GENERIC_RESPONSE = {
+    "status": "If an unverified account exists for this email, a verification code has been sent."
 }
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -53,6 +66,17 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
     matched = next((u for u in candidates if verify_password(payload.password, u.hashed_password)), None)
     if matched is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    if not matched.email_verified:
+        # 403, not 401: the password is correct (already confirmed above) — this is
+        # an account-state block, not an auth failure, and the frontend's global 401
+        # handler must not treat it as an expired/invalid session. Distinct status
+        # code (not just message text) so the frontend can reliably route to the
+        # verify-email screen instead of string-matching the detail text.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your email before logging in.",
+        )
 
     token = create_access_token(user_id=matched.id, clinic_id=matched.clinic_id, role=matched.role)
     return TokenResponse(access_token=token, must_change_password=matched.must_change_password)
@@ -98,6 +122,10 @@ def register(payload: RegisterRequest, background_tasks: BackgroundTasks, db: Se
         phone=payload.phone,
         dob=payload.dob,
         gender=payload.gender,
+        # Overrides the column's own server_default "true" (which only exists to
+        # grandfather in pre-existing rows) — every fresh self-registration starts
+        # unverified and must complete the OTP flow below before it can log in.
+        email_verified=False,
     )
     db.add(user)
     try:
@@ -109,7 +137,10 @@ def register(payload: RegisterRequest, background_tasks: BackgroundTasks, db: Se
             detail="An account with this email already exists for this clinic",
         )
     db.refresh(user)
-    background_tasks.add_task(send_welcome_email, to=user.email, full_name=user.full_name)
+    # Verification OTP only here, not the welcome email — that goes out once
+    # verify_email() below actually confirms they own this address, not before.
+    code = send_verification_for_new_registration(db, user)
+    background_tasks.add_task(send_verification_otp_email, user, code)
     return user
 
 
@@ -195,3 +226,51 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
             detail="That code is invalid or has expired. Please request a new one.",
         )
     return {"status": "password reset"}
+
+
+@router.post("/resend-verification-email")
+def resend_verification_email(
+    payload: ResendVerificationRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> dict:
+    try:
+        result = request_email_verification(db, payload.email)
+    except VerificationOtpCooldownActive:
+        # Same reasoning as forgot-password's identical branch: only ever reached for
+        # an email that DOES have an unverified account, so it can't be used to
+        # probe account existence — just tells a real, already-requesting user to wait.
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="A code was already sent recently — please wait a minute before requesting another.",
+        )
+
+    if result is not None:
+        user, code = result
+        background_tasks.add_task(send_verification_otp_email, user, code)
+
+    return _RESEND_VERIFICATION_GENERIC_RESPONSE
+
+
+@router.post("/verify-email", response_model=TokenResponse)
+def verify_email(
+    payload: VerifyEmailRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    """On success, logs the patient straight in (same as /login) — they just proved
+    ownership of the email a moment ago, so making them log in again immediately
+    after would be pure friction with no security benefit. The welcome email — held
+    back at registration until this point — goes out now instead.
+    """
+    try:
+        user = apply_email_verification(db, payload.email, payload.otp)
+    except InvalidOrExpiredVerificationOtp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That code is invalid or has expired. Please request a new one.",
+        )
+
+    background_tasks.add_task(send_welcome_email, to=user.email, full_name=user.full_name)
+    token = create_access_token(user_id=user.id, clinic_id=user.clinic_id, role=user.role)
+    return TokenResponse(access_token=token, must_change_password=user.must_change_password)

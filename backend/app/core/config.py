@@ -70,6 +70,14 @@ class Settings(BaseSettings):
     # endpoint can't be used to spam a stranger's inbox.
     PASSWORD_RESET_OTP_RESEND_COOLDOWN_SECONDS: int = 60
 
+    # Same three knobs as the password-reset OTP above, for the separate
+    # self-registration email-verification OTP (see app/services/email_verification.py)
+    # — kept as their own settings rather than reusing the password-reset ones so the
+    # two flows' timing can be tuned independently later without coupling them.
+    EMAIL_VERIFICATION_OTP_TTL_MINUTES: int = 5
+    EMAIL_VERIFICATION_OTP_MAX_ATTEMPTS: int = 5
+    EMAIL_VERIFICATION_OTP_RESEND_COOLDOWN_SECONDS: int = 60
+
     DEFAULT_SLOT_MINUTES: int = 30
     RETRIEVAL_SIMILARITY_THRESHOLD: float = 0.5
 

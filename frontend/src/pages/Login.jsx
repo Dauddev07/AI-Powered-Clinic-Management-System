@@ -41,6 +41,14 @@ export default function Login() {
           : "/patient";
       navigate(destination, { replace: true });
     } catch (err) {
+      // 403 here means the password was actually correct — the account just
+      // hasn't completed email verification yet (see app/api/auth.py's login()) —
+      // a distinct status rather than string-matching the error text, so this
+      // routes to finishing verification instead of showing a dead-end error.
+      if (err instanceof ApiError && err.status === 403) {
+        navigate("/verify-email", { state: { email } });
+        return;
+      }
       setError(err instanceof ApiError ? err.detail || err.message : "Something went wrong.");
     } finally {
       setSubmitting(false);

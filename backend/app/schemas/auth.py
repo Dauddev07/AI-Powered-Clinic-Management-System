@@ -109,6 +109,15 @@ class ResetPasswordRequest(BaseModel):
         return value
 
 
+class VerifyEmailRequest(BaseModel):
+    email: EmailStr
+    otp: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+
 class UserPublicOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -121,6 +130,7 @@ class UserPublicOut(BaseModel):
     dob: date | None
     gender: str | None
     must_change_password: bool
+    email_verified: bool
     created_at: datetime
 
 

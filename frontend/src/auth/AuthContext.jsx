@@ -35,8 +35,10 @@ export function AuthProvider({ children }) {
     });
   }, [navigate]);
 
-  const login = async (email, password) => {
-    const data = await authApi.login(email, password);
+  // Shared by login() below and VerifyEmail.jsx's post-verification auto-login —
+  // both end up with the exact same TokenResponse shape ({access_token,
+  // must_change_password}) from the backend, just via a different endpoint.
+  const applyAuthResponse = (data) => {
     localStorage.setItem("access_token", data.access_token);
     const payload = decodeJwtPayload(data.access_token);
     setAuthState({
@@ -47,6 +49,16 @@ export function AuthProvider({ children }) {
     return data;
   };
 
+  const login = async (email, password) => {
+    const data = await authApi.login(email, password);
+    return applyAuthResponse(data);
+  };
+
+  // Takes an already-fetched TokenResponse (e.g. from POST /auth/verify-email,
+  // which logs the patient in directly on success) rather than calling the login
+  // endpoint itself.
+  const loginWithToken = (data) => applyAuthResponse(data);
+
   const logout = () => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("chat_session_id");
@@ -55,7 +67,16 @@ export function AuthProvider({ children }) {
   };
 
   const value = useMemo(
-    () => ({ token, user, isAuthenticated: !!token, login, logout, sessionMessage, setSessionMessage }),
+    () => ({
+      token,
+      user,
+      isAuthenticated: !!token,
+      login,
+      loginWithToken,
+      logout,
+      sessionMessage,
+      setSessionMessage,
+    }),
     [token, user, sessionMessage]
   );
 

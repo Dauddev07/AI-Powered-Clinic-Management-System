@@ -114,8 +114,9 @@ export default function Register() {
         gender: form.gender || null,
       });
       setSuccess(true);
+      const registeredEmail = form.email;
       setForm(initialForm);
-      setTimeout(() => navigate("/login"), 1200);
+      setTimeout(() => navigate("/verify-email", { state: { email: registeredEmail } }), 1200);
     } catch (err) {
       // Backend is authoritative: surface its message verbatim, including 409 duplicates.
       setError(err instanceof ApiError ? err.detail || err.message : "Something went wrong.");
@@ -148,7 +149,7 @@ export default function Register() {
           {success && (
             <div className={styles.success}>
               <SuccessCheck />
-              Account created! Redirecting to log in…
+              Account created! Redirecting you to verify your email…
             </div>
           )}
 

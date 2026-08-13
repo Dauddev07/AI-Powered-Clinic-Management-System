@@ -1,0 +1,253 @@
+.field {
+  margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.field label {
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  color: var(--app-text-label);
+}
+
+.requiredMark {
+  color: var(--app-error-text);
+  margin-left: 0.15rem;
+}
+
+.fieldHint {
+  display: block;
+  font-size: var(--font-size-caption);
+  color: var(--app-text-subtitle);
+}
+
+.linkButton {
+  background: none;
+  border: none;
+  color: var(--app-link);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: inherit;
+  padding: 0;
+}
+
+.linkButton:disabled {
+  color: var(--app-text-subtitle);
+  cursor: not-allowed;
+}
+
+/* ---- OTP digit entry ---- */
+
+.otpRow {
+  display: flex;
+  gap: clamp(0.3rem, 2vw, 0.5rem);
+  margin-bottom: 0.6rem;
+}
+
+.otpDigit {
+  /* flex: 1 1 0 (not width: 100%) — the 6 boxes always divide whatever width the
+     row actually has, equally, and can shrink as far as needed on a narrow
+     screen. Reported live: a fixed min-width here previously demanded more
+     total width than some phones have, pushing the row past the screen edge
+     and clipping the later boxes entirely — min-width: 0 is what lets a flex
+     item shrink below its content size at all, overriding the browser's
+     default min-width: auto on flex items. */
+  flex: 1 1 0;
+  min-width: 0;
+  aspect-ratio: 1;
+  text-align: center;
+  line-height: 1;
+  font-size: clamp(1rem, 6vw, 1.5rem);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--sans);
+  /* Defensive: guards against a mobile browser applying its own OTP-field/
+     password-style masking to this box on top of the typed digit. */
+  -webkit-text-security: none;
+  border: 1.5px solid var(--app-border);
+  border-radius: 10px;
+  background: var(--app-input-bg);
+  color: var(--app-input-text);
+  padding: 0;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.otpDigit:focus {
+  outline: none;
+  border-color: var(--app-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 22%, transparent);
+}
+
+.otpDigit:disabled {
+  opacity: 0.5;
+}
+
+/* ---- "Verifying…" indicator (set once all 6 boxes are filled and the
+   auto-verify request is in flight) ----
+   Reported live, twice: any transform/rotation on the digit itself (first a
+   full 360° rotateX, then a bounded ±22°) reads as the number leaning/tilting
+   on real devices — and since perspective was shared across the whole row,
+   each box (at a different horizontal position) skewed by a visibly different
+   amount, making it look broken rather than stylized. Digits must never be
+   transformed at all — this uses only box-shadow/border-color, which can't
+   distort the glyph underneath no matter the device or screen size. */
+.otpDigit.otpDigitVerifying:disabled {
+  opacity: 1;
+  border-color: var(--app-accent);
+  animation: otp-digit-pulse 900ms ease-in-out infinite;
+}
+
+@keyframes otp-digit-pulse {
+  0%,
+  100% {
+    border-color: var(--app-accent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--app-accent) 0%, transparent);
+  }
+  50% {
+    border-color: var(--app-accent-hover);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--app-accent) 25%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .otpDigit.otpDigitVerifying:disabled {
+    animation: none;
+    border-color: var(--app-accent);
+  }
+}
+
+.verifyingRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+/* A real six-face 3D cube (not a flat square faked with a transform) — safe to
+   rotate as heavily/smoothly as looks good, since it's pure decoration built
+   from colored faces, never actual text. Unlike the digit boxes above, there's
+   no glyph here that a rotation could ever render edge-on/unreadable. */
+.cubeScene {
+  width: 1.1rem;
+  height: 1.1rem;
+  perspective: 260px;
+  flex-shrink: 0;
+}
+
+.cube {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  animation: verifying-cube-spin 2.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+.cubeFace {
+  position: absolute;
+  inset: 0;
+  border-radius: 3px;
+  background: linear-gradient(135deg, var(--app-accent), var(--app-accent-hover));
+  border: 1px solid color-mix(in srgb, var(--app-accent-hover) 60%, white);
+  opacity: 0.92;
+}
+
+.cubeFront {
+  transform: translateZ(0.55rem);
+}
+.cubeBack {
+  transform: rotateY(180deg) translateZ(0.55rem);
+}
+.cubeRight {
+  transform: rotateY(90deg) translateZ(0.55rem);
+}
+.cubeLeft {
+  transform: rotateY(-90deg) translateZ(0.55rem);
+}
+.cubeTop {
+  transform: rotateX(90deg) translateZ(0.55rem);
+  opacity: 0.75;
+}
+.cubeBottom {
+  transform: rotateX(-90deg) translateZ(0.55rem);
+  opacity: 0.6;
+}
+
+@keyframes verifying-cube-spin {
+  0% {
+    transform: rotateX(0deg) rotateY(0deg);
+  }
+  50% {
+    transform: rotateX(180deg) rotateY(190deg);
+  }
+  100% {
+    transform: rotateX(360deg) rotateY(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cube {
+    animation: none;
+  }
+}
+
+/* ---- Countdown / resend row ---- */
+
+.otpMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.expiryPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--app-text-subtitle);
+  font-variant-numeric: tabular-nums;
+}
+
+.expiryPill svg {
+  flex-shrink: 0;
+  color: var(--app-accent);
+}
+
+.expiryPillUrgent {
+  color: var(--app-warning-text);
+}
+
+.expiryPillUrgent svg {
+  color: var(--app-warning-text);
+}
+
+.resendText {
+  font-size: var(--font-size-caption);
+  color: var(--app-text-subtitle);
+}
+
+.expiredBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  background: var(--app-error-bg);
+  color: var(--app-error-text);
+  border: 1px solid var(--app-error-border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  font-size: var(--font-size-label);
+  margin-bottom: 1.25rem;
+}
+
+.expiredBanner .linkButton {
+  color: var(--app-error-text);
+  text-decoration: underline;
+  white-space: nowrap;
+}

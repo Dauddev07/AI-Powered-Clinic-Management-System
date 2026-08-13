@@ -31,6 +31,14 @@ export function resetPassword(email, otp, newPassword) {
   });
 }
 
+export function resendVerificationEmail(email) {
+  return apiFetch("/auth/resend-verification-email", { method: "POST", body: { email } });
+}
+
+export function verifyEmail(email, otp) {
+  return apiFetch("/auth/verify-email", { method: "POST", body: { email, otp } });
+}
+
 export function fetchPublicClinics() {
   return apiFetch("/clinics/public-list");
 }

@@ -148,6 +148,38 @@ def send_password_reset_otp_email(*, to: str, full_name: str, otp_code: str, ttl
     send_email(to=to, subject="Your QuickCheck Clinic verification code", html_body=html)
 
 
+def send_email_verification_otp_email(*, to: str, full_name: str, otp_code: str, ttl_minutes: int) -> None:
+    body = f"""\
+    <p style="margin:0 0 22px;text-align:center;">
+      Hi {full_name}, enter the code below to verify your email and finish setting
+      up your QuickCheck Clinic account. This code expires in
+      <strong>{ttl_minutes} minutes</strong>.
+    </p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;">
+      <tr>
+        <td align="center" style="background:{_ACCENT_SOFT};border:1.5px dashed {_ACCENT};border-radius:12px;padding:22px 0;">
+          <span style="font-family:'Courier New',monospace;font-size:32px;font-weight:700;letter-spacing:0.4em;color:{_ACCENT_DARK};">
+            {otp_code}
+          </span>
+        </td>
+      </tr>
+    </table>
+    <p style="margin:0 0 22px;text-align:center;font-size:12px;color:{_MUTED};">
+      This code can only be used once.
+    </p>
+    <p style="margin:0;font-size:13px;color:{_MUTED};border-top:1px solid {_BORDER};padding-top:16px;">
+      If you didn't create this account, you can safely ignore this email.
+    </p>
+    """
+    html = _layout(
+        preheader=f"Your verification code is {otp_code} — expires in {ttl_minutes} minutes.",
+        icon="✉️",
+        heading="Verify your email",
+        body_html=body,
+    )
+    send_email(to=to, subject="Verify your email for QuickCheck Clinic", html_body=html)
+
+
 def _feature_row(*, icon: str, text: str) -> str:
     return f"""\
     <tr>
