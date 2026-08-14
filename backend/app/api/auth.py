@@ -9,6 +9,8 @@ from app.api.deps import get_current_user
 from app.core.db import get_db
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.clinic import Clinic
+from app.models.email_verification_otp import EmailVerificationOtp
+from app.models.password_reset_otp import PasswordResetOtp
 from app.models.user import User
 from app.schemas.auth import (
     ChangePasswordRequest,
@@ -108,10 +110,39 @@ def register(payload: RegisterRequest, background_tasks: BackgroundTasks, db: Se
         )
     ).scalars().first()
     if existing_phone is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="This phone number is already registered at this clinic.",
+        if existing_phone.email_verified:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This phone number is already registered at this clinic.",
+            )
+
+        # Unverified account sitting on this phone number — e.g. a patient who
+        # typo'd their email on a first attempt and can never receive that code.
+        # Only reclaim the phone once any outstanding OTP for that stale account
+        # has actually expired, so an in-progress verification (valid code still
+        # sitting in the patient's real inbox) is never yanked out from under them.
+        latest_otp = db.execute(
+            select(EmailVerificationOtp)
+            .where(EmailVerificationOtp.user_id == existing_phone.id)
+            .order_by(EmailVerificationOtp.created_at.desc())
+        ).scalars().first()
+        if latest_otp is not None and latest_otp.expires_at > datetime.now(timezone.utc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This phone number has a pending, unverified registration. "
+                    "Please check that inbox and verify, or try again once the code expires."
+                ),
+            )
+
+        db.execute(
+            EmailVerificationOtp.__table__.delete().where(EmailVerificationOtp.user_id == existing_phone.id)
         )
+        db.execute(
+            PasswordResetOtp.__table__.delete().where(PasswordResetOtp.user_id == existing_phone.id)
+        )
+        db.delete(existing_phone)
+        db.commit()
 
     user = User(
         clinic_id=payload.clinic_id,
