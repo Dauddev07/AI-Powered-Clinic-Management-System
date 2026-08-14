@@ -291,7 +291,7 @@ def send_appointment_booked_email(
         """
         html = _layout(
             preheader=f"Confirmed: {doctor_name} on {when_text}.",
-            icon="📅",
+            icon="✅",
             heading="Appointment confirmed",
             body_html=body,
         )
