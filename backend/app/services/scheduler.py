@@ -3,21 +3,24 @@
 1. Slot regeneration — rolls the slot horizon forward on its own, so the rolling
    `SLOT_GENERATION_HORIZON_DAYS` window doesn't shrink by a day every day that passes
    without an admin action (CSV re-upload, block-date) to re-trigger it.
-2. Appointment auto-completion — flips 'confirmed' appointments whose slot has ended to
-   'completed' even if nobody ever hits an endpoint after the slot ends. Purely a
-   backstop: the lazy call at the top of the relevant endpoints (app/api/appointments.py)
-   still runs unchanged and catches everything the instant a screen is loaded.
+2. Appointment reminders — sends the 60m/30m/5m/starting-now reminder for whichever
+   appointments just came due.
 
-Both run on their own short, frequent interval rather than a single fixed daily tick —
-each is idempotent and cheap (a no-op tick just finds nothing to do), so there's no real
-cost to checking often, and it means neither job can fall behind by more than one
-interval no matter what: a missed exact moment (process down, laptop asleep through it,
-clock jump on wake) gets caught by the very next tick instead of waiting for the next
-fixed trigger time or an admin noticing and re-triggering it by hand.
+Appointments whose slot has ended are NOT auto-completed by a timer here — that status
+change now only happens via the patient's own explicit confirm-visit action (see
+app/services/booking_engine.confirm_visit), surfaced as a blocking prompt on their next
+visit to the site (app/api/appointments.py's /pending-confirmations).
+
+Both jobs run on their own short, frequent interval rather than a single fixed daily
+tick — each is idempotent and cheap (a no-op tick just finds nothing to do), so there's
+no real cost to checking often, and it means neither job can fall behind by more than
+one interval no matter what: a missed exact moment (process down, laptop asleep through
+it, clock jump on wake) gets caught by the very next tick instead of waiting for the
+next fixed trigger time or an admin noticing and re-triggering it by hand.
 
 Each job calls the exact same service-layer function used by its admin/API-triggered
-path (`regenerate_slots_for_clinic`, `auto_complete_past_appointments`) — a job here is
-only a scheduling trigger, never a second implementation of that logic.
+path (`regenerate_slots_for_clinic`) — a job here is only a scheduling trigger, never a
+second implementation of that logic.
 """
 import logging
 
@@ -30,7 +33,6 @@ from app.core.db import SessionLocal
 from app.models.audit_log import AuditLog
 from app.models.clinic import Clinic
 from app.services.appointment_reminders import send_due_reminders_for_clinic
-from app.services.appointments import auto_complete_past_appointments
 from app.services.slots import regenerate_slots_for_clinic
 
 logger = logging.getLogger(__name__)
@@ -88,49 +90,6 @@ def run_slot_regeneration_tick() -> None:
         db.close()
 
 
-def run_appointment_auto_complete_tick() -> None:
-    """Loops every active clinic and auto-completes any 'confirmed' appointment whose
-    slot has already ended. This only covers the gap when nobody hits an endpoint after
-    a slot ends — the lazy call at the top of the relevant endpoints (see
-    app/api/appointments.py) still guarantees freshness the instant someone loads a
-    screen; this tick is purely a backstop, not a replacement. Notifications for each
-    completed appointment are created inside auto_complete_past_appointments itself, not
-    here, so the lazy and scheduled paths both get one consistently.
-    """
-    db = SessionLocal()
-    try:
-        clinics = db.execute(select(Clinic).where(Clinic.is_active.is_(True))).scalars().all()
-        for clinic in clinics:
-            try:
-                completed = auto_complete_past_appointments(db, clinic.id)
-                # Only audit-logged when something actually changed — otherwise a
-                # 10-minute tick interval fills this table with all-zero rows for
-                # every clinic, all day, forever.
-                if completed:
-                    db.add(
-                        AuditLog(
-                            clinic_id=clinic.id,
-                            actor_user_id=None,
-                            action="scheduled_appointment_auto_complete",
-                            entity_type="clinic",
-                            entity_id=clinic.id,
-                            metadata_json={"completed": len(completed)},
-                        )
-                    )
-                db.commit()
-                if completed:
-                    logger.info(
-                        "scheduled_appointment_auto_complete clinic=%s completed=%d",
-                        clinic.id,
-                        len(completed),
-                    )
-            except Exception:
-                db.rollback()
-                logger.exception("scheduled_appointment_auto_complete failed for clinic=%s", clinic.id)
-    finally:
-        db.close()
-
-
 def run_appointment_reminder_tick() -> None:
     """Loops every active clinic and sends any appointment reminder (60m/30m/5m/
     starting-now) that's now due — see app.services.appointment_reminders for the
@@ -173,16 +132,6 @@ def start_scheduler() -> BackgroundScheduler:
         # previous tick ran long) still runs once rather than being skipped — a
         # skipped tick is exactly the silent-falling-behind failure mode this interval
         # approach exists to avoid.
-        misfire_grace_time=None,
-    )
-    scheduler.add_job(
-        run_appointment_auto_complete_tick,
-        trigger=IntervalTrigger(minutes=settings.APPOINTMENT_AUTO_COMPLETE_INTERVAL_MINUTES),
-        id="appointment_auto_complete_tick",
-        replace_existing=True,
-        # Same reasoning as the slot-regeneration job: a delayed tick still runs once
-        # rather than being skipped, so a sleeping/restarted process catches up instead
-        # of silently leaving stale 'confirmed' appointments until the next tick.
         misfire_grace_time=None,
     )
     scheduler.add_job(

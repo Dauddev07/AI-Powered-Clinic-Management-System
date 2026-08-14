@@ -33,7 +33,7 @@ const STATUS_LABEL = {
   in_progress: "In progress",
   completed: "Completed",
   cancelled: "Cancelled",
-  no_show: "No-show",
+  no_show: "Missed",
   expired: "Expired",
 };
 

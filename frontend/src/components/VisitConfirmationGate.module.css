@@ -1,0 +1,140 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200; /* above the shared Modal (100) — this must always win if both somehow overlap */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.content {
+  width: 100%;
+  max-width: min(460px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 1.75rem 1.5rem;
+  background: var(--app-bg-card);
+  color: var(--app-text-body);
+  border: 1px solid var(--app-border);
+  border-radius: 18px;
+  box-shadow: 0 20px 60px var(--app-shadow);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  margin: 0 auto 0.9rem;
+  border-radius: 50%;
+  background: var(--app-accent-bg, var(--app-neutral-bg));
+  color: var(--app-accent);
+}
+
+.title {
+  margin: 0 0 0.6rem;
+  font-size: var(--font-size-heading);
+  color: var(--app-text-title);
+}
+
+.detail {
+  margin: 0 0 0.5rem;
+  font-size: var(--font-size-body);
+  line-height: 1.55;
+  color: var(--app-text-body);
+}
+
+.queueNote {
+  margin: 0.5rem 0 0;
+  font-size: var(--font-size-caption);
+  color: var(--app-text-subtitle);
+}
+
+.error {
+  margin-top: 0.9rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 10px;
+  background: var(--app-error-bg);
+  color: var(--app-error-text);
+  font-size: var(--font-size-caption);
+  text-align: left;
+}
+
+.actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 1.4rem;
+}
+
+.confirmBtn {
+  padding: 0.7rem 1.3rem;
+  border-radius: 12px;
+  border: none;
+  background: var(--app-accent);
+  color: var(--app-bg-page);
+  font-size: var(--font-size-label);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.confirmBtn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.missedBtn {
+  padding: 0.7rem 1.3rem;
+  border-radius: 12px;
+  border: 1px solid var(--app-error-text);
+  background: none;
+  color: var(--app-error-text);
+  font-size: var(--font-size-label);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.missedBtn:hover:not(:disabled) {
+  background: var(--app-error-bg);
+}
+
+.backBtn {
+  padding: 0.7rem 1.3rem;
+  border-radius: 12px;
+  border: 1px solid var(--app-border);
+  background: none;
+  color: var(--app-text-body);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.backBtn:hover:not(:disabled) {
+  background: var(--app-neutral-bg);
+}
+
+.confirmBtn:disabled,
+.missedBtn:disabled,
+.backBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+  .actions {
+    flex-direction: column-reverse;
+  }
+
+  .confirmBtn,
+  .missedBtn,
+  .backBtn {
+    width: 100%;
+  }
+}

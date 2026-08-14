@@ -96,12 +96,6 @@ class Settings(BaseSettings):
     # by more than one interval, even across a missed tick.
     SLOT_REGENERATION_INTERVAL_MINUTES: int = 30
 
-    # How often the background job auto-completes past-end appointments (see
-    # app/services/scheduler.py). This only covers the gap when nobody hits an
-    # endpoint after a slot ends — the lazy per-request check still catches everything
-    # else immediately, so this interval doesn't need to be as tight as it sounds.
-    APPOINTMENT_AUTO_COMPLETE_INTERVAL_MINUTES: int = 10
-
     # How often the background job checks for due appointment reminders (60m/30m/5m/
     # starting-now — see app/services/appointment_reminders.py). Unlike the two
     # intervals above, these reminders are meant to fire at close to an exact offset

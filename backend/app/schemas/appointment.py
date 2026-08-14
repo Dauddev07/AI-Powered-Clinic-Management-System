@@ -13,6 +13,12 @@ class RescheduleRequest(BaseModel):
     new_slot_id: uuid.UUID
 
 
+class ConfirmVisitRequest(BaseModel):
+    # True: the patient confirms the visit happened -> status becomes 'completed'.
+    # False: the patient says they missed it -> status becomes 'no_show'.
+    completed: bool
+
+
 class AppointmentOut(BaseModel):
     id: uuid.UUID
     slot_id: uuid.UUID

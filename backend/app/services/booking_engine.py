@@ -30,7 +30,6 @@ from app.models.department import Department
 from app.models.doctor import Doctor
 from app.models.slot import Slot
 from app.schemas.appointment import AppointmentOut
-from app.services.appointments import auto_complete_past_appointments
 from app.services.notifications import create_notification, format_appointment_datetime
 
 DAILY_DEPARTMENT_BOOKING_CAP = 2
@@ -109,9 +108,6 @@ def book_appointment(
     reason: str | None = None,
     booked_via: str = "manual",
 ) -> Appointment:
-    auto_complete_past_appointments(db, clinic_id)
-    db.commit()
-
     # Row-level lock: a concurrent request for the same slot blocks here until this
     # transaction commits or rolls back, then re-reads the now-committed status —
     # so the loser sees a clean 409, never a double booking.
@@ -229,6 +225,41 @@ def cancel_appointment(db: Session, clinic_id: uuid.UUID, patient_id: uuid.UUID,
         ),
         related_appointment_id=appointment.id,
     )
+    db.commit()
+    db.refresh(appointment)
+    return appointment
+
+
+def confirm_visit(
+    db: Session, clinic_id: uuid.UUID, patient_id: uuid.UUID, appointment_id: uuid.UUID, completed: bool
+) -> Appointment:
+    """The patient's own answer to "did this visit happen?" — the only way a
+    'confirmed' appointment now leaves that status once its slot has ended (see
+    app/services/appointments.py's get_pending_visit_confirmations; nothing auto-flips
+    it on a timer anymore). `completed=True` means the visit happened, `False` means
+    the patient missed it — mapped to the pre-existing 'no_show' status rather than a
+    new one, since it already carries exactly that meaning and needs no schema change.
+    """
+    appointment = db.execute(
+        select(Appointment).where(
+            Appointment.id == appointment_id,
+            Appointment.clinic_id == clinic_id,
+            Appointment.patient_id == patient_id,
+        )
+    ).scalar_one_or_none()
+    if appointment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appointment not found.")
+
+    if appointment.status != "confirmed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="This appointment isn't awaiting confirmation."
+        )
+
+    slot = db.get(Slot, appointment.slot_id)
+    if slot.end_utc > datetime.now(timezone.utc):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This appointment hasn't ended yet.")
+
+    appointment.status = "completed" if completed else "no_show"
     db.commit()
     db.refresh(appointment)
     return appointment

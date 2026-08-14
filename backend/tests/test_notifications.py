@@ -172,37 +172,6 @@ def test_rescheduling_appointment_to_a_different_doctor_names_both_doctors(db, c
     assert other_doctor.full_name in message
 
 
-def test_lazy_auto_complete_creates_notification_without_the_scheduler_tick(db, clinic, patient, doctor):
-    # Reproduces a reported gap: an 'appointment_auto_completed' notification was only
-    # ever created by the scheduler's backstop tick (app/services/scheduler.py). In
-    # practice the lazy auto_complete_past_appointments call at the top of every
-    # relevant endpoint/tool almost always flips the appointment to 'completed' first,
-    # so by the time the tick ran there was nothing left for it to catch — most patients
-    # never got a completion notification at all. Now auto_complete_past_appointments
-    # itself creates the notification, so it fires on the lazy path too.
-    from app.services.appointments import auto_complete_past_appointments
-
-    slot = _future_slot(db, clinic, doctor, hours_from_now=-1)
-    slot.status = "booked"
-    appointment = Appointment(
-        clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id,
-        status="confirmed", booked_via="chatbot",
-    )
-    db.add(appointment)
-    db.flush()
-
-    auto_complete_past_appointments(db, clinic.id)
-
-    assert appointment.status == "completed"
-    notifications = (
-        db.query(Notification)
-        .filter(Notification.user_id == patient.id, Notification.type == "appointment_auto_completed")
-        .all()
-    )
-    assert len(notifications) == 1
-    assert doctor.full_name in notifications[0].message
-
-
 # --- API endpoints -------------------------------------------------------------
 
 def test_list_my_notifications_is_own_and_clinic_scoped_only(db, clinic, patient, other_patient):

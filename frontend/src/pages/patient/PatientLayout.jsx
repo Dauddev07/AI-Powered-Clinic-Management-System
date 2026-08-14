@@ -1,4 +1,5 @@
 import { Outlet, useLocation } from "react-router-dom";
+import VisitConfirmationGate from "../../components/VisitConfirmationGate";
 import styles from "./PatientLayout.module.css";
 
 // Navigation for the patient area lives in PrimaryNavDesktop (a row inside
@@ -15,10 +16,17 @@ export default function PatientLayout() {
   const isFullBleed = location.pathname.startsWith("/patient/chat");
 
   return (
-    <main className={`${styles.content} ${isFullBleed ? styles.contentFullBleed : ""}`}>
-      <div className={`${styles.contentInner} ${isFullBleed ? styles.contentInnerFullBleed : ""}`}>
-        <Outlet />
-      </div>
-    </main>
+    <>
+      {/* Checked once per patient-area mount, above everything else here — a patient
+          with an appointment past its slot end time and no answer yet can't interact
+          with any /patient/* screen until they resolve it (see the component itself
+          for why this isn't the shared, dismissible Modal). */}
+      <VisitConfirmationGate />
+      <main className={`${styles.content} ${isFullBleed ? styles.contentFullBleed : ""}`}>
+        <div className={`${styles.contentInner} ${isFullBleed ? styles.contentInnerFullBleed : ""}`}>
+          <Outlet />
+        </div>
+      </main>
+    </>
   );
 }

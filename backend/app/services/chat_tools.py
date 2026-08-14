@@ -513,10 +513,6 @@ def _get_my_appointments_impl(db: Session, ctx: ClinicContext, status_filter: st
     from sqlalchemy import select
 
     from app.models.appointment import Appointment
-    from app.services.appointments import auto_complete_past_appointments
-
-    auto_complete_past_appointments(db, ctx.clinic_id)
-    db.commit()
 
     now = datetime.now(timezone.utc)
     stmt = (

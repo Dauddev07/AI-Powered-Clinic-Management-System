@@ -16,10 +16,11 @@ from app.schemas.appointment import (
     AppointmentOut,
     AppointmentSummaryOut,
     BookAppointmentRequest,
+    ConfirmVisitRequest,
     RescheduleRequest,
 )
 from app.services import booking_engine
-from app.services.appointments import auto_complete_past_appointments
+from app.services.appointments import get_pending_visit_confirmations
 
 router = APIRouter(prefix="/appointments", tags=["appointments"])
 
@@ -47,9 +48,6 @@ def list_my_appointments(
     db: Session = Depends(get_db),
 ) -> AppointmentListOut:
     clinic_id = current_user.clinic_id
-    auto_complete_past_appointments(db, clinic_id)
-    db.commit()
-
     clinic = db.get(Clinic, clinic_id)
 
     stmt = (
@@ -63,6 +61,25 @@ def list_my_appointments(
         .order_by(Slot.start_utc.asc())
     )
     appointments = db.execute(stmt).scalars().all()
+    return AppointmentListOut(
+        clinic_timezone=clinic.timezone,
+        appointments=[booking_engine.serialize_appointment(db, a) for a in appointments],
+    )
+
+
+@router.get("/pending-confirmations", response_model=AppointmentListOut)
+def list_my_pending_confirmations(
+    current_user: User = Depends(require_role("patient")),
+    db: Session = Depends(get_db),
+) -> AppointmentListOut:
+    """Appointments whose slot has ended but the patient hasn't yet said whether the
+    visit happened — the frontend blocks the rest of the app behind this list until
+    it's empty (see PatientLayout.jsx), oldest first so a patient who's been away
+    works through them in order.
+    """
+    clinic_id = current_user.clinic_id
+    clinic = db.get(Clinic, clinic_id)
+    appointments = get_pending_visit_confirmations(db, clinic_id, current_user.id)
     return AppointmentListOut(
         clinic_timezone=clinic.timezone,
         appointments=[booking_engine.serialize_appointment(db, a) for a in appointments],
@@ -88,9 +105,6 @@ def list_my_appointment_history(
     recently to my appointments."
     """
     clinic_id = current_user.clinic_id
-    auto_complete_past_appointments(db, clinic_id)
-    db.commit()
-
     clinic = db.get(Clinic, clinic_id)
 
     resolved_at = func.coalesce(Appointment.cancelled_at, Slot.end_utc)
@@ -124,9 +138,6 @@ def get_my_appointment_summary(
     more wasteful the longer they've been a patient here.
     """
     clinic_id = current_user.clinic_id
-    auto_complete_past_appointments(db, clinic_id)
-    db.commit()
-
     clinic = db.get(Clinic, clinic_id)
 
     counts = dict(
@@ -169,6 +180,23 @@ def cancel_appointment(
 ) -> AppointmentOut:
     appointment = booking_engine.cancel_appointment(
         db, clinic_id=current_user.clinic_id, patient_id=current_user.id, appointment_id=appointment_id
+    )
+    return booking_engine.serialize_appointment(db, appointment)
+
+
+@router.post("/{appointment_id}/confirm-visit", response_model=AppointmentOut)
+def confirm_visit(
+    appointment_id: uuid.UUID,
+    payload: ConfirmVisitRequest,
+    current_user: User = Depends(require_role("patient")),
+    db: Session = Depends(get_db),
+) -> AppointmentOut:
+    appointment = booking_engine.confirm_visit(
+        db,
+        clinic_id=current_user.clinic_id,
+        patient_id=current_user.id,
+        appointment_id=appointment_id,
+        completed=payload.completed,
     )
     return booking_engine.serialize_appointment(db, appointment)
 

@@ -5,7 +5,6 @@ import pytest
 from sqlalchemy import select
 
 from app.models.appointment import Appointment
-from app.models.audit_log import AuditLog
 from app.models.clinic import Clinic
 from app.models.department import Department
 from app.models.doctor import Doctor
@@ -32,94 +31,6 @@ def use_test_session_for_scheduler(db, monkeypatch):
     everything at teardown, real seeded-clinic data included."""
     monkeypatch.setattr(scheduler_module, "SessionLocal", lambda: db)
     monkeypatch.setattr(db, "close", lambda: None)
-
-
-def _ended_appointment(db, clinic):
-    dept = Department(clinic_id=clinic.id, name="Cardiology")
-    db.add(dept)
-    db.flush()
-
-    doctor = Doctor(
-        clinic_id=clinic.id, department_id=dept.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:6]}",
-        full_name="Dr. Jane Example", is_active=True,
-    )
-    db.add(doctor)
-    db.flush()
-
-    patient = User(
-        clinic_id=clinic.id, role="patient", email=f"{uuid.uuid4().hex}@example.com",
-        hashed_password="x", full_name="Pat Ient",
-    )
-    db.add(patient)
-    db.flush()
-
-    now = datetime.now(timezone.utc)
-    slot = Slot(clinic_id=clinic.id, doctor_id=doctor.id, start_utc=now - timedelta(hours=1), end_utc=now - timedelta(minutes=30))
-    db.add(slot)
-    db.flush()
-
-    appointment = Appointment(clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id, status="confirmed")
-    db.add(appointment)
-    db.flush()
-    return appointment
-
-
-def test_noop_tick_does_not_add_audit_log_row(db, clinic, use_test_session_for_scheduler):
-    scheduler_module.run_appointment_auto_complete_tick()
-
-    logs = db.execute(select(AuditLog).where(AuditLog.clinic_id == clinic.id)).scalars().all()
-    assert logs == []
-
-
-def test_tick_completes_ended_appointment_with_no_endpoint_call_and_logs_audit(db, clinic, use_test_session_for_scheduler):
-    appointment = _ended_appointment(db, clinic)
-
-    scheduler_module.run_appointment_auto_complete_tick()
-
-    db.refresh(appointment)
-    assert appointment.status == "completed"
-
-    logs = db.execute(
-        select(AuditLog).where(
-            AuditLog.clinic_id == clinic.id, AuditLog.action == "scheduled_appointment_auto_complete"
-        )
-    ).scalars().all()
-    assert len(logs) == 1
-    assert logs[0].metadata_json == {"completed": 1}
-
-
-def test_inactive_clinic_is_skipped(db, clinic, use_test_session_for_scheduler):
-    clinic.is_active = False
-    db.flush()
-    appointment = _ended_appointment(db, clinic)
-
-    scheduler_module.run_appointment_auto_complete_tick()
-
-    db.refresh(appointment)
-    assert appointment.status == "confirmed"
-
-
-def test_tick_creates_auto_completed_notification_for_the_patient(db, clinic, use_test_session_for_scheduler):
-    from app.models.notification import Notification
-
-    appointment = _ended_appointment(db, clinic)
-
-    scheduler_module.run_appointment_auto_complete_tick()
-
-    notifications = (
-        db.execute(
-            select(Notification).where(
-                Notification.clinic_id == clinic.id,
-                Notification.user_id == appointment.patient_id,
-                Notification.type == "appointment_auto_completed",
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert len(notifications) == 1
-    assert notifications[0].related_appointment_id == appointment.id
-    assert notifications[0].read_at is None
 
 
 def _upcoming_appointment(db, clinic, *, starts_in):

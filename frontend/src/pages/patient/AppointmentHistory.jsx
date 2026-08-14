@@ -11,12 +11,15 @@ import styles from "./PatientScreens.module.css";
 import historyStyles from "./AppointmentHistory.module.css";
 
 // tone/label drive StatusBadge; nodeTone/cardTone pick the timeline dot + card
-// accent color family — cancelled and no-show share the same "error" family
-// (both mean the visit never happened) while expired is a neutral non-outcome.
+// accent color family — cancelled and missed (no_show) share the same "error"
+// family (both mean the visit never happened) while expired is a neutral
+// non-outcome. "no_show" is the status value stored in the DB (see
+// app/services/booking_engine.confirm_visit) but "Missed" is what the patient
+// actually sees — it's what they answer in the visit-confirmation prompt.
 const STATUS_META = {
   completed: { tone: "success", label: "Completed", accent: "success" },
   cancelled: { tone: "error", label: "Cancelled", accent: "error" },
-  no_show: { tone: "error", label: "No-show", accent: "error" },
+  no_show: { tone: "error", label: "Missed", accent: "error" },
   expired: { tone: "neutral", label: "Expired", accent: "neutral" },
 };
 
@@ -86,13 +89,15 @@ function resolvedAtFor(appointment) {
   return appointment.updated_at;
 }
 
-// No "No-show" or "Expired" filters: nothing in the system sets either status
-// anymore (see app/models/appointment.py) — not worth a filter chip for a status
-// that can no longer occur.
+// No "Expired" filter: nothing in the system sets that status anymore (see
+// app/models/appointment.py) — not worth a filter chip for a status that can no
+// longer occur. "Missed" (no_show), however, is now a real, patient-driven outcome
+// (see VisitConfirmationGate) and does get its own chip.
 const FILTERS = [
   { key: "all", label: "All" },
   { key: "completed", label: "Completed" },
   { key: "cancelled", label: "Cancelled" },
+  { key: "no_show", label: "Missed" },
 ];
 
 export default function AppointmentHistory() {

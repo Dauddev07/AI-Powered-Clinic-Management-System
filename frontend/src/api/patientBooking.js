@@ -57,3 +57,15 @@ export function rescheduleAppointment(appointmentId, newSlotId) {
     body: { new_slot_id: newSlotId },
   });
 }
+
+export function fetchPendingVisitConfirmations() {
+  return apiFetch("/appointments/pending-confirmations", { auth: true });
+}
+
+export function confirmVisit(appointmentId, completed) {
+  return apiFetch(`/appointments/${appointmentId}/confirm-visit`, {
+    method: "POST",
+    auth: true,
+    body: { completed },
+  });
+}

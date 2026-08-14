@@ -12,11 +12,13 @@ from app.core.db import Base
 class Appointment(Base):
     """Status values: 'confirmed' is the one active/"booked" state — it's what the
     partial unique index keys off and what patient-overlap/cancellation rules check
-    against. 'completed' is set automatically (app.services.appointments.
-    auto_complete_past_appointments) the moment a 'confirmed' appointment's slot end_utc
-    passes — no manual admin marking step. 'cancelled' is the patient-initiated final
-    state. 'no_show'/'expired' remain valid per the CHECK constraint for any historical
-    rows but nothing in the system sets them anymore.
+    against. Once a 'confirmed' appointment's slot end_utc passes, it stays 'confirmed'
+    until the patient explicitly answers a blocking "did this visit happen?" prompt on
+    their next visit to the site (app.services.booking_engine.confirm_visit, surfaced via
+    app.services.appointments.get_pending_visit_confirmations) — nothing flips it on a
+    timer. That answer sets it to 'completed' (visit happened) or 'no_show' (patient says
+    they missed it). 'cancelled' is the patient-initiated final state. 'expired' remains
+    valid per the CHECK constraint for any historical rows but nothing sets it anymore.
     """
 
     __tablename__ = "appointments"
