@@ -9,7 +9,7 @@ endpoint on mount and renders it as a synthetic first bubble, before any real me
 has been sent.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -21,7 +21,6 @@ from app.models.appointment_feedback import AppointmentFeedback
 from app.models.clinic import Clinic
 from app.models.doctor import Doctor
 from app.models.slot import Slot
-from app.models.user import User
 
 _MAX_PENDING_APPOINTMENTS = 1
 

@@ -23,7 +23,6 @@ from app.schemas.doctor_csv import (
     DeactivationSkippedOut,
     HeaderSuggestionOut,
     IngestionLogListOut,
-    IngestionLogOut,
     RejectedRowOut,
 )
 from app.services.doctor_csv import (
