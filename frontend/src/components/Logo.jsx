@@ -22,6 +22,10 @@ export default function Logo({ size = "md", wrap = false, compact = false }) {
         compact ? styles.compact : ""
       }`}
     >
+      {/* One continuous stroke, not two separate glyphs: a heartbeat trace that
+          rises straight into a checkmark's long stroke, so "pulse" (clinic) and
+          "check" (quick, confirmed) read as a single unbroken gesture rather than
+          a pulse icon and a check icon awkwardly sharing one circle. */}
       <svg
         className={styles.glyph}
         viewBox="0 0 24 24"
@@ -32,10 +36,10 @@ export default function Logo({ size = "md", wrap = false, compact = false }) {
       >
         <circle cx="12" cy="12" r="11" fill="var(--app-accent)" />
         <path
-          d="M5.5 12.5L9 16l3.2-4.2M12.5 12h2.5l1.3-3 1.4 6 1.3-3H21"
+          d="M5 12.5h3.3l2-5.3 2.4 9.8L20 7.5"
           fill="none"
           stroke="var(--app-accent-text)"
-          strokeWidth="1.6"
+          strokeWidth="1.7"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
