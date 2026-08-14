@@ -216,10 +216,11 @@ def test_rescheduling_appointment_sends_a_reschedule_email(db, clinic, patient, 
 
     assert len(sent) == 1
     assert sent[0]["to"] == patient.email
-    assert sent[0]["doctor_changed"] is False
+    assert sent[0]["old_doctor_name"] == doctor.full_name
+    assert sent[0]["new_doctor_name"] == doctor.full_name
 
 
-def test_rescheduling_to_a_different_doctor_flags_doctor_changed_in_the_email(
+def test_rescheduling_to_a_different_doctor_names_both_doctors_in_the_email(
     db, clinic, patient, doctor, other_doctor, monkeypatch
 ):
     sent = []
@@ -233,7 +234,6 @@ def test_rescheduling_to_a_different_doctor_flags_doctor_changed_in_the_email(
     )
 
     assert len(sent) == 1
-    assert sent[0]["doctor_changed"] is True
     assert sent[0]["old_doctor_name"] == doctor.full_name
     assert sent[0]["new_doctor_name"] == other_doctor.full_name
 

@@ -413,15 +413,13 @@ def reschedule_appointment(
 
     patient = db.get(User, patient_id)
     if patient is not None:
-        doctor_changed = old_doctor is not None and old_doctor.id != new_doctor.id
         send_appointment_rescheduled_email(
             to=patient.email,
             full_name=patient.full_name,
+            old_doctor_name=old_doctor.full_name if old_doctor is not None else "your previous doctor",
             old_when_text=format_appointment_datetime(old_slot.start_utc, clinic.timezone),
             new_doctor_name=new_doctor.full_name,
             new_when_text=format_appointment_datetime(new_slot.start_utc, clinic.timezone),
-            doctor_changed=doctor_changed,
-            old_doctor_name=old_doctor.full_name if old_doctor is not None else None,
         )
 
     return appointment

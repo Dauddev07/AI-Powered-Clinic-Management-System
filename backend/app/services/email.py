@@ -329,16 +329,18 @@ def send_appointment_rescheduled_email(
     *,
     to: str,
     full_name: str,
+    old_doctor_name: str,
     old_when_text: str,
     new_doctor_name: str,
     new_when_text: str,
-    doctor_changed: bool,
-    old_doctor_name: str | None = None,
 ) -> None:
     def _send() -> None:
+        # Doctor name is always shown alongside the time, even when it's the same
+        # doctor for both — a patient scanning just the From/To rows shouldn't have
+        # to infer "same doctor" from its absence.
         rows = (
-            _detail_row(label="From", value=f"{old_doctor_name} — {old_when_text}" if doctor_changed else old_when_text)
-            + _detail_row(label="To", value=f"{new_doctor_name} — {new_when_text}" if doctor_changed else new_when_text)
+            _detail_row(label="From", value=f"{old_doctor_name} — {old_when_text}")
+            + _detail_row(label="To", value=f"{new_doctor_name} — {new_when_text}")
         )
         body = f"""\
         <p style="margin:0 0 20px;text-align:center;">
