@@ -46,6 +46,10 @@
   border-left-color: var(--app-neutral-border);
 }
 
+.statTile.warning {
+  border-left-color: var(--app-warning-border);
+}
+
 .statValue {
   font-size: calc(var(--font-size-title) * 0.85);
   font-weight: 700;
@@ -228,6 +232,12 @@
   background: var(--app-neutral-bg);
 }
 
+.node.warning {
+  border-color: var(--app-warning-border);
+  color: var(--app-warning-text);
+  background: var(--app-warning-bg);
+}
+
 .card {
   flex: 1;
   min-width: 0;
@@ -257,6 +267,10 @@
 
 .card.neutral {
   border-left-color: var(--app-neutral-border);
+}
+
+.card.warning {
+  border-left-color: var(--app-warning-border);
 }
 
 .cardTop {
@@ -351,4 +365,22 @@
   color: var(--app-success-text);
   font-size: var(--font-size-caption);
   font-weight: 600;
+}
+
+.missedNote {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--app-warning-bg);
+  border: 1px solid var(--app-warning-border);
+  border-radius: 10px;
+  color: var(--app-warning-text);
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+}
+
+.missedNote svg {
+  flex: none;
 }

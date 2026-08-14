@@ -11,15 +11,16 @@ import styles from "./PatientScreens.module.css";
 import historyStyles from "./AppointmentHistory.module.css";
 
 // tone/label drive StatusBadge; nodeTone/cardTone pick the timeline dot + card
-// accent color family — cancelled and missed (no_show) share the same "error"
-// family (both mean the visit never happened) while expired is a neutral
-// non-outcome. "no_show" is the status value stored in the DB (see
+// accent color family. Missed (no_show) gets its own "warning" (amber) family,
+// distinct from cancelled's "error" (red) — a patient-initiated cancellation and
+// a no-show are different outcomes and used to be visually identical here.
+// "no_show" is the status value stored in the DB (see
 // app/services/booking_engine.confirm_visit) but "Missed" is what the patient
 // actually sees — it's what they answer in the visit-confirmation prompt.
 const STATUS_META = {
   completed: { tone: "success", label: "Completed", accent: "success" },
   cancelled: { tone: "error", label: "Cancelled", accent: "error" },
-  no_show: { tone: "error", label: "Missed", accent: "error" },
+  no_show: { tone: "warning", label: "Missed", accent: "warning" },
   expired: { tone: "neutral", label: "Expired", accent: "neutral" },
 };
 
@@ -65,10 +66,21 @@ function HistoryNodeIcon({ status }) {
       </svg>
     );
   }
-  if (status === "cancelled" || status === "no_show") {
+  if (status === "cancelled") {
     return (
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M18 6 6 18M6 6l12 12" />
+      </svg>
+    );
+  }
+  if (status === "no_show") {
+    // A clock with a strike-through — reads as "the time passed, unattended",
+    // distinct at a glance from cancelled's plain X.
+    return (
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 7.5v4l2.3 1.4" />
+        <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+        <path d="M4.5 4.5l15 15" />
       </svg>
     );
   }
@@ -79,14 +91,18 @@ function HistoryNodeIcon({ status }) {
   );
 }
 
-// Cancelled: cancelled_at is the exact instant the patient (or clinic) cancelled it.
-// Completed: the appointment's own scheduled end_utc — the visit's real date/time —
-// rather than updated_at, which only reflects whenever the lazy auto-complete job
-// happened to run and flip the status, not when the visit itself actually happened.
+// Cancelled: cancelled_at is the exact instant the patient (or clinic) cancelled it —
+// a genuinely distinct, useful second timestamp, so it's shown alongside the slot
+// time. Completed: the appointment's own scheduled end_utc — the visit's real
+// date/time. Missed (no_show) has no second timestamp shown at all: updated_at is
+// just whenever the patient happened to answer the visit-confirmation prompt, not
+// anything about the appointment itself, so showing it next to the slot time as
+// "Missed at <answered-at time>" was actively misleading — it looked like the slot
+// time itself, just wrong.
 function resolvedAtFor(appointment) {
   if (appointment.status === "cancelled" && appointment.cancelled_at) return appointment.cancelled_at;
   if (appointment.status === "completed") return appointment.end_utc;
-  return appointment.updated_at;
+  return null;
 }
 
 // No "Expired" filter: nothing in the system sets that status anymore (see
@@ -157,6 +173,7 @@ export default function AppointmentHistory() {
             {[
               { key: "completed", label: "Completed", accent: "success" },
               { key: "cancelled", label: "Cancelled", accent: "error" },
+              { key: "no_show", label: "Missed", accent: "warning" },
             ]
               .filter((tile) => statusCounts[tile.key] > 0)
               .map((tile) => (
@@ -227,9 +244,13 @@ export default function AppointmentHistory() {
                         <div className={historyStyles.whenRow}>
                           <CalendarIcon />
                           <span>{formatDateTime(a.start_utc, clinicTimezone)}</span>
-                          <span className={historyStyles.relativeTime}>
-                            {meta.label} {formatDateTime(resolvedAtFor(a), clinicTimezone)}
-                          </span>
+                          {resolvedAtFor(a) ? (
+                            <span className={historyStyles.relativeTime}>
+                              {meta.label} {formatDateTime(resolvedAtFor(a), clinicTimezone)}
+                            </span>
+                          ) : (
+                            <span className={historyStyles.relativeTime}>{meta.label}</span>
+                          )}
                         </div>
 
                         {a.reason && <div className={historyStyles.reason}>{a.reason}</div>}
@@ -238,6 +259,16 @@ export default function AppointmentHistory() {
                           <div className={historyStyles.completedNote}>
                             <SuccessCheck />
                             Visit completed — thanks for visiting!
+                          </div>
+                        )}
+
+                        {a.status === "no_show" && (
+                          <div className={historyStyles.missedNote}>
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M12 9v4M12 16.5h.01" />
+                              <path d="M10.3 3.9 1.9 18.3a1.5 1.5 0 0 0 1.3 2.2h17.6a1.5 1.5 0 0 0 1.3-2.2L13.7 3.9a1.5 1.5 0 0 0-2.6 0Z" />
+                            </svg>
+                            Marked as missed — you can book a new appointment anytime.
                           </div>
                         )}
                       </div>
