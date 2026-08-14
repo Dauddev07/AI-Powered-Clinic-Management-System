@@ -172,6 +172,72 @@ def test_rescheduling_appointment_to_a_different_doctor_names_both_doctors(db, c
     assert other_doctor.full_name in message
 
 
+# --- booking_engine email triggers --------------------------------------------------
+# Emails are fired off a background thread (see app.services.email._send_in_background)
+# rather than via FastAPI's BackgroundTasks — booking_engine is shared by the REST API
+# AND the chatbot's tool-calling path, only one of which has BackgroundTasks available.
+# monkeypatching the send_* wrapper itself (rather than the low-level send_email) lets
+# these tests assert on the exact recipient/content without waiting on/joining a thread.
+
+def test_booking_appointment_sends_a_confirmation_email(db, clinic, patient, doctor, monkeypatch):
+    sent = []
+    monkeypatch.setattr(booking_engine, "send_appointment_booked_email", lambda **kwargs: sent.append(kwargs))
+    slot = _future_slot(db, clinic, doctor)
+
+    booking_engine.book_appointment(db, clinic_id=clinic.id, patient_id=patient.id, slot_id=slot.id)
+
+    assert len(sent) == 1
+    assert sent[0]["to"] == patient.email
+    assert sent[0]["doctor_name"] == doctor.full_name
+
+
+def test_cancelling_appointment_sends_a_cancellation_email(db, clinic, patient, doctor, monkeypatch):
+    sent = []
+    monkeypatch.setattr(booking_engine, "send_appointment_cancelled_email", lambda **kwargs: sent.append(kwargs))
+    slot = _future_slot(db, clinic, doctor)
+    appointment = booking_engine.book_appointment(db, clinic_id=clinic.id, patient_id=patient.id, slot_id=slot.id)
+
+    booking_engine.cancel_appointment(db, clinic_id=clinic.id, patient_id=patient.id, appointment_id=appointment.id)
+
+    assert len(sent) == 1
+    assert sent[0]["to"] == patient.email
+
+
+def test_rescheduling_appointment_sends_a_reschedule_email(db, clinic, patient, doctor, monkeypatch):
+    sent = []
+    monkeypatch.setattr(booking_engine, "send_appointment_rescheduled_email", lambda **kwargs: sent.append(kwargs))
+    slot = _future_slot(db, clinic, doctor, hours_from_now=72)
+    new_slot = _future_slot(db, clinic, doctor, hours_from_now=96)
+    appointment = booking_engine.book_appointment(db, clinic_id=clinic.id, patient_id=patient.id, slot_id=slot.id)
+
+    booking_engine.reschedule_appointment(
+        db, clinic_id=clinic.id, patient_id=patient.id, appointment_id=appointment.id, new_slot_id=new_slot.id,
+    )
+
+    assert len(sent) == 1
+    assert sent[0]["to"] == patient.email
+    assert sent[0]["doctor_changed"] is False
+
+
+def test_rescheduling_to_a_different_doctor_flags_doctor_changed_in_the_email(
+    db, clinic, patient, doctor, other_doctor, monkeypatch
+):
+    sent = []
+    monkeypatch.setattr(booking_engine, "send_appointment_rescheduled_email", lambda **kwargs: sent.append(kwargs))
+    slot = _future_slot(db, clinic, doctor, hours_from_now=72)
+    new_slot = _future_slot(db, clinic, other_doctor, hours_from_now=96)
+    appointment = booking_engine.book_appointment(db, clinic_id=clinic.id, patient_id=patient.id, slot_id=slot.id)
+
+    booking_engine.reschedule_appointment(
+        db, clinic_id=clinic.id, patient_id=patient.id, appointment_id=appointment.id, new_slot_id=new_slot.id,
+    )
+
+    assert len(sent) == 1
+    assert sent[0]["doctor_changed"] is True
+    assert sent[0]["old_doctor_name"] == doctor.full_name
+    assert sent[0]["new_doctor_name"] == other_doctor.full_name
+
+
 # --- API endpoints -------------------------------------------------------------
 
 def test_list_my_notifications_is_own_and_clinic_scoped_only(db, clinic, patient, other_patient):

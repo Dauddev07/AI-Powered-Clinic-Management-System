@@ -96,10 +96,10 @@ class Settings(BaseSettings):
     # by more than one interval, even across a missed tick.
     SLOT_REGENERATION_INTERVAL_MINUTES: int = 30
 
-    # How often the background job checks for due appointment reminders (60m/30m/5m/
-    # starting-now — see app/services/appointment_reminders.py). Unlike the two
-    # intervals above, these reminders are meant to fire at close to an exact offset
-    # from the appointment's start time, not "eventually" — a 1-minute tick keeps the
+    # How often the background job checks for the due 60-minutes-before appointment
+    # reminder (see app/services/appointment_reminders.py). Unlike the slot-regeneration
+    # interval above, this reminder is meant to fire at close to an exact offset from
+    # the appointment's start time, not "eventually" — a 1-minute tick keeps the
     # worst-case lateness under a minute.
     APPOINTMENT_REMINDER_INTERVAL_MINUTES: int = 1
 

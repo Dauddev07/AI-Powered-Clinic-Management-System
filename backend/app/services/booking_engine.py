@@ -29,7 +29,13 @@ from app.models.clinic import Clinic
 from app.models.department import Department
 from app.models.doctor import Doctor
 from app.models.slot import Slot
+from app.models.user import User
 from app.schemas.appointment import AppointmentOut
+from app.services.email import (
+    send_appointment_booked_email,
+    send_appointment_cancelled_email,
+    send_appointment_rescheduled_email,
+)
 from app.services.notifications import create_notification, format_appointment_datetime
 
 DAILY_DEPARTMENT_BOOKING_CAP = 2
@@ -179,6 +185,19 @@ def book_appointment(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This slot is no longer available.")
 
     db.refresh(appointment)
+
+    # Only sent once the commit above has actually succeeded — an email for a booking
+    # that got rolled back (e.g. lost the slot race) would be actively misleading.
+    patient = db.get(User, patient_id)
+    if patient is not None:
+        send_appointment_booked_email(
+            to=patient.email,
+            full_name=patient.full_name,
+            doctor_name=doctor.full_name,
+            department_name=department.name,
+            when_text=format_appointment_datetime(slot.start_utc, clinic.timezone),
+        )
+
     return appointment
 
 
@@ -227,6 +246,16 @@ def cancel_appointment(db: Session, clinic_id: uuid.UUID, patient_id: uuid.UUID,
     )
     db.commit()
     db.refresh(appointment)
+
+    patient = db.get(User, patient_id)
+    if patient is not None:
+        send_appointment_cancelled_email(
+            to=patient.email,
+            full_name=patient.full_name,
+            doctor_name=doctor.full_name,
+            when_text=format_appointment_datetime(slot.start_utc, clinic.timezone),
+        )
+
     return appointment
 
 
@@ -381,4 +410,18 @@ def reschedule_appointment(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This slot is no longer available.")
 
     db.refresh(appointment)
+
+    patient = db.get(User, patient_id)
+    if patient is not None:
+        doctor_changed = old_doctor is not None and old_doctor.id != new_doctor.id
+        send_appointment_rescheduled_email(
+            to=patient.email,
+            full_name=patient.full_name,
+            old_when_text=format_appointment_datetime(old_slot.start_utc, clinic.timezone),
+            new_doctor_name=new_doctor.full_name,
+            new_when_text=format_appointment_datetime(new_slot.start_utc, clinic.timezone),
+            doctor_changed=doctor_changed,
+            old_doctor_name=old_doctor.full_name if old_doctor is not None else None,
+        )
+
     return appointment

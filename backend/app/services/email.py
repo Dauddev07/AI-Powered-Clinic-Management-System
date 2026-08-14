@@ -9,6 +9,7 @@ Called from a FastAPI BackgroundTask (see app/api/auth.py) so the HTTP round-tri
 never adds latency to the request that triggered it.
 """
 import logging
+import threading
 from datetime import datetime, timezone
 
 import httpx
@@ -16,6 +17,19 @@ import httpx
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _send_in_background(target, /, *args, **kwargs) -> None:
+    """Fires an email off a daemon thread rather than blocking the caller — used by
+    the appointment lifecycle emails below, which (unlike the OTP/welcome emails)
+    are triggered from app.services.booking_engine and app.services.
+    appointment_reminders: shared service-layer code called both from a FastAPI
+    request (which has BackgroundTasks available) AND from the chatbot's tool-calling
+    path and the scheduler's background tick (neither of which do). A plain thread
+    works uniformly in all three, at the cost of no built-in retry/backoff — same
+    best-effort tradeoff send_email() below already makes for its own failures.
+    """
+    threading.Thread(target=target, args=args, kwargs=kwargs, daemon=True).start()
 
 _BREVO_SEND_URL = "https://api.brevo.com/v3/smtp/email"
 
@@ -246,3 +260,131 @@ def send_welcome_email(*, to: str, full_name: str) -> None:
         body_html=body,
     )
     send_email(to=to, subject="Welcome to QuickCheck Clinic", html_body=html)
+
+
+def _detail_row(*, label: str, value: str) -> str:
+    return f"""\
+    <tr>
+      <td style="padding:6px 0;font-size:13px;color:{_MUTED};width:110px;">{label}</td>
+      <td style="padding:6px 0;font-size:14px;color:{_INK};font-weight:600;">{value}</td>
+    </tr>
+    """
+
+
+def send_appointment_booked_email(
+    *, to: str, full_name: str, doctor_name: str, department_name: str, when_text: str
+) -> None:
+    def _send() -> None:
+        body = f"""\
+        <p style="margin:0 0 20px;text-align:center;">
+          Hi {full_name}, your appointment is confirmed.
+        </p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:{_SURFACE};border-radius:12px;padding:16px 20px;">
+          {_detail_row(label="Doctor", value=doctor_name)}
+          {_detail_row(label="Department", value=department_name)}
+          {_detail_row(label="When", value=when_text)}
+        </table>
+        <p style="margin:0;font-size:13px;color:{_MUTED};border-top:1px solid {_BORDER};padding-top:16px;">
+          Need to make a change? You can reschedule or cancel anytime from your
+          Upcoming Appointments page.
+        </p>
+        """
+        html = _layout(
+            preheader=f"Confirmed: {doctor_name} on {when_text}.",
+            icon="📅",
+            heading="Appointment confirmed",
+            body_html=body,
+        )
+        send_email(to=to, subject="Your QuickCheck Clinic appointment is confirmed", html_body=html)
+
+    _send_in_background(_send)
+
+
+def send_appointment_cancelled_email(*, to: str, full_name: str, doctor_name: str, when_text: str) -> None:
+    def _send() -> None:
+        body = f"""\
+        <p style="margin:0 0 20px;text-align:center;">
+          Hi {full_name}, your appointment has been cancelled.
+        </p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:{_SURFACE};border-radius:12px;padding:16px 20px;">
+          {_detail_row(label="Doctor", value=doctor_name)}
+          {_detail_row(label="Was set for", value=when_text)}
+        </table>
+        <p style="margin:0;font-size:13px;color:{_MUTED};border-top:1px solid {_BORDER};padding-top:16px;">
+          Changed your mind? You can book a new appointment anytime from Book Appointment.
+        </p>
+        """
+        html = _layout(
+            preheader=f"Cancelled: {doctor_name} on {when_text}.",
+            icon="✖️",
+            heading="Appointment cancelled",
+            body_html=body,
+        )
+        send_email(to=to, subject="Your QuickCheck Clinic appointment was cancelled", html_body=html)
+
+    _send_in_background(_send)
+
+
+def send_appointment_rescheduled_email(
+    *,
+    to: str,
+    full_name: str,
+    old_when_text: str,
+    new_doctor_name: str,
+    new_when_text: str,
+    doctor_changed: bool,
+    old_doctor_name: str | None = None,
+) -> None:
+    def _send() -> None:
+        rows = (
+            _detail_row(label="From", value=f"{old_doctor_name} — {old_when_text}" if doctor_changed else old_when_text)
+            + _detail_row(label="To", value=f"{new_doctor_name} — {new_when_text}" if doctor_changed else new_when_text)
+        )
+        body = f"""\
+        <p style="margin:0 0 20px;text-align:center;">
+          Hi {full_name}, your appointment has been rescheduled.
+        </p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:{_SURFACE};border-radius:12px;padding:16px 20px;">
+          {rows}
+        </table>
+        <p style="margin:0;font-size:13px;color:{_MUTED};border-top:1px solid {_BORDER};padding-top:16px;">
+          Need to make another change? You can reschedule or cancel anytime from your
+          Upcoming Appointments page.
+        </p>
+        """
+        html = _layout(
+            preheader=f"Rescheduled to {new_when_text}.",
+            icon="🔁",
+            heading="Appointment rescheduled",
+            body_html=body,
+        )
+        send_email(to=to, subject="Your QuickCheck Clinic appointment was rescheduled", html_body=html)
+
+    _send_in_background(_send)
+
+
+def send_appointment_reminder_email(*, to: str, full_name: str, doctor_name: str, when_text: str) -> None:
+    def _send() -> None:
+        body = f"""\
+        <p style="margin:0 0 20px;text-align:center;">
+          Hi {full_name}, this is a reminder that your appointment with
+          <strong>{doctor_name}</strong> is coming up in about <strong>1 hour</strong>.
+        </p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:{_SURFACE};border-radius:12px;padding:16px 20px;">
+          {_detail_row(label="Doctor", value=doctor_name)}
+          {_detail_row(label="When", value=when_text)}
+        </table>
+        <p style="margin:0;font-size:13px;color:{_MUTED};border-top:1px solid {_BORDER};padding-top:16px;">
+          Running late or can't make it? You can reschedule or cancel from your Upcoming
+          Appointments page.
+        </p>
+        """
+        html = _layout(
+            preheader=f"Reminder: {doctor_name} in about 1 hour ({when_text}).",
+            icon="⏰",
+            heading="Your appointment is in 1 hour",
+            body_html=body,
+        )
+        send_email(to=to, subject="Reminder: your QuickCheck Clinic appointment is in 1 hour", html_body=html)
+
+    _send_in_background(_send)

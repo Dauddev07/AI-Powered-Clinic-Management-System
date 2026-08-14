@@ -3,8 +3,8 @@
 1. Slot regeneration — rolls the slot horizon forward on its own, so the rolling
    `SLOT_GENERATION_HORIZON_DAYS` window doesn't shrink by a day every day that passes
    without an admin action (CSV re-upload, block-date) to re-trigger it.
-2. Appointment reminders — sends the 60m/30m/5m/starting-now reminder for whichever
-   appointments just came due.
+2. Appointment reminders — sends the 60-minutes-before reminder (in-app notification +
+   email) for whichever appointments just came due.
 
 Appointments whose slot has ended are NOT auto-completed by a timer here — that status
 change now only happens via the patient's own explicit confirm-visit action (see
@@ -91,11 +91,11 @@ def run_slot_regeneration_tick() -> None:
 
 
 def run_appointment_reminder_tick() -> None:
-    """Loops every active clinic and sends any appointment reminder (60m/30m/5m/
-    starting-now) that's now due — see app.services.appointment_reminders for the
-    exactly-once-per-window logic. Runs on a tight 1-minute interval (unlike the
-    other two ticks above) since these reminders are meant to land close to an
-    exact offset from the appointment's start time.
+    """Loops every active clinic and sends the 60-minutes-before reminder for any
+    appointment that's now due — see app.services.appointment_reminders for the
+    exactly-once logic. Runs on a tight 1-minute interval (unlike the slot-regeneration
+    tick above) since this reminder is meant to land close to an exact offset from the
+    appointment's start time, not "eventually".
     """
     db = SessionLocal()
     try:

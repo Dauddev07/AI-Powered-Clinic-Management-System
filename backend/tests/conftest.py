@@ -3,6 +3,19 @@ from sqlalchemy import event
 from sqlalchemy.orm import sessionmaker
 
 from app.core.db import engine
+from app.services import email as email_service
+
+
+@pytest.fixture(autouse=True)
+def no_real_emails(monkeypatch):
+    """Booking/cancel/reschedule/reminder emails (app/services/email.py) fire off a
+    background thread straight from the service layer — unlike the OTP/welcome emails,
+    which route through FastAPI's BackgroundTasks and never actually execute in a test
+    that just constructs BackgroundTasks() without running it. Autouse and session-wide
+    so no test anywhere can accidentally fire a real Brevo API call using this repo's
+    real .env credentials against a throwaway uuid@example.com test address.
+    """
+    monkeypatch.setattr(email_service, "send_email", lambda **kwargs: None)
 
 
 @pytest.fixture

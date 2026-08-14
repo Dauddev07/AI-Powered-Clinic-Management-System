@@ -86,7 +86,7 @@ def test_reminder_tick_sends_the_due_reminder_for_the_patient(db, clinic, use_te
             )
         ).scalars().all()
     )
-    assert types == ["appointment_reminder_30m", "appointment_reminder_5m", "appointment_reminder_60m"]
+    assert types == ["appointment_reminder_60m"]
 
 
 def test_reminder_tick_skips_inactive_clinics(db, clinic, use_test_session_for_scheduler):
