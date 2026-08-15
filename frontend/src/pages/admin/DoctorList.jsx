@@ -6,6 +6,7 @@ import EmptyState from "../../components/EmptyState";
 import Pagination from "../../components/Pagination";
 import Skeleton from "../../components/Skeleton";
 import { useReveal } from "../../hooks/useReveal";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 import styles from "./AdminScreens.module.css";
 
 const PAGE_SIZE = 10;
@@ -16,6 +17,11 @@ const SEARCH_DEBOUNCE_MS = 300;
 
 export default function DoctorList() {
   const revealRef = useReveal();
+  // The full placeholder ("Search by doctor, department, or specialization…") gets
+  // hard-clipped by the input's own width on narrow screens — a browser placeholder
+  // has no text-wrap/ellipsis control, so the fix is a genuinely shorter string
+  // below this breakpoint rather than trying to shrink font-size/padding further.
+  const isNarrow = useMediaQuery("(max-width: 480px)");
   const [doctors, setDoctors] = useState(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -89,7 +95,7 @@ export default function DoctorList() {
           <input
             type="text"
             className={styles.searchInput}
-            placeholder="Search by doctor, department, or specialization…"
+            placeholder={isNarrow ? "Search doctors…" : "Search by doctor, department, or specialization…"}
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             aria-label="Search doctors"

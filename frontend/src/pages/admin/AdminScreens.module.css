@@ -65,6 +65,17 @@
   border-color: var(--app-accent);
 }
 
+@media (max-width: 480px) {
+  .searchInput {
+    padding: 0.55rem 2.2rem 0.55rem 2.2rem;
+    font-size: var(--font-size-label);
+  }
+
+  .searchIcon {
+    left: 0.7rem;
+  }
+}
+
 .searchClearBtn {
   position: absolute;
   right: 0.6rem;
