@@ -1,8 +1,8 @@
 import styles from "./Logo.module.css";
 
-// Text-based wordmark for "Quick Check Clinic" paired with a chat-bubble glyph
-// containing a pulse-into-checkmark stroke — a single icon rather than several
-// competing symbols, chosen specifically to stay legible down to favicon size.
+// Text-based wordmark for "Quick Check Clinic" with a small pulse/check glyph
+// standing in for the dot on the "i" in "Quick" — keeps the mark simple and
+// legible at header size while still reading as a distinct brand icon.
 //
 // `wrap` lets the wordmark break onto a second line instead of truncating with
 // an ellipsis — for narrow-but-tall placements (e.g. Register's fixed-width
@@ -22,11 +22,10 @@ export default function Logo({ size = "md", wrap = false, compact = false }) {
         compact ? styles.compact : ""
       }`}
     >
-      {/* A chat bubble (ties directly to the AI assistant) with one continuous
-          stroke inside it — a heartbeat trace that rises straight into a
-          checkmark's long stroke, so "pulse" (clinic) and "check" (quick,
-          confirmed) read as a single unbroken gesture rather than two icons
-          sharing one shape. */}
+      {/* One continuous stroke, not two separate glyphs: a heartbeat trace that
+          rises straight into a checkmark's long stroke, so "pulse" (clinic) and
+          "check" (quick, confirmed) read as a single unbroken gesture rather than
+          a pulse icon and a check icon awkwardly sharing one circle. */}
       <svg
         className={styles.glyph}
         viewBox="0 0 24 24"
@@ -35,13 +34,12 @@ export default function Logo({ size = "md", wrap = false, compact = false }) {
         aria-hidden="true"
         focusable="false"
       >
-        <rect x="2" y="3" width="20" height="13" rx="6.5" ry="6.5" fill="var(--app-accent)" />
-        <path d="M7.5 16 5.5 20 11 16Z" fill="var(--app-accent)" />
+        <circle cx="12" cy="12" r="11" fill="var(--app-accent)" />
         <path
-          d="M5.3 10.3h2.3l1.7-3.6 2 7.8L18.5 6.3"
+          d="M5 12.5h3.3l2-5.3 2.4 9.8L20 7.5"
           fill="none"
           stroke="var(--app-accent-text)"
-          strokeWidth="1.8"
+          strokeWidth="1.7"
           strokeLinecap="round"
           strokeLinejoin="round"
         />

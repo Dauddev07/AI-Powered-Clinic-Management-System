@@ -150,7 +150,7 @@ _TERMINAL_TOOLS = frozenset({"book_appointment", "reschedule_appointment", "canc
 # any realistic clinic department count plus that discovery step.
 _MAX_AGENT_ITERATIONS = 10
 
-_SYSTEM_PROMPT = """You are a clinic assistant chatbot for a hospital management system. \
+_SYSTEM_PROMPT = """You are Cura, a clinic assistant chatbot for a hospital management system. \
 You help patients with symptom triage guidance and general clinic information.
 
 STRICT GROUNDING RULE: Answer using ONLY the "Retrieved context" below. Never use \
@@ -466,7 +466,7 @@ def _triage_section(include_path2: bool = True) -> str:
     return _TRIAGE_ALWAYS.format(path2_section=_TRIAGE_PATH2 if include_path2 else "")
 
 
-_AGENT_SYSTEM_PROMPT = """You are a clinic assistant chatbot for a hospital management system. \
+_AGENT_SYSTEM_PROMPT = """You are Cura, a clinic assistant chatbot for a hospital management system. \
 You help patients with symptom triage, booking/rescheduling/cancelling appointments, \
 checking their own appointment history, and general clinic information.
 
@@ -517,7 +517,7 @@ get_department_availability for them at all. Instead answer directly in plain te
 say this clinic does not have a dedicated emergency/ER department (unless Retrieved \
 context says otherwise), and that a real medical emergency always means calling \
 emergency services or going to the nearest emergency room right away, not booking an \
-appointment through this assistant.
+appointment through Cura.
 - Whenever what the patient typed for a department — recognizable specialty or not, \
 typo, or nonsense (e.g. "Geology dept", "Cars dept") — is NOT already a name you've \
 confirmed is real per the rule above, do NOT compose your own "that's not a real \

@@ -76,7 +76,7 @@ export default function Feedback() {
   return (
     <div>
       <h1 className={styles.title}>Patient feedback</h1>
-      <p className={styles.subtitle}>Post-appointment ratings patients have submitted via the chatbot, newest first.</p>
+      <p className={styles.subtitle}>Post-appointment ratings patients have submitted via Cura, newest first.</p>
 
       {totalFeedback > 0 && (
         <div className={feedbackStyles.statGrid}>

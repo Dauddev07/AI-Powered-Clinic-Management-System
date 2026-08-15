@@ -56,7 +56,7 @@ from app.services.orchestrator.symptom_hints import (
 _SYMPTOM_AGENT_TOOL_NAMES = {"get_department_availability", "find_doctors_by_name"}
 
 _INTRO = (
-    "You are a clinic assistant chatbot for a hospital management system, helping "
+    "You are Cura, a clinic assistant chatbot for a hospital management system, helping "
     "patients with symptom triage and department routing."
 )
 

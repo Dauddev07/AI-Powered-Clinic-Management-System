@@ -62,7 +62,7 @@ export default function Login() {
           <Logo wrap />
           <h2 className={styles.introTitle}>Welcome back</h2>
           <p className={styles.introText}>
-            Log in to book appointments, message our assistant, and manage your visits online.
+            Log in to book appointments, message Cura, and manage your visits online.
           </p>
         </div>
 

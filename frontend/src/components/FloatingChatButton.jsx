@@ -22,10 +22,10 @@ export default function FloatingChatButton() {
             <path d="M12 2 13.8 8.9 21 12l-7.2 3.1L12 22l-1.8-6.9L3 12l7.2-3.1L12 2Z" />
           </svg>
         </span>
-        Need help? I'm here
+        Need help? Chat with Cura
       </div>
 
-      <button type="button" className={styles.button} aria-label="Open AI assistant chat" onClick={() => navigate("/patient/chat")}>
+      <button type="button" className={styles.button} aria-label="Open Cura chat" onClick={() => navigate("/patient/chat")}>
         <span className={styles.ring} aria-hidden="true" />
         <span className={styles.pulse} aria-hidden="true" />
         <span className={styles.glow} aria-hidden="true" />

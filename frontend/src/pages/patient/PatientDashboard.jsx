@@ -181,8 +181,8 @@ export default function PatientDashboard() {
           {summary && summary.upcoming_count === 0 && summary.completed_count === 0 && (
             <EmptyState
               icon="calendar"
-              message="You haven't had any appointments yet. Describe how you're feeling and our assistant will point you to the right doctor."
-              actionLabel="Chat with the assistant"
+              message="You haven't had any appointments yet. Describe how you're feeling and Cura will point you to the right doctor."
+              actionLabel="Chat with Cura"
               actionTo="/patient/chat"
             />
           )}

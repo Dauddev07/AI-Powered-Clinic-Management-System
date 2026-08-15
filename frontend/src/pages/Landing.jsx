@@ -101,7 +101,7 @@ const STEPS = [
   {
     title: "Describe your symptoms",
     description:
-      "Tell our assistant how you're feeling, and it will suggest the right department, an available doctor, and open slots for you.",
+      "Tell Cura how you're feeling, and it will suggest the right department, an available doctor, and open slots for you.",
   },
   {
     title: "Browse",
@@ -111,7 +111,7 @@ const STEPS = [
   {
     title: "Book",
     description:
-      "Reserve your appointment through our assistant or manually — no phone calls needed.",
+      "Reserve your appointment through Cura or manually — no phone calls needed.",
   },
   {
     title: "Manage",

@@ -70,7 +70,7 @@ export default function KnowledgeBase() {
       <h1 className={styles.title}>Knowledge base</h1>
       <p className={styles.subtitle}>
         Upload PDF or DOCX documents (clinic timings, location, fees, policies, and other general clinic
-        information) for the AI chatbot to draw on when answering logistics questions. Uploading a file with the
+        information) for Cura to draw on when answering logistics questions. Uploading a file with the
         same name as an existing document replaces it.
       </p>
 

@@ -223,7 +223,7 @@ def send_welcome_email(*, to: str, full_name: str) -> None:
             _feature_row(
                 icon="💬",
                 text=(
-                    "<strong>Describe your symptoms to our assistant</strong> — it asks a "
+                    "<strong>Describe your symptoms to Cura</strong> — it asks a "
                     "few quick questions and points you to the right department, no "
                     "guessing which one to pick."
                 ),

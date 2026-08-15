@@ -573,7 +573,7 @@ def _bare_broken_bone_stated(message: str) -> bool:
 
 RED_FLAG_MESSAGE_EN = (
     "This may be a medical emergency. Please call 1122 or go to "
-    "the nearest emergency room right away. This assistant cannot handle emergencies.\n\n"
+    "the nearest emergency room right away. Cura cannot handle emergencies.\n\n"
     "While you're on your way:\n"
     "- Stay as calm as possible and try to rest in a comfortable position, avoiding unnecessary movement.\n"
     "- Do not eat, drink, or take any medication unless a medical professional tells you to.\n"

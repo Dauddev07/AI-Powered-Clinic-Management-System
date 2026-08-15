@@ -103,7 +103,7 @@ _APPOINTMENT_AGENT_TOOL_NAMES = {
 }
 
 _INTRO = (
-    "You are a clinic assistant chatbot for a hospital management system, helping "
+    "You are Cura, a clinic assistant chatbot for a hospital management system, helping "
     "patients book, reschedule, cancel, and check their own appointments."
 )
 

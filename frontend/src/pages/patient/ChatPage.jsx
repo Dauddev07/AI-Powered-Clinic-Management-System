@@ -154,7 +154,7 @@ function TypingIndicator() {
   return (
     <div className={`${styles.bubbleRow} ${styles.assistantRow}`}>
       <AssistantAvatar />
-      <div className={`${styles.bubble} ${styles.assistantBubble} ${styles.typingBubble}`} aria-label="Assistant is typing">
+      <div className={`${styles.bubble} ${styles.assistantBubble} ${styles.typingBubble}`} aria-label="Cura is typing">
         <span className={styles.typingDot} />
         <span className={styles.typingDot} />
         <span className={styles.typingDot} />
@@ -1060,7 +1060,7 @@ export default function ChatPage() {
               <line x1="9" y1="4" x2="9" y2="20" />
             </svg>
           </button>
-          <span className={styles.topBarTitle}>AI Assistant</span>
+          <span className={styles.topBarTitle}>Cura</span>
           <button type="button" className={styles.topBarNewChatBtn} onClick={startNewChat} aria-label="Start new chat">
             <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M12 5v14M5 12h14" />
@@ -1082,7 +1082,7 @@ export default function ChatPage() {
             </span>
             <span className={styles.disclaimerText}>
               <span className={styles.disclaimerLabel}>Medical disclaimer</span>
-              this assistant provides general information only and is not a substitute for professional medical
+              Cura provides general information only and is not a substitute for professional medical
               advice, diagnosis, or treatment. In an emergency, contact the clinic or emergency services directly.
             </span>
           </div>
@@ -1110,7 +1110,7 @@ export default function ChatPage() {
                 </div>
               </div>
               <h1 className={styles.welcomeHeading}>
-                Hi{firstName ? ` ${firstName}` : ""}, how can I help you today?
+                Hi{firstName ? ` ${firstName}` : ""}, I'm Cura — how can I help you today?
               </h1>
               <p className={styles.welcomeSubtitle}>
                 Ask about symptoms, clinic hours, or anything else about your care — I'll answer straight from

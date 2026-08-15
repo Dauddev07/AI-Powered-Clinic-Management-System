@@ -26,7 +26,7 @@ from app.models.patient_memory_profile import PatientMemoryProfile
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """You maintain a short running memory profile for one patient, \
-carried forward between separate chat sessions with a clinic assistant chatbot.
+carried forward between separate chat sessions with Cura, the clinic's assistant chatbot.
 
 From the "New messages" below, extract ONLY three kinds of information:
 1. Symptoms or health complaints the patient described (e.g. "reported recurring \
