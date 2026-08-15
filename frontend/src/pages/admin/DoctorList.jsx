@@ -9,19 +9,25 @@ import { useReveal } from "../../hooks/useReveal";
 import styles from "./AdminScreens.module.css";
 
 const PAGE_SIZE = 10;
+// Waits for the admin to pause typing before hitting the server — a search-as-you-type
+// field firing one request per keystroke would otherwise spam /admin/doctors for every
+// letter of, say, "cardiology".
+const SEARCH_DEBOUNCE_MS = 300;
 
 export default function DoctorList() {
   const revealRef = useReveal();
   const [doctors, setDoctors] = useState(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
   const [error, setError] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [rowErrors, setRowErrors] = useState({});
 
-  const load = async (pageToLoad) => {
+  const load = async (pageToLoad, q) => {
     try {
-      const data = await fetchDoctors({ limit: PAGE_SIZE, offset: (pageToLoad - 1) * PAGE_SIZE });
+      const data = await fetchDoctors({ limit: PAGE_SIZE, offset: (pageToLoad - 1) * PAGE_SIZE, q });
       setDoctors(data.items);
       setTotal(data.total);
     } catch (err) {
@@ -29,10 +35,25 @@ export default function DoctorList() {
     }
   };
 
+  // Debounce: only commit `searchInput` to `search` (which actually triggers the
+  // fetch below) once the admin has stopped typing for a moment.
   useEffect(() => {
-    load(page);
+    const id = setTimeout(() => setSearch(searchInput.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [searchInput]);
+
+  // A new search term always jumps back to page 1 — staying on, say, page 3 of an
+  // old unfiltered list would silently show "no results" against the new search's
+  // (usually much shorter) result set instead of its actual first page.
+  useEffect(() => {
+    setPage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page]);
+  }, [search]);
+
+  useEffect(() => {
+    load(page, search);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, search]);
 
   const handleToggle = async (doctor) => {
     setBusyId(doctor.id);
@@ -60,11 +81,40 @@ export default function DoctorList() {
       </p>
 
       <div className={`${styles.card} reveal`} ref={revealRef}>
+        <div className={styles.searchRow}>
+          <svg className={styles.searchIcon} viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="text"
+            className={styles.searchInput}
+            placeholder="Search by doctor, department, or specialization…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            aria-label="Search doctors"
+          />
+          {searchInput && (
+            <button
+              type="button"
+              className={styles.searchClearBtn}
+              onClick={() => setSearchInput("")}
+              aria-label="Clear search"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
         {error && <p className={styles.errorText}>{error}</p>}
 
         {doctors === null && !error && <Skeleton rows={4} />}
 
-        {doctors && total === 0 && (
+        {doctors && total === 0 && search && (
+          <EmptyState icon="search" message={`No doctors match "${search}".`} />
+        )}
+
+        {doctors && total === 0 && !search && (
           <EmptyState
             icon="search"
             message="No doctors yet. Import a CSV to add some."

@@ -26,10 +26,11 @@ export function fetchIngestionLogs({ limit, offset } = {}) {
   return apiFetch(`/admin/doctors/csv/ingestion-logs${query ? `?${query}` : ""}`, { auth: true });
 }
 
-export function fetchDoctors({ limit, offset } = {}) {
+export function fetchDoctors({ limit, offset, q } = {}) {
   const params = new URLSearchParams();
   if (limit != null) params.set("limit", limit);
   if (offset != null) params.set("offset", offset);
+  if (q) params.set("q", q);
   const query = params.toString();
   return apiFetch(`/admin/doctors${query ? `?${query}` : ""}`, { auth: true });
 }

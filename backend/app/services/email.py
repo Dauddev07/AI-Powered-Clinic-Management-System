@@ -377,8 +377,8 @@ def send_appointment_reminder_email(*, to: str, full_name: str, doctor_name: str
           {_detail_row(label="When", value=when_text)}
         </table>
         <p style="margin:0;font-size:13px;color:{_MUTED};border-top:1px solid {_BORDER};padding-top:16px;">
-          Running late or can't make it? You can reschedule or cancel from your Upcoming
-          Appointments page.
+          Appointments can't be cancelled or rescheduled within 2 hours of the appointment
+          time. If you can't make it, please contact the clinic directly.
         </p>
         """
         html = _layout(

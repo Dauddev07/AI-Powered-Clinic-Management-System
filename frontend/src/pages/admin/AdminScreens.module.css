@@ -31,6 +31,61 @@
   }
 }
 
+.searchRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 1.25rem;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 0.85rem;
+  color: var(--app-text-subtitle);
+  pointer-events: none;
+}
+
+.searchInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.6rem 2.4rem 0.6rem 2.5rem;
+  border: 1px solid var(--app-border);
+  border-radius: 10px;
+  background: var(--app-input-bg);
+  color: var(--app-text-body);
+  font-size: var(--font-size-body);
+}
+
+.searchInput::placeholder {
+  color: var(--app-text-subtitle);
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: var(--app-accent);
+}
+
+.searchClearBtn {
+  position: absolute;
+  right: 0.6rem;
+  width: 1.6rem;
+  height: 1.6rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--app-text-subtitle);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+}
+
+.searchClearBtn:hover {
+  background: var(--app-neutral-bg);
+  color: var(--app-text-body);
+}
+
 .actionGrid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

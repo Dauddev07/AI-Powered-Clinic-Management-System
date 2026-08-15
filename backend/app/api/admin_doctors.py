@@ -2,7 +2,7 @@ import json
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_role
@@ -454,21 +454,32 @@ def _serialize_doctor(doctor: Doctor, department: Department) -> DoctorOut:
 def list_doctors(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    q: str | None = Query(default=None, max_length=200),
     current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ) -> DoctorListOut:
     clinic_id = current_user.clinic_id
-    total = db.execute(
-        select(func.count()).select_from(Doctor).where(Doctor.clinic_id == clinic_id)
-    ).scalar_one()
-    stmt = (
-        select(Doctor, Department)
-        .join(Department, Department.id == Doctor.department_id)
-        .where(Doctor.clinic_id == clinic_id)
-        .order_by(Department.name.asc(), Doctor.full_name.asc())
-        .offset(offset)
-        .limit(limit)
+    base_stmt = select(Doctor, Department).join(Department, Department.id == Doctor.department_id).where(
+        Doctor.clinic_id == clinic_id
     )
+
+    # Matches doctor name, specialization, or department name — an admin searching
+    # "cardio" should find both the Cardiology department's doctors and any doctor
+    # individually specialized in something cardiology-adjacent, without needing to
+    # know which field the term actually lives in.
+    search = q.strip() if q else None
+    if search:
+        pattern = f"%{search}%"
+        base_stmt = base_stmt.where(
+            or_(
+                Doctor.full_name.ilike(pattern),
+                Doctor.specialization.ilike(pattern),
+                Department.name.ilike(pattern),
+            )
+        )
+
+    total = db.execute(select(func.count()).select_from(base_stmt.subquery())).scalar_one()
+    stmt = base_stmt.order_by(Department.name.asc(), Doctor.full_name.asc()).offset(offset).limit(limit)
     rows = db.execute(stmt).all()
     items = [_serialize_doctor(doctor, department) for doctor, department in rows]
     return DoctorListOut(total=total, limit=limit, offset=offset, items=items)
