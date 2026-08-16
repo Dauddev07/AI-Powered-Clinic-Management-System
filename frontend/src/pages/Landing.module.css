@@ -1135,10 +1135,13 @@
   text-align: center;
 }
 
-/* Small serif eyebrow label, flanked by short rules — a deliberate
-   typographic contrast against the sans-serif body copy, used once per
-   section to give each block its own identity instead of every heading
-   looking the same. */
+/* Small serif eyebrow label, flanked by a pulse-line rule instead of a plain
+   straight one — the same heartbeat wave as the logo mark (see Logo.jsx),
+   echoed here so every section carries a small piece of the brand mark
+   rather than the generic double-hairline flourish every template uses for
+   this exact position. Built as a background-color shape clipped through an
+   SVG mask (not a straight <img>/data-uri stroke color) so it automatically
+   follows --app-accent in both themes with no separate light/dark rule. */
 .eyebrow {
   display: flex;
   align-items: center;
@@ -1155,10 +1158,18 @@
 .eyebrow::before,
 .eyebrow::after {
   content: "";
-  width: 1.75rem;
-  height: 1px;
+  width: 2.25rem;
+  height: 10px;
   background: var(--app-accent);
-  opacity: 0.5;
+  opacity: 0.55;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 16'%3E%3Cpath d='M0 8H20L25 1L32 15L37 8H64' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 16'%3E%3Cpath d='M0 8H20L25 1L32 15L37 8H64' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
 }
 
 .sectionTitle {
@@ -1793,123 +1804,142 @@
   }
 }
 
-/* Why choose us */
-.featureGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1rem;
+/* Why choose us — an indexed editorial list rather than a third grid of
+   boxed cards (Departments and the doctor grid already own that language).
+   Row-based, left-aligned, ruled between items — the "chapter number" per
+   row reads at a glance without needing an icon-in-a-box to anchor it. */
+.whyList {
+  display: flex;
+  flex-direction: column;
+  max-width: 720px;
+  margin: 0 auto;
   text-align: left;
+  border-top: 1px solid var(--app-border);
 }
 
-/* Below ~268px of available width, a 220px column floor no longer fits
-   inside the hero/section side padding, forcing the grid item wider than
-   the viewport (horizontal overflow) instead of wrapping to one column. */
-@media (max-width: 350px) {
-  .featureGrid {
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  }
-}
-
-.featureCard {
+.whyRow {
   position: relative;
-  overflow: hidden;
-  padding: 1.75rem 1.5rem;
-  background: var(--app-bg-page);
-  border: 1px solid var(--app-border);
-  border-radius: 20px;
-  box-shadow: 0 3px 14px var(--app-shadow);
-  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease, border-color 220ms ease;
-}
-
-/* A large, softly blurred corner glow that only becomes visible on hover —
-   same restrained "quiet depth" language as the hero's own glow blobs
-   (see .heroGlow1/.heroGlow2), scaled down to a per-card detail here. */
-.featureCard::after {
-  content: "";
-  position: absolute;
-  top: -40%;
-  right: -30%;
-  width: 60%;
-  height: 60%;
-  border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 16%, transparent), transparent 70%);
-  opacity: 0;
-  transition: opacity 260ms ease;
-  pointer-events: none;
-}
-
-.featureCard:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 16px 34px var(--app-shadow);
-  border-color: color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
-}
-
-.featureCard:hover::after {
-  opacity: 1;
-}
-
-.featureIcon {
-  position: relative;
-  z-index: 1;
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 2.9rem;
-  height: 2.9rem;
-  margin-bottom: 1.1rem;
-  border-radius: 13px;
-  background: linear-gradient(145deg, color-mix(in srgb, var(--app-accent) 16%, var(--app-bg-card)), color-mix(in srgb, var(--app-accent) 4%, var(--app-bg-card)));
-  border: 1px solid color-mix(in srgb, var(--app-accent) 20%, var(--app-border));
-  color: var(--app-accent);
-  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  gap: 1.5rem;
+  padding: 1.75rem 0.25rem;
+  border-bottom: 1px solid var(--app-border);
+  transition: padding-left 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.featureCard:hover .featureIcon {
-  transform: scale(1.08) rotate(-4deg);
+/* A thin accent rule that grows in from the left edge on hover — the row's
+   own version of .deptCard's top-edge accent bar, adapted to a horizontal
+   list instead of a grid of tiles. */
+.whyRow::before {
+  content: "";
+  position: absolute;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  left: -1.25rem;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--app-accent);
+  transform: scaleY(0);
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .featureCard,
-  .featureCard::after,
-  .featureIcon {
-    transition: none;
-  }
-
-  .featureCard:hover {
-    transform: none;
-  }
-
-  .featureCard:hover .featureIcon {
-    transform: none;
-  }
+.whyRow:hover {
+  padding-left: 0.75rem;
 }
 
-.featureTitle {
-  margin: 0 0 0.5rem;
+.whyRow:hover::before {
+  transform: scaleY(1);
+}
+
+.whyIndex {
+  flex: none;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-style: italic;
+  font-size: 2.5rem;
+  font-weight: 700;
+  line-height: 1;
+  color: color-mix(in srgb, var(--app-accent) 45%, transparent);
+}
+
+.whyRowText {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.whyRowTitle {
+  margin: 0 0 0.4rem;
   font-size: var(--font-size-body);
   font-weight: 600;
   letter-spacing: 0.01em;
   color: var(--app-text-title);
 }
 
-.featureDescription {
+.whyRowDescription {
   margin: 0;
   font-size: var(--font-size-label);
   color: var(--app-text-subtitle);
   line-height: 1.6;
 }
 
-/* Consolidated About / Location passage */
-.about {
-  max-width: 640px;
+.whyRowIcon {
+  flex: none;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.9rem;
+  height: 2.9rem;
+  border-radius: 13px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--app-accent) 16%, var(--app-bg-card)), color-mix(in srgb, var(--app-accent) 4%, var(--app-bg-card)));
+  border: 1px solid color-mix(in srgb, var(--app-accent) 20%, var(--app-border));
+  color: var(--app-accent);
+}
+
+/* The icon is a supporting detail, not the row's anchor (the index number
+   already carries that job) — shown from tablet width up, where there's
+   room for it beside the text without crowding a narrow phone row. */
+@media (min-width: 560px) {
+  .whyRowIcon {
+    display: flex;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .whyRow,
+  .whyRow::before {
+    transition: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .whyIndex {
+    font-size: 2rem;
+  }
+
+  .whyRow {
+    gap: 1rem;
+  }
+}
+
+/* About — narrative left, a distinct quick-facts panel right, instead of
+   one centered block of grey text (the most generic pattern on the page
+   before this). Text-align/justify follow the grid below, overriding
+   .section's own text-align: center, which the plain-paragraph version
+   relied on. */
+.aboutGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: clamp(1.75rem, 4vw, 3rem);
+  align-items: start;
+  max-width: 900px;
   margin: 0 auto;
+  text-align: left;
+}
+
+.about {
+  margin: 0;
   color: var(--app-text-subtitle);
   font-size: var(--font-size-body);
-  line-height: 1.6;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  text-align: center;
+  line-height: 1.7;
 }
 
 .about a {
@@ -1917,9 +1947,49 @@
   font-weight: 600;
 }
 
-.location {
+/* A visually distinct panel (card surface, not just more paragraph text) —
+   gives the closing section the same "designed" weight as every card
+   earlier on the page instead of trailing off into plain prose. */
+.aboutFacts {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  padding: 1.5rem 1.4rem;
+  background: var(--app-bg-card);
+  border: 1px solid var(--app-border);
+  border-radius: 18px;
+  box-shadow: 0 3px 14px var(--app-shadow);
+}
+
+.aboutFactRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
   font-size: var(--font-size-label);
-  color: var(--app-text-subtitle);
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--app-border);
+  color: var(--app-text-body);
+  line-height: 1.45;
+}
+
+.aboutFactIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  margin-top: -0.1rem;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--app-accent) 14%, transparent);
+  color: var(--app-accent);
+}
+
+@media (max-width: 720px) {
+  .aboutGrid {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+
+  .aboutFactRow {
+    text-align: left;
+  }
 }

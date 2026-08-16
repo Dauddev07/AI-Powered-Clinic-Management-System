@@ -590,35 +590,38 @@ export default function Landing() {
         <section className={styles.section} aria-labelledby="why-us-heading">
           <span className={`${styles.eyebrow} reveal ${styles.revealBlur}`} ref={register}>Why Quick Check Clinic</span>
           <h2 id="why-us-heading" className={`${styles.sectionTitle} reveal ${styles.revealBlur}`} ref={register}>No lines. No waiting. Just care.</h2>
-          <div className={styles.featureGrid}>
+          {/* Deliberately not a third grid of boxed icon-cards — Departments and
+              "How it works" already use that language, and a third identical
+              pattern back to back is what made the page read as templated.
+              An indexed editorial list (big serif chapter numbers, a rule
+              between rows) borrows the same serif voice as .eyebrow/.sectionTitle
+              instead of another bordered card. */}
+          <div className={styles.whyList}>
             {WHY_CARDS.map((card, i) => (
-              // See the Departments wrapper above for why the reveal transition
-              // lives on this wrapper rather than .featureCard itself. Alternates
-              // left/right slide-in (see .revealLeft/.revealRight) instead of a
-              // uniform slide-up, for a little more visual variety here.
               <div
-                className={`reveal ${styles.revealBlur} ${i % 2 === 0 ? styles.revealLeft : styles.revealRight} ${revealDelayClass(i)}`}
+                className={`${styles.whyRow} reveal ${styles.revealBlur} ${revealDelayClass(i)}`}
                 ref={register}
                 key={card.title}
               >
-                <div className={styles.featureCard}>
-                  <span className={styles.featureIcon} aria-hidden="true">
-                    <svg
-                      viewBox="0 0 24 24"
-                      width="22"
-                      height="22"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d={card.icon} />
-                    </svg>
-                  </span>
-                  <h3 className={styles.featureTitle}>{card.title}</h3>
-                  <p className={styles.featureDescription}>{card.description}</p>
+                <span className={styles.whyIndex} aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
+                <div className={styles.whyRowText}>
+                  <h3 className={styles.whyRowTitle}>{card.title}</h3>
+                  <p className={styles.whyRowDescription}>{card.description}</p>
                 </div>
+                <span className={styles.whyRowIcon} aria-hidden="true">
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="22"
+                    height="22"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d={card.icon} />
+                  </svg>
+                </span>
               </div>
             ))}
           </div>
@@ -671,19 +674,46 @@ export default function Landing() {
             About Quick Check Clinic
           </h2>
           {/* Address/phone/hours below are placeholder data — replace with the
-              clinic's real details before launch. */}
-          <div className={`${styles.about} reveal ${styles.revealBlur}`} ref={register}>
-            <p>
+              clinic's real details before launch. Split into narrative +
+              a distinct quick-facts panel rather than one centered block of
+              grey text — the plain-paragraph closing section is the single
+              most generic pattern on the page, this gives it real structure
+              to match the rest of the site's card language. */}
+          <div className={styles.aboutGrid}>
+            <p className={`${styles.about} reveal ${styles.revealBlur}`} ref={register}>
               Quick Check Clinic is an online booking platform that connects
               patients with doctors across every department we offer. Our goal
               is simple: make booking and managing care straightforward, calm,
               and free of unnecessary back-and-forth.
             </p>
-            <p className={styles.location}>
-              Visit us at 123 Main Boulevard, Gulberg III, Lahore, Punjab. Open
-              Monday through Sunday, 8:00 AM – 9:00 PM. For anything the app
-              doesn't cover, call +92 42 111 234 567.
-            </p>
+            <div className={`${styles.aboutFacts} reveal ${styles.revealBlur}`} ref={register}>
+              <div className={styles.aboutFactRow}>
+                <span className={styles.aboutFactIcon} aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 21s-7-5.6-7-11.5A7 7 0 0 1 19 9.5C19 15.4 12 21 12 21Z" />
+                    <circle cx="12" cy="9.5" r="2.5" />
+                  </svg>
+                </span>
+                <span>123 Main Boulevard, Gulberg III, Lahore, Punjab</span>
+              </div>
+              <div className={styles.aboutFactRow}>
+                <span className={styles.aboutFactIcon} aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="8.5" />
+                    <path d="M12 7.5V12l3 2" />
+                  </svg>
+                </span>
+                <span>Open every day, 8:00 AM – 9:00 PM</span>
+              </div>
+              <div className={styles.aboutFactRow}>
+                <span className={styles.aboutFactIcon} aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L14 13l5 2v4a2 2 0 0 1-2 2C9.5 21 3 14.5 3 6a2 2 0 0 1 1-2Z" />
+                  </svg>
+                </span>
+                <span>+92 42 111 234 567</span>
+              </div>
+            </div>
           </div>
         </section>
       </div>
