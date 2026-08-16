@@ -27,16 +27,11 @@ html[data-theme="dark"] {
   --app-input-bg: #1c1d1f;
   --app-input-text: #e6e7e9;
   --app-input-placeholder: #75777c;
-  /* Deepened from the earlier #77a877 sage — same hue family, pushed more
-     saturated/emerald so it reads as a deliberate brand color instead of the
-     desaturated "generic healthcare green" every telehealth template lands
-     on. --app-accent-bg darkened+enriched to match rather than left as the
-     old flat olive tone. */
-  --app-accent: #34b579;
-  --app-accent-hover: #4ecf92;
-  --app-accent-bg: #163524;
-  --app-accent-text: #eafcf1;
-  --app-link: #4ecf92;
+  --app-accent: #77a877;
+  --app-accent-hover: #8fc794;
+  --app-accent-bg: #2b3a2c;
+  --app-accent-text: #ecfdee;
+  --app-link: #8fc794;
   --app-error-bg: #2c1f1f;
   --app-error-text: #d1908f;
   --app-error-border: #4d3535;
@@ -85,14 +80,11 @@ html[data-theme="light"] {
   --app-input-bg: #ffffff;
   --app-input-text: #14171a;
   --app-input-placeholder: #8b8e94;
-  /* Deepened from the earlier #3f6b3f — same relationship, richer/more
-     saturated emerald so it reads as confident rather than a muted khaki
-     tone (see the dark theme's own --app-accent comment above). */
-  --app-accent: #1c8354;
-  --app-accent-hover: #146840;
-  --app-accent-bg: #d8f2e3;
-  --app-accent-text: #f6fbf7;
-  --app-link: #146840;
+  --app-accent: #3f6b3f;
+  --app-accent-hover: #2f5330;
+  --app-accent-bg: #e2f0e0;
+  --app-accent-text: #f6f7f4;
+  --app-link: #2f5330;
   --app-error-bg: #fdedec;
   --app-error-text: #9c2b2b;
   --app-error-border: #edbcbc;
