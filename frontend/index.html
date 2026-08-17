@@ -25,6 +25,18 @@
         document.documentElement.setAttribute("data-theme", stored === "light" ? "light" : "dark");
       })();
     </script>
+    <script>
+      // Browsers auto-restore the previous scroll position on a page reload —
+      // fine for most pages, but it fights the landing page's own refresh
+      // behavior (see Landing.jsx: a refresh should always land at the top
+      // hero, not wherever an earlier in-page nav click left the URL hash/
+      // scroll position). Opting out globally, this early, is what makes that
+      // possible — by the time React mounts, the browser has already restored
+      // scroll if this doesn't run first.
+      if ("scrollRestoration" in history) {
+        history.scrollRestoration = "manual";
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

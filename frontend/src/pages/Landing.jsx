@@ -129,11 +129,28 @@ export default function Landing() {
   // Client-side route changes don't trigger the browser's native hash-scroll,
   // so a cross-page nav link (e.g. from the footer) landing here with a hash
   // needs a manual scroll-into-view once the page has rendered.
+  //
+  // A hard refresh is deliberately excluded from that — reported live: hitting
+  // the browser's refresh button while an in-page nav anchor (see AppHeader's
+  // handleAnchorClick) had left e.g. "/#why-us-heading" in the URL bar dropped
+  // the visitor back into the middle of the page instead of the hero, since
+  // the browser resolves that hash on its own before this effect even runs.
+  // index.html turns off the browser's separate scroll-position restoration
+  // for the same reason; this checks the Navigation Timing API to tell a
+  // reload apart from an actual cross-page/anchor navigation, and on a reload
+  // clears the stale hash and forces the scroll back to the top instead of
+  // honoring it.
   useEffect(() => {
+    const [navEntry] = performance.getEntriesByType("navigation");
+    if (navEntry?.type === "reload") {
+      if (location.hash) window.history.replaceState(null, "", location.pathname);
+      window.scrollTo(0, 0);
+      return;
+    }
     if (!location.hash) return;
     const el = document.querySelector(location.hash);
     if (el) el.scrollIntoView({ behavior: "smooth" });
-  }, [location.hash]);
+  }, [location.hash, location.pathname]);
 
   // Public, unauthenticated, cross-clinic — always live, so a new rating
   // anywhere can move this list before the visitor's next reload. No error
