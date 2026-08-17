@@ -628,6 +628,109 @@ export default function Landing() {
         </section>
       </div>
 
+      {/* Cura is the app's headline differentiator (an actual AI clinic
+          assistant, not just a booking form) but had no dedicated section of
+          its own — only passing mentions inside "How it works". Patient-only,
+          behind auth (see ChatPage.jsx's RequireAuth), so the CTA here is
+          honest about that rather than inviting a guest to "try it now". */}
+      <div className={styles.bandPage}>
+        <section className={styles.section} aria-labelledby="cura-heading">
+          <span className={`${styles.eyebrow} reveal ${styles.revealBlur}`} ref={register}>Meet Cura</span>
+          <h2 id="cura-heading" className={`${styles.sectionTitle} reveal ${styles.revealBlur}`} ref={register}>
+            Your AI clinic assistant, one message away.
+          </h2>
+          <div className={styles.curaGrid}>
+            <div className={`${styles.curaText} reveal ${styles.revealBlur} ${styles.revealLeft}`} ref={register}>
+              <p className={styles.curaLead}>
+                Cura is built into your patient account — describe how you're
+                feeling in plain words, and it takes it from there: suggesting
+                the right department, pointing you to an available doctor, and
+                booking, rescheduling, or cancelling the appointment for you.
+              </p>
+              <ul className={styles.curaFeatureList}>
+                <li>
+                  <span className={styles.curaFeatureIcon} aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                  </span>
+                  Symptom triage that routes you to the right department
+                </li>
+                <li>
+                  <span className={styles.curaFeatureIcon} aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                  </span>
+                  Books, reschedules, and cancels appointments through chat
+                </li>
+                <li>
+                  <span className={styles.curaFeatureIcon} aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                  </span>
+                  Answers clinic questions straight from our own knowledge base
+                </li>
+              </ul>
+              <p className={styles.curaDisclaimer}>
+                Cura gives general information only and isn't a substitute for
+                professional medical advice — for emergencies, contact the
+                clinic or emergency services directly.
+              </p>
+              {isAuthenticated && user?.role === "patient" ? (
+                <Link to="/patient/chat" className={styles.heroCtaPrimary}>
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 12.5C4 7.81 8.03 4 13 4s9 3.81 9 8.5-4.03 8.5-9 8.5c-1.09 0-2.13-.19-3.1-.53L4 21l1.2-4.02A8.16 8.16 0 0 1 4 12.5Z" />
+                  </svg>
+                  Open Cura
+                </Link>
+              ) : !isAuthenticated ? (
+                <Link to="/register" className={styles.heroCtaPrimary}>
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M9 20a4 4 0 0 1 8 0" />
+                    <circle cx="13" cy="8" r="3.2" />
+                    <path d="M4 9h4M6 7v4" />
+                  </svg>
+                  Register to chat with Cura
+                </Link>
+              ) : null}
+            </div>
+
+            {/* A compact chat-transcript mockup — real capabilities (symptom
+                triage → department/doctor/slot suggestion, see
+                appointment_agent.py) rendered as a two-bubble exchange rather
+                than another icon-in-a-box, and the same speech-bubble +
+                three-dots + sparkle mark used everywhere else Cura appears
+                (FloatingChatButton, ChatPage) instead of a new glyph. */}
+            <div className={`${styles.curaMock} reveal ${styles.revealBlur} ${styles.revealRight}`} ref={register}>
+              <div className={styles.curaMockHeader}>
+                <span className={styles.curaMockAvatar} aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 12.5C4 7.81 8.03 4 13 4s9 3.81 9 8.5-4.03 8.5-9 8.5c-1.09 0-2.13-.19-3.1-.53L4 21l1.2-4.02A8.16 8.16 0 0 1 4 12.5Z" />
+                    <circle cx="9.5" cy="12.5" r="1" fill="currentColor" stroke="none" />
+                    <circle cx="13" cy="12.5" r="1" fill="currentColor" stroke="none" />
+                    <circle cx="16.5" cy="12.5" r="1" fill="currentColor" stroke="none" />
+                  </svg>
+                  <svg className={styles.curaMockSparkle} viewBox="0 0 24 24" width="10" height="10" fill="currentColor" aria-hidden="true">
+                    <path d="M12 2 13.8 8.9 21 12l-7.2 3.1L12 22l-1.8-6.9L3 12l7.2-3.1L12 2Z" />
+                  </svg>
+                </span>
+                <span>Cura</span>
+              </div>
+              <div className={styles.curaMockBody}>
+                <div className={styles.curaBubbleUser}>
+                  I've had a bad headache and a slight fever since this morning.
+                </div>
+                <div className={styles.curaBubbleCura}>
+                  That sounds like a General Medicine visit. Dr. Ali Raza has an
+                  opening today at 2:00 PM — want me to book it for you?
+                </div>
+                <div className={styles.curaBubbleUser}>Yes, please book it.</div>
+                <div className={`${styles.curaBubbleCura} ${styles.curaBubbleConfirm}`}>
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+                  Booked with Dr. Ali Raza, 2:00 PM today.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
       <div className={styles.bandCard}>
         <section className={styles.section} aria-labelledby="how-it-works-heading">
           <span className={`${styles.eyebrow} reveal ${styles.revealBlur}`} ref={register}>How it works</span>

@@ -57,22 +57,80 @@
 }
 
 /* Filled accent badge around just the Chat icon — see the JSX call site's
-   own comment. Sits slightly above the row (negative margin) so the badge
-   reads as its own raised element rather than just a colored square inline
-   with the others. */
+   own comment. Sits slightly above the row (negative margin, larger than
+   the plain 20px tab icons) so it reads as its own raised, tappable element
+   rather than just a colored square inline with the others. */
 .tabIconChat {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  margin-top: -2px;
+  width: 34px;
+  height: 34px;
+  margin-top: -4px;
   border-radius: 50%;
   color: var(--app-accent-text);
   background: linear-gradient(135deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 78%, black));
-  box-shadow: 0 3px 8px color-mix(in srgb, var(--app-accent) 40%, transparent);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--app-accent) 45%, transparent), inset 0 1px 0 color-mix(in srgb, white 20%, transparent);
 }
 
 .tabItem.active .tabIconChat {
   background: linear-gradient(135deg, var(--app-accent-hover), color-mix(in srgb, var(--app-accent-hover) 78%, black));
+}
+
+/* A quiet breathing ring behind the badge — the same "AI is alive" language
+   FloatingChatButton uses on wider screens (see its own .pulse), scaled down
+   so it reads as a detail here rather than the ring:pulse:glow triple-stack
+   that button uses at 62px. This is the only place that signal exists at
+   all below 720px. */
+.tabIconChatRing {
+  position: absolute;
+  inset: -5px;
+  z-index: -1;
+  border-radius: 50%;
+  background: var(--app-accent);
+  opacity: 0.3;
+  animation: tab-chat-breathe 2.6s ease-in-out infinite;
+}
+
+@keyframes tab-chat-breathe {
+  0%, 100% {
+    transform: scale(0.85);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 0;
+  }
+}
+
+.tabIconChatSparkle {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  color: color-mix(in srgb, white 75%, var(--app-accent-text));
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--app-accent-hover) 80%, transparent));
+  animation: tab-chat-twinkle 2.6s ease-in-out infinite;
+}
+
+@keyframes tab-chat-twinkle {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tabIconChatRing {
+    animation: none;
+    opacity: 0.15;
+  }
+
+  .tabIconChatSparkle {
+    animation: none;
+  }
 }

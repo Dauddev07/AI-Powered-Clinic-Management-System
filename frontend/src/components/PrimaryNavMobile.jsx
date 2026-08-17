@@ -50,14 +50,34 @@ export default function PrimaryNavMobile() {
             className={`${styles.tabItem} ${active ? styles.active : ""}`}
             aria-current={active ? "page" : undefined}
           >
-            {/* Chat used to be its own floating action button (see the removed
-                FloatingChatButton) — the filled accent badge keeps that same
-                "this one's special" weight now that it's a tab like the rest. */}
-            <span className={isChat ? styles.tabIconChat : styles.tabIcon}>
-              <svg viewBox="0 0 24 24" width={isChat ? 17 : 20} height={isChat ? 17 : 20} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d={getIconPath(item.icon)} />
-              </svg>
-            </span>
+            {/* Chat is Cura, not a generic "messages" tab — everywhere else Cura
+                appears (FloatingChatButton, ChatPage) it's the same speech-bubble
+                + three dots + a small sparkle, never the plain outline every
+                other tab icon uses. Below 720px this badge is the ONLY place
+                that identity shows up at all (FloatingChatButton hides here,
+                see its own module.css), so it gets that full treatment plus a
+                quiet animated ring/glow instead of reusing the flat getIconPath
+                outline the rest of the tab bar uses. */}
+            {isChat ? (
+              <span className={styles.tabIconChat}>
+                <span className={styles.tabIconChatRing} aria-hidden="true" />
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M4 12.5C4 7.81 8.03 4 13 4s9 3.81 9 8.5-4.03 8.5-9 8.5c-1.09 0-2.13-.19-3.1-.53L4 21l1.2-4.02A8.16 8.16 0 0 1 4 12.5Z" />
+                  <circle cx="9.5" cy="12.5" r="0.9" fill="currentColor" stroke="none" />
+                  <circle cx="13" cy="12.5" r="0.9" fill="currentColor" stroke="none" />
+                  <circle cx="16.5" cy="12.5" r="0.9" fill="currentColor" stroke="none" />
+                </svg>
+                <svg className={styles.tabIconChatSparkle} viewBox="0 0 24 24" width="9" height="9" fill="currentColor" aria-hidden="true">
+                  <path d="M12 2 13.8 8.9 21 12l-7.2 3.1L12 22l-1.8-6.9L3 12l7.2-3.1L12 2Z" />
+                </svg>
+              </span>
+            ) : (
+              <span className={styles.tabIcon}>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d={getIconPath(item.icon)} />
+                </svg>
+              </span>
+            )}
             <span>{item.shortLabel}</span>
           </Link>
         );
