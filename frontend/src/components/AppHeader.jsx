@@ -8,7 +8,7 @@ import SettingsMenu from "./SettingsMenu";
 import ThemeToggle from "./ThemeToggle";
 import styles from "./AppHeader.module.css";
 
-const SECTION_IDS = ["departments-heading", "why-us-heading", "how-it-works-heading", "about-heading"];
+const SECTION_IDS = ["departments-heading", "why-us-heading", "cura-heading", "how-it-works-heading", "about-heading"];
 
 // Public landing nav only now - the authenticated patient/admin nav lives in
 // PrimaryNavDesktop, a second row rendered inside this same <header> (see
@@ -202,6 +202,13 @@ export default function AppHeader() {
                 onClick={handleAnchorClick("why-us-heading")}
               >
                 Why us
+              </Link>
+              <Link
+                to="/#cura-heading"
+                className={anchorLinkClass("cura-heading")}
+                onClick={handleAnchorClick("cura-heading")}
+              >
+                Meet Cura
               </Link>
               <Link
                 to="/#how-it-works-heading"

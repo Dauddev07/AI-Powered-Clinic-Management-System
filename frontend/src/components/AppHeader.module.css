@@ -155,8 +155,9 @@
    actually fit in one row until ~1090px — anywhere in the 1025-1089px gap
    wrapped into a second row and truncated the brand text ("Quick Chi...").
    Raised past that whole gap so the header is never caught wrapping
-   mid-collapse. */
-@media (max-width: 1094px) {
+   mid-collapse. Raised again to 1190px once "Meet Cura" was added as a
+   fifth nav link — the wider row needs more room before it fits flat. */
+@media (max-width: 1190px) {
   .navToggle {
     display: inline-flex;
   }
