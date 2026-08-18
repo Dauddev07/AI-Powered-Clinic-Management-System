@@ -39,10 +39,24 @@ export default function Pagination({ page, pageSize, total, onPageChange }) {
   // callers) since this is the one shared control they all funnel through —
   // fixing it here fixes every one of them at once, and any future page that
   // adopts Pagination gets this for free too.
+  //
+  // Reported live (2nd report, admin DoctorList only): landing on page 1 via
+  // the "‹" Previous button specifically never scrolled, while the same
+  // button's "›" Next sibling and the numbered page buttons worked fine.
+  // Cause: only Previous disables itself (page<=1) as a *direct result* of
+  // the very click that fires this handler — and Chromium silently drops a
+  // `window.scrollTo(..., {behavior:"smooth"})` requested from a control that
+  // becomes disabled/loses focus within the same tick, before the animation
+  // ever starts. Next and the number buttons never disable themselves on
+  // click, so they never hit this. Deferring to the next animation frame lets
+  // that disabled-state re-render (and the resulting blur) settle first, so
+  // the scroll request is no longer racing it.
   const goToPage = (newPage) => {
     onPageChange(newPage);
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+    requestAnimationFrame(() => {
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+    });
   };
 
   return (
