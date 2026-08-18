@@ -3908,6 +3908,72 @@ def test_run_general_info_agent_rewrite_rescues_a_query_that_fails_on_its_own(mo
     assert result == "5 departments."
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "hello bye",  # reported live: leaked real (irrelevant) KB chunks instead of "(none)"
+        "hi",
+        "thanks",
+        "ok great",
+    ],
+)
+def test_run_general_info_agent_skips_retrieval_entirely_for_small_talk(monkeypatch, db, ctx, message):
+    """retrieve()'s own similarity gate only inspects the single best chunk's raw
+    score, which can accidentally clear the threshold for a short, low-content
+    message purely by chance — classify_message_intent's deterministic CONVERSATIONAL
+    check must short-circuit before retrieve() is ever called, not rely on that gate."""
+    monkeypatch.setattr(
+        general_info_agent, "retrieve", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not retrieve"))
+    )
+    monkeypatch.setattr(
+        general_info_agent, "rewrite_query", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not rewrite"))
+    )
+
+    captured = {}
+
+    def fake_run_plain_reply(system_prompt, message, history):
+        captured["system_prompt"] = system_prompt
+        return "Hey there!"
+
+    monkeypatch.setattr(general_info_agent.llm, "run_plain_reply", fake_run_plain_reply)
+
+    result = general_info_agent.run_general_info_agent(db, ctx, message, "en", [])
+
+    assert result == "Hey there!"
+    assert "(none)" in captured["system_prompt"]
+
+
+def test_run_general_info_agent_skips_retrieval_for_a_personal_recall_question(monkeypatch, db, ctx):
+    monkeypatch.setattr(
+        general_info_agent, "retrieve", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not retrieve"))
+    )
+    monkeypatch.setattr(general_info_agent.llm, "run_plain_reply", lambda system_prompt, message, history: "reply")
+
+    result = general_info_agent.run_general_info_agent(db, ctx, "what is my name", "en", [])
+
+    assert result == "reply"
+
+
+def test_run_general_info_agent_still_retrieves_for_a_real_question_that_happens_to_be_short(monkeypatch, db, ctx):
+    """Guards against the fix above becoming over-broad: a short message is only
+    exempted from retrieval when it's genuinely small talk/personal-recall shaped —
+    a short real question must still hit retrieve()."""
+    from app.rag.retrieval import RetrievalResult
+
+    monkeypatch.setattr(
+        general_info_agent,
+        "retrieve",
+        lambda db, clinic_id, query: RetrievalResult(
+            matched=True, best_score=0.9, chunks=["Clinic hours: 9-5."], fallback_message=None
+        ),
+    )
+    monkeypatch.setattr(general_info_agent.llm, "run_plain_reply", lambda system_prompt, message, history: "9-5.")
+
+    result = general_info_agent.run_general_info_agent(db, ctx, "what are your hours?", "en", [])
+
+    assert result == "9-5."
+
+
 def test_run_general_info_agent_never_rewrites_a_clean_standalone_question_even_with_unrelated_history(
     monkeypatch, db, ctx
 ):

@@ -28,6 +28,9 @@ from app.rag.retrieval import retrieve
 from app.services import llm
 from app.services.department_availability import list_active_department_names
 from app.services.message_classifier import (
+    CONVERSATIONAL,
+    PERSONAL_RECALL,
+    classify_message_intent,
     is_department_list_explanation_request,
     is_department_list_followup_request,
     is_department_list_request,
@@ -99,15 +102,38 @@ def run_general_info_agent(
         )
         return f"{intro}\n\n{body}"
 
-    # Same raw-first, rewrite-as-rescue retrieval pattern as the original
-    # single-pipeline chat.py — a clean standalone question must never be touched
-    # by rewriting, which only kicks in when the raw message genuinely fails.
-    result = retrieve(db, ctx.clinic_id, message)
-    if not result.matched:
-        retrieval_query = rewrite_query(message, history)
-        if retrieval_query != message:
-            result = retrieve(db, ctx.clinic_id, retrieval_query)
-    context_chunks = result.chunks if result.matched else []
+    # Small talk and personal-recall questions never need KB grounding — the
+    # system prompt's own CONVERSATIONAL EXCEPTION already knows how to reply
+    # naturally when context is "(none)", but retrieval's similarity gate is a
+    # coincidence of embedding geometry, not a real "is this even a question"
+    # check: retrieve() only inspects the SINGLE best chunk's raw cosine score
+    # before deciding to return "(none)" — a short, low-content message like
+    # "hello bye" can occasionally score above RETRIEVAL_SIMILARITY_THRESHOLD
+    # against some unrelated KB chunk purely by chance, and once that one score
+    # clears the bar, the ensemble step returns its top 5 chunks unconditionally
+    # regardless of whether any of them are actually relevant. Reported live:
+    # exactly this happened for "hello bye" — real (irrelevant) doctor/
+    # department chunks leaked into the prompt instead of "(none)".
+    # classify_message_intent's own heuristic (word-list/shape based, not
+    # embedding-based) is a deterministic check for "is this even a knowledge
+    # question" that doesn't depend on chance embedding geometry, so it's
+    # checked first and skips retrieval entirely for these two intents — the
+    # same behavior the pre-orchestrator single-pipeline system already
+    # guaranteed via this exact classifier before the orchestrator rewrite.
+    intent = classify_message_intent(message, history)
+    if intent in (CONVERSATIONAL, PERSONAL_RECALL):
+        context_chunks = []
+    else:
+        # Same raw-first, rewrite-as-rescue retrieval pattern as the original
+        # single-pipeline chat.py — a clean standalone question must never be
+        # touched by rewriting, which only kicks in when the raw message
+        # genuinely fails.
+        result = retrieve(db, ctx.clinic_id, message)
+        if not result.matched:
+            retrieval_query = rewrite_query(message, history)
+            if retrieval_query != message:
+                result = retrieve(db, ctx.clinic_id, retrieval_query)
+        context_chunks = result.chunks if result.matched else []
 
     system_prompt = llm._SYSTEM_PROMPT.format(
         language_name=llm._LANGUAGE_NAMES.get(language, "English"),
