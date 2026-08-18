@@ -1,9 +1,12 @@
-@property --banner-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-
+/* Reported live: the previous version's spinning accent-colored conic
+   border plus a green diagonal wash across the whole card read as "too
+   green" rather than stylish — replaced with a plain neutral card (the
+   app's own surface/border tokens, no --app-accent anywhere in the
+   background) that gets its polish from depth and texture instead of
+   color: a soft lift shadow, a faint neutral dot-grid bleeding from one
+   corner (the same ambient texture language Landing.module.css's hero uses,
+   just toned to --app-text-subtitle instead of the brand accent), and a
+   subtle top-edge highlight for a touch of glass-like sheen. */
 .banner {
   position: relative;
   isolation: isolate;
@@ -14,131 +17,31 @@
   gap: 1.75rem;
   padding: 2.25rem 2.5rem;
   margin-bottom: 1.75rem;
-  border: 1.5px solid transparent;
+  border: 1px solid var(--app-border);
   border-radius: 24px;
-  /* Three layers: a second radial glow (bottom-left, the info tone) plus the
-     original diagonal accent wash — both clipped to padding-box so they only
-     fill the card's interior — sitting over a slow-rotating conic gradient
-     clipped to border-box. Since the interior layers are opaque, the conic
-     only shows through the 1.5px transparent border itself: a continuously
-     shifting gradient ring around the whole card instead of the old flat
-     top-only accent bar. */
-  background:
-    radial-gradient(
-      ellipse 70% 60% at 2% 100%,
-      color-mix(in srgb, var(--app-info-text) 16%, transparent),
-      transparent 72%
-    ) padding-box,
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--app-accent) 13%, var(--app-bg-card)),
-      var(--app-bg-card) 62%
-    ) padding-box,
-    conic-gradient(
-      from var(--banner-angle),
-      color-mix(in srgb, var(--app-accent) 70%, transparent),
-      color-mix(in srgb, var(--app-info-text) 55%, transparent),
-      color-mix(in srgb, var(--app-accent) 70%, transparent)
-    ) border-box;
-  box-shadow: 0 10px 32px var(--app-shadow);
-  animation: banner-border-spin 12s linear infinite;
+  background: var(--app-bg-card);
+  box-shadow: 0 10px 28px var(--app-shadow), inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
 }
 
-@keyframes banner-border-spin {
-  to {
-    --banner-angle: 360deg;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .banner {
-    animation: none;
-  }
-}
-
-/* Light theme's white card background made the accent washes/border ring
-   read as barely-there next to dark theme's much higher contrast against a
-   near-black card — deepened the tints and shadow here specifically so the
-   banner reads as a deliberate highlight, not a flat white box, without
-   touching dark theme's already-working balance. */
-/* Dark theme already read fine at the original tints, but asked for "a bit
-   better" too — a smaller nudge than light theme's fix above (that one was
-   correcting a real washed-out problem; this is just extra polish). */
-html[data-theme="dark"] .banner {
-  background:
-    radial-gradient(
-      ellipse 70% 60% at 2% 100%,
-      color-mix(in srgb, var(--app-info-text) 22%, transparent),
-      transparent 72%
-    ) padding-box,
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--app-accent) 20%, var(--app-bg-card)),
-      var(--app-bg-card) 62%
-    ) padding-box,
-    conic-gradient(
-      from var(--banner-angle),
-      color-mix(in srgb, var(--app-accent) 80%, transparent),
-      color-mix(in srgb, var(--app-info-text) 65%, transparent),
-      color-mix(in srgb, var(--app-accent) 80%, transparent)
-    ) border-box;
-  box-shadow: 0 12px 34px color-mix(in srgb, var(--app-accent) 20%, var(--app-shadow));
-}
-
-html[data-theme="dark"] .banner::after {
-  background: radial-gradient(
-    circle,
-    color-mix(in srgb, var(--app-accent) 38%, transparent),
-    transparent 72%
-  );
-}
-
-html[data-theme="light"] .banner {
-  background:
-    radial-gradient(
-      ellipse 70% 60% at 2% 100%,
-      color-mix(in srgb, var(--app-info-text) 26%, transparent),
-      transparent 72%
-    ) padding-box,
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--app-accent) 22%, var(--app-bg-card)),
-      var(--app-bg-card) 62%
-    ) padding-box,
-    conic-gradient(
-      from var(--banner-angle),
-      color-mix(in srgb, var(--app-accent) 85%, transparent),
-      color-mix(in srgb, var(--app-info-text) 70%, transparent),
-      color-mix(in srgb, var(--app-accent) 85%, transparent)
-    ) border-box;
-  box-shadow: 0 12px 34px color-mix(in srgb, var(--app-accent) 16%, var(--app-shadow));
-}
-
-/* The corner glow — sits behind .text (z-index below), bleeding off the
-   card's own edge so it reads as depth rather than a pasted-on shape. */
+/* A quiet dot-grid texture bleeding from the top-right corner — purely
+   neutral (--app-text-subtitle, not the brand accent), masked so it fades
+   out well before it reaches the text. Reads as a deliberate material
+   detail rather than a flat, empty card. */
 .banner::after {
   content: "";
   position: absolute;
-  top: -35%;
-  right: -12%;
-  width: 22rem;
-  height: 22rem;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    color-mix(in srgb, var(--app-accent) 30%, transparent),
-    transparent 72%
-  );
+  inset: 0;
   z-index: 0;
-  pointer-events: none;
-}
-
-html[data-theme="light"] .banner::after {
-  background: radial-gradient(
+  background-image: radial-gradient(
     circle,
-    color-mix(in srgb, var(--app-accent) 42%, transparent),
-    transparent 72%
+    color-mix(in srgb, var(--app-text-subtitle) 45%, transparent) 1.4px,
+    transparent 1.4px
   );
+  background-size: 20px 20px;
+  -webkit-mask-image: radial-gradient(ellipse 55% 85% at 100% 0%, black 0%, transparent 72%);
+  mask-image: radial-gradient(ellipse 55% 85% at 100% 0%, black 0%, transparent 72%);
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 .text {
@@ -285,11 +188,6 @@ html[data-theme="light"] .banner::after {
     padding: 1.5rem;
     gap: 1rem;
     border-radius: 20px;
-  }
-
-  .banner::after {
-    width: 14rem;
-    height: 14rem;
   }
 
   .heading {
