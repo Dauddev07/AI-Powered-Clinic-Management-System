@@ -424,12 +424,25 @@ _NEGATION_TOKENS = frozenset({
     "don't", "dont", "doesn't", "doesnt", "didn't", "didnt",
     "won't", "wont", "wouldn't", "wouldnt", "can't", "cant", "cannot",
 })
-_NEGATION_LOOKBACK_TOKENS = 3
+# A negation needs more than one token of lookback to catch realistic phrasing
+# ("not going to reschedule", "don't want to reschedule") — but a plain fixed
+# window is too blunt on its own: "don't reschedule, just cancel it" put
+# "cancel" within a 3-token window of "don't", wrongly negating an unrelated,
+# later clause. These reset words mark a clause boundary — walking backward
+# from the action word, hitting one of these BEFORE hitting an actual negation
+# token means "stop, that negation belongs to a different clause."
+_NEGATION_RESET_TOKENS = frozenset({"but", "instead", "actually", "rather", "just"})
+_NEGATION_LOOKBACK_TOKENS = 4
 
 
 def _action_word_is_negated(tokens: list[str], index: int) -> bool:
     window_start = max(0, index - _NEGATION_LOOKBACK_TOKENS)
-    return any(token in _NEGATION_TOKENS for token in tokens[window_start:index])
+    for token in reversed(tokens[window_start:index]):
+        if token in _NEGATION_TOKENS:
+            return True
+        if token in _NEGATION_RESET_TOKENS:
+            return False
+    return False
 
 
 def _detect_action_intent(message: str) -> str | None:
@@ -697,7 +710,11 @@ def _doctor_already_shown(history: list[ConversationMemory], doctor_name: str, d
             # confirmed anything yet, so naming this doctor here doesn't count.
             continue
         else:
-            if target_name in content.strip().lower():
+            # Periods after "Dr" are inconsistent in free-form prose (the LLM
+            # doesn't always write "Dr." the same way it's stored in the DB) —
+            # stripped from both sides before comparing so "Dr Farhan Malik"
+            # in prose still matches a stored "Dr. Farhan Malik".
+            if target_name.replace(".", "") in content.strip().lower().replace(".", ""):
                 return True
             continue
         for group in department_groups:

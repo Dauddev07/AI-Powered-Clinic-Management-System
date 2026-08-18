@@ -2234,6 +2234,47 @@ def test_doctor_already_shown_false_with_empty_history():
     assert appointment_agent._doctor_already_shown([], "Dr. Junaid Mirza", "Orthopedics") is False
 
 
+def test_doctor_already_shown_true_for_a_plain_prose_assistant_reply_naming_the_doctor():
+    # Reported live: a confirming reply about one specific doctor doesn't always come
+    # back as a structured DOCTOR_OPTIONS/DEPARTMENT_LIST card — sometimes it's just
+    # plain prose (e.g. confirming "Dr Farhan Malik" by describing his hours). That
+    # used to leave _doctor_already_shown with nothing to match, silently failing a
+    # doctor-scoped follow-up later in the same conversation.
+    history = [
+        _row(
+            "assistant",
+            "Dr Farhan Malik - General Cardiology - available on Saturday and Sunday "
+            "from 10:00 am to 6:00 pm, 15-minute slots.",
+        ),
+    ]
+    assert appointment_agent._doctor_already_shown(history, "Dr. Farhan Malik", "Cardiology") is True
+    # A doctor never mentioned in any assistant reply must still come back False.
+    assert appointment_agent._doctor_already_shown(history, "Dr. Ahmed Farooq", "Cardiology") is False
+
+
+def test_doctor_already_shown_ignores_a_doctor_named_only_in_a_pending_disambiguation_question():
+    # A DOCTOR_DISAMBIGUATION_MARKER card is a QUESTION the assistant is still
+    # waiting on an answer to ("did you mean X or Y?") — naming a doctor there is
+    # not the same as having confirmed them, so it must not count as "already shown".
+    history = [
+        _row(
+            "assistant",
+            DOCTOR_DISAMBIGUATION_MARKER
+            + json.dumps(
+                {
+                    "kind": "doctor_name",
+                    "question": "Did you mean Dr. Iqra Qureshi or Dr. Iqra Raza?",
+                    "candidates": [
+                        {"doctor_name": "Dr. Iqra Qureshi", "department_name": "ENT"},
+                        {"doctor_name": "Dr. Iqra Raza", "department_name": "ENT"},
+                    ],
+                }
+            ),
+        ),
+    ]
+    assert appointment_agent._doctor_already_shown(history, "Dr. Iqra Raza", "ENT") is False
+
+
 def test_run_appointment_agent_skips_confirmation_when_doctor_already_shown_in_history(
     monkeypatch, db, ctx, clinic, department, doctor
 ):
@@ -2977,6 +3018,61 @@ def test_run_appointment_agent_narrows_after_resolving_a_name_disambiguation_rep
     assert result.startswith(DOCTOR_OPTIONS_MARKER)
     payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
     assert [d["doctor_name"] for d in payload["doctors"]] == ["Dr. Iqra Raza"]
+
+
+# --- action-intent negation (_detect_action_intent) ---------------------------------
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("I want to reschedule my appointment", "reschedule"),
+        ("please cancel my appointment", "cancel"),
+        ("reshedule my upcmoing appointment", "reschedule"),  # typo tolerance preserved
+        # Reported live: a real conversation opened with "no no not reschedule but
+        # book" — the negation sits right next to "reschedule", but the old plain
+        # word-SET check had no concept of order/negation and matched it anyway.
+        ("no no not reschedule but book", None),
+        ("don't reschedule, just cancel it", "cancel"),
+        ("never mind rescheduling", None),
+        ("book with dr farhan malik at 11am", None),
+    ],
+)
+def test_detect_action_intent_respects_local_negation(message, expected):
+    assert appointment_agent._detect_action_intent(message) == expected
+
+
+def test_run_appointment_agent_does_not_treat_a_retracted_reschedule_as_a_live_action(
+    monkeypatch, db, ctx, doctor
+):
+    # Reported live: the patient's very first message ("no no not reschedule but
+    # book") was misread as a reschedule request despite explicitly retracting it.
+    # Later, tapping a slot for Dr. Ahmed Khan (who has no active appointment) named
+    # exactly one doctor with no action word of its own, so _most_recent_action_intent
+    # scanned back through recent turns and picked the stale, retracted "reschedule"
+    # back up — replying "You don't have an upcoming appointment... to reschedule"
+    # to what was actually a brand new booking request. The fix makes
+    # _detect_action_intent itself negation-aware, so the retracted mention is never
+    # even a candidate for that lookback to find.
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["called"] = True
+        return "showing slots"
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+
+    history = [
+        _row("user", "no no not reschedule but book"),
+        _row("assistant", "Sure! Which department or doctor would you like to see?"),
+    ]
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "I'd like to book the appointment with Dr. Ahmed Khan at 11:00 AM.", "en", history
+    )
+
+    assert "to reschedule" not in result
+    assert "don't have an upcoming appointment" not in result
+    assert captured.get("called") is True
 
 
 # --- appointment-ambiguity handoff (cancel/reschedule against real appointments) ----
