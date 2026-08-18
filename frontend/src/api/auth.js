@@ -4,6 +4,10 @@ export function login(email, password) {
   return apiFetch("/auth/login", { method: "POST", body: { email, password } });
 }
 
+export function logout(refreshToken) {
+  return apiFetch("/auth/logout", { method: "POST", body: { refresh_token: refreshToken } });
+}
+
 export function register(payload) {
   return apiFetch("/auth/register", { method: "POST", body: payload });
 }

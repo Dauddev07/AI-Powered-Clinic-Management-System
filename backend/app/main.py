@@ -38,6 +38,9 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
 
 from app.api import (
@@ -54,6 +57,7 @@ from app.api import (
     slots,
 )
 from app.core.db import engine
+from app.core.rate_limit import limiter
 from app.services.scheduler import shutdown_scheduler, start_scheduler
 
 
@@ -84,6 +88,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Per-IP rate limiting (see app/core/rate_limit.py) — individual routes opt in via
+# @limiter.limit(...), applied to login/registration/OTP/chat endpoints below.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.include_router(auth.router)
 app.include_router(clinics.router)

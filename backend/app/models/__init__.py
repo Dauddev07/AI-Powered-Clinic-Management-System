@@ -14,6 +14,7 @@ from app.models.kb_document import KBDocument
 from app.models.notification import Notification
 from app.models.password_reset_otp import PasswordResetOtp
 from app.models.patient_memory_profile import PatientMemoryProfile
+from app.models.refresh_token import RefreshToken
 from app.models.slot import Slot
 from app.models.user import User
 
@@ -34,6 +35,7 @@ __all__ = [
     "Notification",
     "PasswordResetOtp",
     "PatientMemoryProfile",
+    "RefreshToken",
     "Slot",
     "User",
 ]

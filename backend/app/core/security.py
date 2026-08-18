@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -24,9 +26,23 @@ def create_access_token(*, user_id: uuid.UUID, clinic_id: uuid.UUID, role: str) 
         "clinic_id": str(clinic_id),
         "role": role,
         "iat": now,
-        "exp": now + timedelta(hours=settings.JWT_EXPIRE_HOURS),
+        "exp": now + timedelta(minutes=settings.JWT_ACCESS_EXPIRE_MINUTES),
     }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+def generate_refresh_token_value() -> str:
+    """The plaintext refresh token handed to the client — only its hash (see
+    hash_refresh_token) is ever persisted. 32 bytes of randomness (256 bits) is
+    already far beyond brute-forceable, so unlike a password there's no benefit to a
+    slow/salted hash here; see RefreshToken's own docstring for why sha256 is used
+    instead of bcrypt.
+    """
+    return secrets.token_urlsafe(32)
+
+
+def hash_refresh_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 class InvalidTokenError(Exception):

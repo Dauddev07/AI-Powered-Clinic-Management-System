@@ -22,8 +22,20 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    # Opaque, long-lived, revocable — exchanged via POST /auth/refresh for a new
+    # access token once the short-lived one above expires, instead of forcing a
+    # full re-login every JWT_ACCESS_EXPIRE_MINUTES. See app/services/refresh_tokens.py.
+    refresh_token: str
     token_type: Literal["bearer"] = "bearer"
     must_change_password: bool
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str = Field(min_length=1)
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str = Field(min_length=1)
 
 
 class RegisterRequest(BaseModel):

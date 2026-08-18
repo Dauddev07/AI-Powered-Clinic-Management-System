@@ -8,7 +8,17 @@ class Settings(BaseSettings):
 
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_HOURS: int = 24
+    # Short-lived on purpose — this is the token sent on every request. A stolen
+    # access token is only ever usable for this long, regardless of whether the
+    # theft is ever noticed. Session longevity now comes from the refresh token
+    # below instead, which is revocable (see app/models/refresh_token.py).
+    JWT_ACCESS_EXPIRE_MINUTES: int = 30
+    # How long an unused refresh token stays valid. Each successful /auth/refresh
+    # call rotates it (see app/services/refresh_tokens.py), so a session that's
+    # actively used never actually hits this ceiling — it only matters for a
+    # genuinely abandoned session (patient never returns) or a device the patient
+    # never explicitly logs out of.
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     LLM_API_KEY: str = ""
     # Optional additional Groq API keys — when set, app.core.api_keys round-robins

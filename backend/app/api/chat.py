@@ -1,11 +1,12 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_clinic_context, require_role
 from app.core.db import get_db
+from app.core.rate_limit import limiter
 from app.core.tenancy import ClinicContext
 from app.models.conversation_memory import ConversationMemory
 from app.models.user import User
@@ -18,8 +19,10 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 @router.post("", response_model=ChatResponse)
+@limiter.limit("20/minute")
 def send_chat_message(
     payload: ChatRequest,
+    request: Request = None,
     _current_user: User = Depends(require_role("patient")),
     ctx: ClinicContext = Depends(get_clinic_context),
     db: Session = Depends(get_db),

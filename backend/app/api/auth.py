@@ -1,12 +1,13 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.core.db import get_db
+from app.core.rate_limit import limiter
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.clinic import Clinic
 from app.models.user import User
@@ -14,6 +15,8 @@ from app.schemas.auth import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
     LoginRequest,
+    LogoutRequest,
+    RefreshTokenRequest,
     RegisterRequest,
     ResendVerificationRequest,
     ResetPasswordRequest,
@@ -40,6 +43,12 @@ from app.services.password_reset import (
     send_otp_email,
     verify_otp,
 )
+from app.services.refresh_tokens import (
+    InvalidRefreshToken,
+    issue_refresh_token,
+    revoke_refresh_token,
+    rotate_refresh_token,
+)
 
 # Identical wording regardless of whether the email actually has an account, or
 # whether a code was already sent moments ago — never lets a caller distinguish
@@ -55,7 +64,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+@limiter.limit("10/minute")
+def login(payload: LoginRequest, request: Request = None, db: Session = Depends(get_db)) -> TokenResponse:
     # Email is unique per clinic, not globally (a patient may register the same email at
     # more than one branch). The login screen has no branch selector, so the password
     # itself disambiguates which clinic account is being authenticated.
@@ -79,7 +89,8 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
         )
 
     token = create_access_token(user_id=matched.id, clinic_id=matched.clinic_id, role=matched.role)
-    return TokenResponse(access_token=token, must_change_password=matched.must_change_password)
+    refresh_token = issue_refresh_token(db, matched)
+    return TokenResponse(access_token=token, refresh_token=refresh_token, must_change_password=matched.must_change_password)
 
 
 @router.get("/me", response_model=UserWithClinicOut)
@@ -166,9 +177,11 @@ def change_password(
 
 
 @router.post("/forgot-password")
+@limiter.limit("5/minute")
 def forgot_password(
     payload: ForgotPasswordRequest,
     background_tasks: BackgroundTasks,
+    request: Request = None,
     db: Session = Depends(get_db),
 ) -> dict:
     try:
@@ -191,7 +204,8 @@ def forgot_password(
 
 
 @router.post("/verify-reset-otp")
-def verify_reset_otp(payload: VerifyResetOtpRequest, db: Session = Depends(get_db)) -> dict:
+@limiter.limit("10/minute")
+def verify_reset_otp(payload: VerifyResetOtpRequest, request: Request = None, db: Session = Depends(get_db)) -> dict:
     """Lets the frontend show its "code verified ✓" step before ever collecting a
     new password — doesn't consume the code (see verify_otp's own docstring); the
     actual /reset-password call re-checks it before applying anything.
@@ -207,7 +221,8 @@ def verify_reset_otp(payload: VerifyResetOtpRequest, db: Session = Depends(get_d
 
 
 @router.post("/reset-password")
-def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)) -> dict:
+@limiter.limit("10/minute")
+def reset_password(payload: ResetPasswordRequest, request: Request = None, db: Session = Depends(get_db)) -> dict:
     try:
         apply_password_reset(db, payload.email, payload.otp, payload.new_password)
     except InvalidOrExpiredOtp:
@@ -219,9 +234,11 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
 
 
 @router.post("/resend-verification-email")
+@limiter.limit("5/minute")
 def resend_verification_email(
     payload: ResendVerificationRequest,
     background_tasks: BackgroundTasks,
+    request: Request = None,
     db: Session = Depends(get_db),
 ) -> dict:
     try:
@@ -243,9 +260,11 @@ def resend_verification_email(
 
 
 @router.post("/verify-email", response_model=TokenResponse)
+@limiter.limit("10/minute")
 def verify_email(
     payload: VerifyEmailRequest,
     background_tasks: BackgroundTasks,
+    request: Request = None,
     db: Session = Depends(get_db),
 ) -> TokenResponse:
     """On success, logs the patient straight in (same as /login) — they just proved
@@ -263,4 +282,35 @@ def verify_email(
 
     background_tasks.add_task(send_welcome_email, to=user.email, full_name=user.full_name)
     token = create_access_token(user_id=user.id, clinic_id=user.clinic_id, role=user.role)
-    return TokenResponse(access_token=token, must_change_password=user.must_change_password)
+    refresh_token = issue_refresh_token(db, user)
+    return TokenResponse(access_token=token, refresh_token=refresh_token, must_change_password=user.must_change_password)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+@limiter.limit("30/minute")
+def refresh(payload: RefreshTokenRequest, request: Request = None, db: Session = Depends(get_db)) -> TokenResponse:
+    """Exchanges a still-valid refresh token for a new access token, rotating the
+    refresh token itself in the process (see rotate_refresh_token's own docstring for
+    why re-presenting an already-rotated token is treated as invalid rather than
+    silently accepted).
+    """
+    try:
+        user, new_refresh_token = rotate_refresh_token(db, payload.refresh_token)
+    except InvalidRefreshToken:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
+
+    access_token = create_access_token(user_id=user.id, clinic_id=user.clinic_id, role=user.role)
+    return TokenResponse(
+        access_token=access_token, refresh_token=new_refresh_token, must_change_password=user.must_change_password
+    )
+
+
+@router.post("/logout")
+def logout(payload: LogoutRequest, db: Session = Depends(get_db)) -> dict:
+    """Revokes this one refresh token (i.e. this one device/session) — every other
+    session the patient is logged into elsewhere is untouched. The now-short-lived
+    access token this device already holds simply expires on its own within
+    JWT_ACCESS_EXPIRE_MINUTES; there's nothing further to revoke for it.
+    """
+    revoke_refresh_token(db, payload.refresh_token)
+    return {"status": "logged out"}
