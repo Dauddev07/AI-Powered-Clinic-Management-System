@@ -132,7 +132,5 @@ change is required.
 ## Deployment
 
 - **Backend**: Render (free tier) — Postgres + a ChromaDB service, both on Render.
-  Free-tier services spin down after ~15 minutes idle; an uptime monitor keeps both
-  warm.
 - **Frontend**: Vercel, built from `frontend/`.
 - Both auto-deploy on push to `main`.
