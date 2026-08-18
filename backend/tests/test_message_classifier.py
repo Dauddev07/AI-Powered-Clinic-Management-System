@@ -578,6 +578,13 @@ def test_needs_path2_screening_defaults_true_for_genuine_ambiguity():
         "all departments",
         "every department",  # singular after all/every is still an unambiguous full-list request
         "available departments",
+        "how many departments does this clinic have",
+        "how many total depts are there in this clinic?",
+        # Reported live: singular "dept" (no trailing s) still fell through to the
+        # ungrounded LLM+RAG path and got a hallucinated count back — "how many
+        # <singular noun>" isn't ambiguous with a single-doctor question the way the
+        # other branches above are, so this one specifically accepts singular too.
+        "how many dept does this clinic have?",
     ],
 )
 def test_is_department_list_request_true_for_list_phrasings(message):

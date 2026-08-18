@@ -307,7 +307,15 @@ _DEPARTMENT_LIST_RE = re.compile(
     # the patterns above (it's asking for a count, not literally saying "list"/"show"/
     # "available"), so it fell through to the ungrounded LLM+RAG path and hallucinated
     # a number — same failure mode this whole short-circuit exists to prevent.
-    rf"|how\s+many\s+(?:total\s+)?{_DEPT_WORD}\b"
+    #
+    # Reported live again: "how many dept does this clinic have?" (singular "dept",
+    # no trailing s) still fell through the same way, since _DEPT_WORD requires the
+    # plural. Uses _DEPT_WORD_ANY here specifically (unlike the plural-only branches
+    # above) because "how many <singular noun>" isn't actually ambiguous the way
+    # "what dept is Dr. Smith in" is — nobody asks "how many dept" wanting one
+    # specific department back, so there's no single-doctor-question case this could
+    # wrongly capture.
+    rf"|how\s+many\s+(?:total\s+)?{_DEPT_WORD_ANY}\b"
     rf")",
     re.IGNORECASE,
 )
