@@ -18,17 +18,15 @@ export default function WelcomeBanner({ name, tagline }) {
   return (
     <div className={`${styles.banner} reveal`} ref={revealRef}>
       <span className={styles.dotTexture} aria-hidden="true" />
-      {/* Instructed live: no icon or image at all — the card's depth comes
-          from typography instead. A huge, very faint echo of "Welcome"
-          itself bleeding off the card's own edge, the same "oversized
-          ghost-text" flourish an editorial poster/masthead uses, built
-          entirely from the same word already on the card rather than a new
-          decorative asset. */}
-      <span className={styles.watermarkText} aria-hidden="true">
-        Welcome
-      </span>
       <div className={styles.text}>
         <span className={styles.eyebrow}>{greeting}</span>
+        {/* No watermark/icon — instructed live to drop both. The "Welcome,
+            Name" line itself is the one thing this card is built to draw the
+            eye to now: a gradient underline grows in under it (see
+            .heading::after) right after the text settles, then a single
+            light sweep passes across it once (.heading::before) — animated,
+            but a one-time flourish rather than a permanent loop, same
+            restraint the .name shimmer just above it already uses. */}
         <h1 className={styles.heading}>
           Welcome{name && (
             <>
@@ -36,7 +34,6 @@ export default function WelcomeBanner({ name, tagline }) {
             </>
           )}
         </h1>
-        <span className={styles.headingRule} aria-hidden="true" />
         {tagline && <p className={styles.tagline}>{tagline}</p>}
       </div>
     </div>
