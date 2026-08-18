@@ -1,22 +1,20 @@
-/* Reported live twice now: first the old green-washed conic-bordered version
-   was "too green," then the plain flat-card replacement read as "just like
-   every other card" (every dashboard stat card already uses the same flat
-   --app-bg-card + 20px radius + soft shadow recipe — see
-   PatientDashboard.module.css). This version gets its own identity from
-   SHAPE and STRUCTURE instead of a full-surface color wash: a larger radius
-   and scale than any stat card uses, a bold accent spine down the left edge,
-   a real icon badge (not decoration — see WelcomeBanner.jsx's
-   iconForHour) giving it a focal point the way a stat card's own icon badge
-   does, and one soft accent spotlight anchored in a single corner rather
-   than tinting the whole surface. */
+/* Reported live three times now: first the old green-washed conic-bordered
+   version was "too green," then the plain flat-card replacement read as
+   "just like every other card" (every dashboard stat card already uses the
+   same flat --app-bg-card + 20px radius + soft shadow recipe — see
+   PatientDashboard.module.css), then instructed live again to drop the icon
+   badge/watermark glyph entirely — no icon or image at all. This version
+   gets its identity from SHAPE, TEXTURE, and TYPOGRAPHY instead: a larger
+   radius and scale than any stat card uses, a bold accent spine down the
+   left edge, a giant ghost-text echo of "Welcome" itself (see
+   WelcomeBanner.jsx's .watermarkText — built from the card's own word, not
+   a new asset), and one soft accent spotlight anchored in a single corner
+   rather than tinting the whole surface. */
 .banner {
   position: relative;
   isolation: isolate;
   overflow: hidden;
   box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  gap: 1.75rem;
   padding: 2.5rem 2.75rem;
   margin-bottom: 1.75rem;
   border: 1px solid var(--app-border);
@@ -80,89 +78,39 @@ html[data-theme="light"] .banner::after {
   pointer-events: none;
 }
 
-/* A large, faint echo of the badge's own icon bleeding off the card's
-   bottom-right corner — sized well past the visible card and clipped by
-   .banner's own overflow: hidden, so only a soft partial silhouette shows
-   through, like a watermark printed on stationery rather than a second
-   real icon. */
-.watermark {
+/* A giant, very faint echo of "Welcome" itself bleeding off the card's own
+   right edge — built entirely from type (the card's own font-display serif,
+   no new asset), clipped by .banner's overflow: hidden so only a partial
+   silhouette of the letterforms shows through, like an oversized masthead
+   word printed behind the real heading rather than a second competing line
+   of text. aria-hidden since it's decorative and the real heading already
+   says the same word. */
+.watermarkText {
   position: absolute;
   z-index: 0;
-  right: -2.5rem;
-  bottom: -3.5rem;
-  width: 11rem;
-  height: 11rem;
+  right: -0.75rem;
+  bottom: -3.2rem;
+  font-family: var(--font-display);
+  font-size: 8.5rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
   color: var(--app-text-title);
   opacity: 0.05;
   pointer-events: none;
 }
 
-/* The time-of-day icon badge — same "icon in a soft tinted rounded square"
-   language the rest of the app already uses for card icon badges (see
-   PatientDashboard.module.css's stat icons, Landing.module.css's
-   .deptIcon/.featureIcon), scaled up to anchor a banner this size. */
-.iconBadge {
-  position: relative;
-  z-index: 1;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 4.75rem;
-  height: 4.75rem;
-  border-radius: 20px;
-  background: linear-gradient(145deg, color-mix(in srgb, var(--app-accent) 20%, var(--app-bg-card)), color-mix(in srgb, var(--app-accent) 5%, var(--app-bg-card)));
-  border: 1px solid color-mix(in srgb, var(--app-accent) 24%, var(--app-border));
-  color: var(--app-accent);
-  box-shadow: 0 8px 22px color-mix(in srgb, var(--app-accent) 22%, transparent);
-}
-
-/* A quiet breathing halo behind the badge — the same "AI/alive" pulse
-   language FloatingChatButton uses for Cura (see its own .pulse), reused
-   here at rest-state scale so the one genuinely dynamic element on the page
-   ties back to a pattern the app already establishes, instead of a new
-   one-off animation. Sits behind the badge (negative z-index within the
-   badge's own stacking context) so it never obscures the icon itself. */
-.iconBadgeHalo {
-  position: absolute;
-  inset: -8px;
-  z-index: -1;
-  border-radius: 24px;
-  background: var(--app-accent);
-  opacity: 0.22;
-  animation: welcome-badge-breathe 3.2s ease-in-out infinite;
-}
-
-@keyframes welcome-badge-breathe {
-  0%, 100% {
-    transform: scale(0.94);
-    opacity: 0.22;
-  }
-  50% {
-    transform: scale(1.12);
-    opacity: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .iconBadgeHalo {
-    animation: none;
-    opacity: 0.12;
+@media (max-width: 720px) {
+  .watermarkText {
+    font-size: 6rem;
+    bottom: -2.2rem;
   }
 }
 
 @media (max-width: 560px) {
-  .iconBadge {
-    width: 3.75rem;
-    height: 3.75rem;
-    border-radius: 16px;
-  }
-
-  .watermark {
-    width: 8rem;
-    height: 8rem;
-    right: -2rem;
-    bottom: -2.5rem;
+  .watermarkText {
+    display: none;
   }
 }
 
