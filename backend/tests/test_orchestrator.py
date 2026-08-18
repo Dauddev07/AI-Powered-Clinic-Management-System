@@ -2401,18 +2401,24 @@ def test_run_appointment_agent_resolves_doctor_from_pronoun_referencing_prior_me
     # pronoun "his", and wasn't a bare "yes" either. Neither existing recovery path
     # fired, leaving the LLM to guess a department_name from raw history — it
     # apparently echoed "otolaryngology" (a specialization, not the real department
-    # name), and get_department_availability's exact-match lookup rejected it.
-    # This confirms the doctor is now recovered deterministically from the
-    # patient's own prior message via the pronoun, with a real confirming question
-    # asked (never skipped, since the patient never actually confirmed this
-    # identity — unlike the bare-"yes" case).
-    captured = {}
-
-    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
-        captured["system_prompt"] = system_prompt
-        return "reply"
-
-    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    # name), and get_department_availability's exact-match lookup rejected it. This
+    # confirms the doctor is now recovered deterministically from the patient's own
+    # prior message via the pronoun.
+    #
+    # Reported live (2nd report): a further real conversation showed the assistant's
+    # own prior reply (naming this exact doctor in plain prose, as below) wasn't
+    # recognized as "already shown" at all — _doctor_already_shown only checked
+    # structured DOCTOR_OPTIONS/DEPARTMENT_LIST cards, so a later pronoun follow-up
+    # like this one fell all the way through to the doctor-blind LLM tool loop and
+    # showed the WHOLE department instead of just this doctor. _doctor_already_shown
+    # now also recognizes a free-form assistant reply naming the doctor, so this
+    # resolves straight to a real, single-doctor answer — no redundant confirming
+    # question, since the patient has already effectively been told who this is.
+    monkeypatch.setattr(
+        appointment_agent.llm,
+        "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not fall through to the LLM tool loop")),
+    )
 
     history = [
         _row("user", "hook me up with dr ahmed khan"),
@@ -2422,12 +2428,14 @@ def test_run_appointment_agent_resolves_doctor_from_pronoun_referencing_prior_me
             "from 2:00 pm to 8:00 pm with 15-minute appointment slots.",
         ),
     ]
-    appointment_agent.run_appointment_agent(db, ctx, "show me his available slots on fri", "en", history)
+    result = appointment_agent.run_appointment_agent(db, ctx, "show me his available slots on fri", "en", history)
 
-    assert "RESOLVED DOCTOR" in captured["system_prompt"]
-    assert "Dr. Ahmed Khan" in captured["system_prompt"]
-    assert "Cardiology" in captured["system_prompt"]
-    assert "ask ONE direct confirming question" in captured["system_prompt"]
+    # No slots ever seeded for this fixture doctor, so the deterministic
+    # short-circuit's own "nothing open" reply is what comes back — the point
+    # being asserted here is that it fired at all (real, resolved-to-one-doctor
+    # deterministic code), not that it found an open slot.
+    assert "Dr. Ahmed Khan" in result
+    assert "doesn't have any open slots" in result
 
 
 def test_run_appointment_agent_pronoun_with_no_prior_named_doctor_does_not_force_a_match(

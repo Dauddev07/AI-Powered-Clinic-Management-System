@@ -89,7 +89,7 @@ from app.services.message_classifier import (
     _CANCEL_ACTION_WORDS,
     _RESCHEDULE_ACTION_WORDS,
     DEPARTMENT_TITLE_HINTS,
-    _fuzzy_words_intersect,
+    _fuzzy_word_in,
     _preceding_assistant_turn_looks_like_a_question,
 )
 from app.services.orchestrator.symptom_hints import departments_hinted_by_patient_symptom_words
@@ -410,6 +410,28 @@ def _message_or_pending_name_disambiguation_asks_to_narrow(
     return bool(prior_message and _message_asks_to_narrow_to_one_doctor(prior_message))
 
 
+# Reported live: "no no not reschedule but book" still resolved to
+# _detect_action_intent returning "reschedule" — the old check was a plain SET
+# intersection against the message's words, which only tells you a keyword is
+# PRESENT somewhere, never whether it's negated. A few tokens of local lookback
+# is enough to catch the common negation phrasings ("not reschedule", "don't
+# reschedule", "never mind rescheduling") without needing real NLP — deliberately
+# a short, fixed window rather than scanning the whole message, so an unrelated
+# negation earlier in a longer message ("no, my name's Ali, I want to reschedule")
+# can't wrongly suppress a genuine request stated later in the same sentence.
+_NEGATION_TOKENS = frozenset({
+    "not", "no", "never", "without",
+    "don't", "dont", "doesn't", "doesnt", "didn't", "didnt",
+    "won't", "wont", "wouldn't", "wouldnt", "can't", "cant", "cannot",
+})
+_NEGATION_LOOKBACK_TOKENS = 3
+
+
+def _action_word_is_negated(tokens: list[str], index: int) -> bool:
+    window_start = max(0, index - _NEGATION_LOOKBACK_TOKENS)
+    return any(token in _NEGATION_TOKENS for token in tokens[window_start:index])
+
+
 def _detect_action_intent(message: str) -> str | None:
     """Cheap keyword check for a fresh cancel/reschedule request — deliberately
     narrow (unlike the broad, over-inclusive keyword lists elsewhere in this
@@ -421,14 +443,20 @@ def _detect_action_intent(message: str) -> str | None:
     Reported live: "reshedule my upcmoing appointment" (a typo'd "reschedule")
     didn't get this same deterministic handoff a correctly-spelled message does —
     exact word-set matching has no tolerance for a dropped/transposed letter.
-    Fuzzy (edit-distance) matching via message_classifier._fuzzy_words_intersect
-    absorbs that without loosening this into a broad keyword list — see its own
-    comment for why the distance threshold stays safe against false positives."""
-    words = set(re.findall(r"[a-z0-9']+", message.lower()))
-    if _fuzzy_words_intersect(words, _CANCEL_KEYWORDS):
-        return "cancel"
-    if _fuzzy_words_intersect(words, _RESCHEDULE_KEYWORDS):
-        return "reschedule"
+    Fuzzy (edit-distance) matching via message_classifier._fuzzy_word_in absorbs
+    that without loosening this into a broad keyword list — see its own comment
+    for why the distance threshold stays safe against false positives.
+
+    Tokens are walked in order (not just checked as an unordered set, see
+    _action_word_is_negated above) so an explicitly negated mention — the patient
+    retracting their own earlier wording — is skipped rather than accepted."""
+    tokens = re.findall(r"[a-z0-9']+", message.lower())
+    for index, token in enumerate(tokens):
+        if _fuzzy_word_in(token, _CANCEL_KEYWORDS) and not _action_word_is_negated(tokens, index):
+            return "cancel"
+    for index, token in enumerate(tokens):
+        if _fuzzy_word_in(token, _RESCHEDULE_KEYWORDS) and not _action_word_is_negated(tokens, index):
+            return "reschedule"
     return None
 
 
@@ -621,20 +649,39 @@ def _most_recent_availability_marker(history: list[ConversationMemory]) -> dict 
 
 
 def _doctor_already_shown(history: list[ConversationMemory], doctor_name: str, department_name: str) -> bool:
-    """True when this exact doctor+department already appeared in a real
-    DOCTOR_OPTIONS_MARKER/DEPARTMENT_LIST_MARKER card shown earlier in `history` —
-    scans every such card, not just the most recent one, since the card in question
-    may be several turns back (e.g. a symptom-triage card from earlier the same
-    conversation). Used to skip the RESOLVED DOCTOR confirming question when the
-    patient is plainly just referencing something the assistant itself already told
-    them, not naming a doctor cold."""
+    """True when this doctor was already surfaced to the patient earlier in
+    `history` — either in a real DOCTOR_OPTIONS_MARKER/DEPARTMENT_LIST_MARKER
+    card (scans every such card, not just the most recent one, since it may be
+    several turns back), OR in a plain free-form assistant reply that names
+    them (see the fallback below). Used to skip the RESOLVED DOCTOR confirming
+    question — and, downstream, to let the narrowing short-circuit build a
+    real single-doctor card — when the patient is plainly just referencing
+    someone the assistant itself already told them about, not naming a doctor
+    cold.
+
+    Reported live: "dr farhan" got a plain prose confirmation ("Dr Farhan
+    Malik – General Cardiology – available on Saturday and Sunday...") with
+    no DOCTOR_OPTIONS/DEPARTMENT_LIST card at all — RESOLVED DOCTOR's
+    "ask ONE confirming question... unless the patient already confirmed"
+    instruction left the LLM to informally acknowledge it in prose instead.
+    The very next turn, "show me his available slots", found no card to
+    match here, so doctor_already_shown stayed False, the narrowing
+    short-circuit below never fired (it requires doctor_already_shown), and
+    the fallback LLM tool call — which cannot filter get_department_availability
+    by doctor at all — showed the whole department instead of just this one
+    doctor. A free-form assistant reply that names this exact doctor now also
+    counts as "already shown": the department isn't cross-checked in that
+    branch (plain prose has no structured department field to check against),
+    but a real doctor's full name is specific enough on its own. Worst case
+    is skipping one redundant confirming question when the name only
+    appeared in passing — a smaller cost than losing doctor-scoping
+    outright."""
     target_name = doctor_name.strip().lower()
     target_department = department_name.strip().lower()
     for row in history:
         if getattr(row, "role", None) != "assistant":
             continue
         content = getattr(row, "content", "") or ""
-        department_groups = None
         if content.startswith(DOCTOR_OPTIONS_MARKER):
             try:
                 department_groups = [json.loads(content[len(DOCTOR_OPTIONS_MARKER):])]
@@ -645,7 +692,13 @@ def _doctor_already_shown(history: list[ConversationMemory], doctor_name: str, d
                 department_groups = json.loads(content[len(DEPARTMENT_LIST_MARKER):]).get("departments", [])
             except (ValueError, TypeError):
                 continue
-        if not department_groups:
+        elif content.startswith(DOCTOR_DISAMBIGUATION_MARKER):
+            # A pending "did you mean X or Y?" question — the patient hasn't
+            # confirmed anything yet, so naming this doctor here doesn't count.
+            continue
+        else:
+            if target_name in content.strip().lower():
+                return True
             continue
         for group in department_groups:
             if (group.get("department_name") or "").strip().lower() != target_department:
