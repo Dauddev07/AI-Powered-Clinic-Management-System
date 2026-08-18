@@ -134,11 +134,30 @@ function FilterDropdown({ id, label, value, options, onChange, searchable = fals
     // for every scrollable descendant, including the option list itself (it has
     // its own overflow-y: auto) — so scrolling *inside* the list must be ignored
     // here, or scrolling to reach a lower option would immediately close the panel.
+    //
+    // Reported live (small screens, searchable dropdowns only — Doctor's own
+    // filter): openMenu() auto-focuses the search input the instant the panel
+    // opens, which raises the on-screen keyboard — and on mobile that keyboard
+    // appearing fires both a window `resize` (the visual viewport shrinks) and
+    // often a `scroll` (the browser nudges the page to keep the focused input in
+    // view), each of which used to be treated as "the user left/resized the
+    // page," closing the panel an instant after it opened, before a single key
+    // could be typed. Both handlers below now skip closing while focus is still
+    // inside the panel (i.e. the search input itself) — that's exactly the
+    // keyboard-driven case; a genuine tap/scroll *outside* the panel still blurs
+    // the input first, so this can't mask the real close-on-outside-interaction
+    // behavior handlePointerDown already provides.
+    const focusIsInsidePanel = () =>
+      panelRef.current && document.activeElement && panelRef.current.contains(document.activeElement);
     const handleScroll = (e) => {
       if (panelRef.current && panelRef.current.contains(e.target)) return;
+      if (focusIsInsidePanel()) return;
       closeMenu();
     };
-    const handleResize = () => closeMenu();
+    const handleResize = () => {
+      if (focusIsInsidePanel()) return;
+      closeMenu();
+    };
     document.addEventListener("mousedown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
     window.addEventListener("scroll", handleScroll, true);
