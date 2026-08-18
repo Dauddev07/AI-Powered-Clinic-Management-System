@@ -50,6 +50,22 @@
 .navItem.active {
   background: var(--app-accent-bg);
   color: var(--app-accent);
+  font-weight: 700;
+}
+
+/* Reported live: on light theme, --app-accent-bg is a very pale tint that reads
+   as barely-there next to .navCapsule's own near-white surface — the active
+   item was hard to tell apart from the others at a glance. Dark theme's own
+   --app-accent-bg is already a distinctly darker panel against the dark
+   capsule, so it doesn't need this. A thin accent-colored border plus a touch
+   more background saturation gives the light-theme pill a real edge instead of
+   relying on a subtle color shift alone. */
+html[data-theme="light"] .navItem.active {
+  background: color-mix(in srgb, var(--app-accent) 16%, var(--app-accent-bg));
+  border: 1px solid color-mix(in srgb, var(--app-accent) 35%, transparent);
+  /* .navItem's own padding assumes no border — compensate so the border doesn't
+     nudge this pill's size/alignment relative to its borderless siblings. */
+  padding: calc(0.4rem - 1px) calc(0.85rem - 1px);
 }
 
 .navItem:focus-visible {
