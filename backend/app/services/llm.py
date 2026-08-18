@@ -82,7 +82,8 @@ def _reasoning_effort_for(model: str) -> str | None:
 # rate-limited for the same request — never an unhandled error, and never a silent
 # attempt at some other/third provider.
 _RATE_LIMIT_REPLY = (
-    "Something went wrong — please try again shortly or contact the clinic directly."
+    "Something went wrong — please try again shortly or contact the clinic directly. "
+    "You can also start a new chat and describe your symptoms there."
 )
 
 
