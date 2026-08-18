@@ -681,39 +681,67 @@
   color: transparent;
 }
 
-.welcomeSubtitle {
-  max-width: 440px;
-  color: var(--app-text-subtitle);
-  font-size: var(--font-size-label);
-  line-height: 1.55;
-}
-
 .suggestions {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 0.6rem;
-  margin-top: 1.1rem;
-  max-width: 520px;
+  gap: 0.65rem;
+  margin-top: 1.6rem;
+  max-width: 560px;
 }
 
 .suggestionChip {
-  padding: 0.55rem 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.1rem;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--app-accent) 30%, var(--app-border));
   background: color-mix(in srgb, var(--app-bg-card) 88%, var(--app-accent) 6%);
   color: var(--app-text-body);
   font-size: var(--font-size-label);
   cursor: pointer;
-  transition: transform 160ms ease, border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+  transition: transform 160ms ease, border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
 }
 
+.suggestionChip svg {
+  flex-shrink: 0;
+  color: var(--app-accent);
+  transition: color 160ms ease;
+}
+
+/* Same gradient-fill hover language already used for the slot-pick/feedback
+   buttons further down this page (see .slotOptionBtn) — a suggestion chip is
+   the same kind of "pick this to continue" control, so it reads as one
+   consistent button family instead of its own one-off style. */
 .suggestionChip:hover,
 .suggestionChip:focus-visible {
   transform: translateY(-2px);
-  border-color: var(--app-accent);
-  background: color-mix(in srgb, var(--app-accent) 16%, var(--app-bg-card));
-  color: var(--app-text-title);
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 78%, black));
+  color: var(--app-accent-text);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--app-accent) 40%, transparent);
+}
+
+.suggestionChip:hover svg,
+.suggestionChip:focus-visible svg {
+  color: inherit;
+}
+
+.suggestionChip:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--app-accent) 35%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .suggestionChip {
+    transition: none;
+  }
+
+  .suggestionChip:hover,
+  .suggestionChip:focus-visible {
+    transform: none;
+  }
 }
 
 @media (max-width: 480px) {

@@ -49,11 +49,28 @@ const DEPARTMENT_LIST_MARKER = "DEPARTMENT_LIST::";
 // app/services/orchestrator/agents/appointment_agent.py.
 const DOCTOR_DISAMBIGUATION_MARKER = "DOCTOR_DISAMBIGUATION::";
 
+// Each suggestion carries its own icon (see SuggestionIcon below) so the starter
+// prompts read as distinct, purpose-built entry points rather than three
+// identically-shaped pills that only differ by their text.
 const SUGGESTIONS = [
-  "What are your clinic's opening hours?",
-  "I have a headache and mild fever — what should I do?",
-  "How do I book an appointment?",
+  { text: "What are your clinic's opening hours?", icon: "clock" },
+  { text: "I have a headache and mild fever — what should I do?", icon: "symptom" },
+  { text: "How do I book an appointment?", icon: "calendar" },
 ];
+
+const SUGGESTION_ICON_PATHS = {
+  clock: "M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
+  symptom: "M3 12h3l2-7 4 14 2-7h7",
+  calendar: "M7 3v3M17 3v3M4 9h16M5 6h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z",
+};
+
+function SuggestionIcon({ icon }) {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={SUGGESTION_ICON_PATHS[icon]} />
+    </svg>
+  );
+}
 
 // A slot-pick sends its raw text — including "(slot_id: <uuid>)" — as the actual
 // message the backend/LLM sees and saves to history (see selectSlot below: the
@@ -1172,18 +1189,15 @@ export default function ChatPage() {
               <h1 className={styles.welcomeHeading}>
                 Hi{firstName ? ` ${firstName}` : ""}, I'm Cura — how can I help you today?
               </h1>
-              <p className={styles.welcomeSubtitle}>
-                Ask about symptoms, clinic hours, or anything else about your care — I'll answer straight from
-                your clinic's own knowledge base.
-              </p>
               <div className={styles.suggestions}>
-                {SUGGESTIONS.map((text) => (
+                {SUGGESTIONS.map(({ text, icon }) => (
                   <button
                     key={text}
                     type="button"
                     className={styles.suggestionChip}
                     onClick={() => applySuggestion(text)}
                   >
+                    <SuggestionIcon icon={icon} />
                     {text}
                   </button>
                 ))}
