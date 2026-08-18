@@ -163,18 +163,45 @@ function TypingIndicator() {
   );
 }
 
+// One icon per fact, each in its own tinted badge — same "row with a badge,
+// not just a line of text" language the landing page's About panel uses
+// (see Landing.jsx's .aboutFactRow) — rather than three visually identical
+// unstyled lines that only differ by which fact happens to be in them.
+const BOOKING_ROW_ICONS = {
+  doctor: "M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
+  department: "M4 21V8l8-5 8 5v13M9 21v-6h6v6M9 12h.01M15 12h.01M9 9h.01M15 9h.01",
+  when: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
+};
+
 function BookingConfirmationCard({ booking }) {
+  const rows = [
+    booking.doctor_name && { key: "doctor", text: booking.doctor_name },
+    booking.department_name && { key: "department", text: booking.department_name },
+    booking.when && { key: "when", text: booking.when },
+  ].filter(Boolean);
+
   return (
     <div className={styles.bookingCard}>
       <div className={styles.bookingCardHeader}>
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M20 6 9 17l-5-5" />
-        </svg>
+        <span className={styles.bookingCardCheck} aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+        </span>
         Appointment confirmed
       </div>
-      {booking.doctor_name && <div className={styles.bookingCardRow}>{booking.doctor_name}</div>}
-      {booking.department_name && <div className={styles.bookingCardRow}>{booking.department_name}</div>}
-      {booking.when && <div className={styles.bookingCardRow}>{booking.when}</div>}
+      <div className={styles.bookingCardRows}>
+        {rows.map((row) => (
+          <div key={row.key} className={styles.bookingCardRow}>
+            <span className={styles.bookingCardRowIcon} aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d={BOOKING_ROW_ICONS[row.key]} />
+              </svg>
+            </span>
+            {row.text}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -212,6 +239,10 @@ function DoctorGroup({ doctor, onSelectSlot, disabled }) {
             disabled={disabled}
             onClick={() => onSelectSlot(doctor.doctor_name, slot.when, slot.slot_id)}
           >
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7.5V12l3 2" />
+            </svg>
             {slot.when}
           </button>
         ))}
@@ -263,6 +294,19 @@ function DoctorDisambiguationCard({ disambiguation, onSelectCandidate, disabled 
             disabled={disabled}
             onClick={() => onSelectCandidate(candidate.doctor_name, candidate.department_name, candidate.when)}
           >
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              {sameDoctor ? (
+                <>
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7.5V12l3 2" />
+                </>
+              ) : (
+                <>
+                  <circle cx="12" cy="8" r="3.2" />
+                  <path d="M5 20a7 7 0 0 1 14 0" />
+                </>
+              )}
+            </svg>
             {sameDoctor
               ? candidate.when
               : `${candidate.doctor_name}${candidate.department_name ? ` — ${candidate.department_name}` : ""}`}

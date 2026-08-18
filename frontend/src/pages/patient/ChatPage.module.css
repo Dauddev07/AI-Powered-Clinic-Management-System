@@ -857,33 +857,91 @@
   line-height: 1.5;
 }
 
+/* A distinct success-tinted card rather than three plain text lines sharing
+   the assistant bubble's own background — this is the moment the patient
+   actually came here for (a real, confirmed appointment), so it gets the
+   same "this deserves its own card" treatment as .feedbackCard rather than
+   blending into ordinary conversation text. */
 .bookingCard {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  min-width: 200px;
+  gap: 0.7rem;
+  min-width: 220px;
+  width: min(100%, 340px);
+  box-sizing: border-box;
+  padding: 1rem 1.1rem;
+  border-radius: 16px;
+  background: linear-gradient(165deg, color-mix(in srgb, var(--app-success-text) 12%, var(--app-bg-card)), var(--app-bg-card) 70%);
+  border: 1px solid color-mix(in srgb, var(--app-success-text) 30%, var(--app-border));
+  box-shadow: 0 6px 18px var(--app-shadow);
 }
 
 .bookingCardHeader {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.55rem;
   font-weight: 700;
+  font-size: var(--font-size-label);
+  letter-spacing: 0.01em;
   color: var(--app-success-text);
-  margin-bottom: 0.2rem;
+}
+
+.bookingCardCheck {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--app-success-text) 20%, transparent);
+  color: var(--app-success-text);
+}
+
+.bookingCardRows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid color-mix(in srgb, var(--app-success-text) 18%, var(--app-border));
 }
 
 .bookingCardRow {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
   font-size: var(--font-size-label);
+  font-weight: 600;
   color: var(--app-text-body);
 }
 
+.bookingCardRowIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--app-accent) 14%, transparent);
+  color: var(--app-accent);
+}
+
+/* A soft card of its own (was invisible layout-only chrome before, relying
+   entirely on the surrounding chat bubble) so a multi-doctor/multi-slot
+   reply reads as one considered panel rather than options floating loose
+   inside the ordinary text bubble. */
 .doctorOptionsCard {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.7rem;
   min-width: 220px;
   max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-accent) 5%, var(--app-bg-card));
+  border: 1px solid color-mix(in srgb, var(--app-accent) 16%, var(--app-border));
 }
 
 .doctorOptionsNote {
@@ -894,13 +952,24 @@
 
 .doctorOptionsHeader {
   font-weight: 700;
-  color: var(--app-text-heading);
+  font-size: var(--font-size-caption);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--app-accent);
 }
 
 .doctorOptionGroup {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.45rem;
+}
+
+/* A quiet divider between multiple doctors listed under the same card —
+   otherwise two doctor groups back to back (a common case: several doctors
+   in one department) read as one undifferentiated block of names and pills. */
+.doctorOptionGroup + .doctorOptionGroup {
+  padding-top: 0.6rem;
+  border-top: 1px solid color-mix(in srgb, var(--app-accent) 12%, var(--app-border));
 }
 
 .doctorOptionNameRow {
@@ -929,6 +998,11 @@
   gap: 0.9rem;
   min-width: 240px;
   max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-accent) 5%, var(--app-bg-card));
+  border: 1px solid color-mix(in srgb, var(--app-accent) 16%, var(--app-border));
 }
 
 .departmentListSection {
@@ -936,7 +1010,7 @@
   flex-direction: column;
   gap: 0.6rem;
   padding-bottom: 0.6rem;
-  border-bottom: 1px solid var(--app-border);
+  border-bottom: 1px solid color-mix(in srgb, var(--app-accent) 14%, var(--app-border));
 }
 
 .departmentListSection:last-child {
@@ -944,25 +1018,65 @@
   border-bottom: none;
 }
 
+/* A proper tappable pill rather than a flat bordered rectangle — accent-
+   tinted by default (so it reads as "interactive" at a glance, not just
+   another line of text with a border), solid accent fill + lift + shadow on
+   hover, the same lift language buttons use elsewhere in the app (see
+   Landing.module.css's .heroCtaPrimary/.deptCard). */
 .slotOptionBtn {
-  border: 1px solid var(--app-border);
-  background: var(--app-surface);
-  color: var(--app-text-body);
-  border-radius: 8px;
-  padding: 0.35rem 0.65rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--app-accent) 30%, var(--app-border));
+  background: color-mix(in srgb, var(--app-accent) 10%, var(--app-bg-card));
+  color: var(--app-text-title);
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
   font-size: var(--font-size-label);
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
 }
 
-.slotOptionBtn:hover:not(:disabled) {
-  background: var(--app-accent-bg);
-  border-color: var(--app-accent);
+.slotOptionBtn svg {
+  flex-shrink: 0;
+  opacity: 0.75;
+  transition: opacity 160ms ease;
+}
+
+.slotOptionBtn:hover:not(:disabled),
+.slotOptionBtn:focus-visible:not(:disabled) {
+  background: linear-gradient(135deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 78%, black));
+  border-color: transparent;
+  color: var(--app-accent-text);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--app-accent) 40%, transparent);
+}
+
+.slotOptionBtn:hover:not(:disabled) svg,
+.slotOptionBtn:focus-visible:not(:disabled) svg {
+  opacity: 1;
+}
+
+.slotOptionBtn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--app-accent) 35%, transparent);
 }
 
 .slotOptionBtn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slotOptionBtn {
+    transition: none;
+  }
+
+  .slotOptionBtn:hover:not(:disabled),
+  .slotOptionBtn:focus-visible:not(:disabled) {
+    transform: none;
+  }
 }
 
 .inputBar {
@@ -1308,23 +1422,39 @@
   align-self: flex-start;
   border: none;
   border-radius: 10px;
-  padding: 0.5rem 1.2rem;
-  background: var(--app-accent);
+  padding: 0.55rem 1.3rem;
+  background: linear-gradient(135deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 78%, black));
   color: var(--app-accent-text);
-  font-weight: 600;
+  font-weight: 700;
   font-size: var(--font-size-label);
   cursor: pointer;
-  transition: background-color 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--app-accent) 32%, transparent);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .feedbackSubmitBtn:hover:not(:disabled) {
-  background: var(--app-accent-hover);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--app-accent) 42%, transparent);
+}
+
+.feedbackSubmitBtn:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .feedbackSubmitBtn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feedbackSubmitBtn {
+    transition: none;
+  }
+
+  .feedbackSubmitBtn:hover:not(:disabled) {
+    transform: none;
+  }
 }
 
 .feedbackAckRow {
