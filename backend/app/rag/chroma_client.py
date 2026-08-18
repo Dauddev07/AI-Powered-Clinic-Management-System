@@ -1,10 +1,17 @@
 """ChromaDB access, scoped per clinic.
 
-Every caller reaches a collection through get_medical_kb_collection/
-get_hospital_info_collection, which derive the collection name from the clinic's slug —
-never from client input — so a clinic can only ever read or write its own collections.
-Naming matches app/scripts/seed_clinic.py exactly (which already creates these collections
-empty when a clinic is onboarded): '<slug>__medical-kb' and '<slug>__hospital-info'.
+Every caller reaches a collection through get_hospital_info_collection, which derives
+the collection name from the clinic's slug — never from client input — so a clinic can
+only ever read or write its own collection. Naming matches app/scripts/seed_clinic.py
+exactly (which already creates this collection empty when a clinic is onboarded):
+'<slug>__hospital-info'.
+
+There used to be a second, per-clinic 'medical-kb' collection for symptom/triage
+reference material — removed along with its helpers (get_medical_kb_collection,
+medical_kb_collection_name, kb_type_for_collection_name) once that concept was
+replaced by real, structured department/doctor data (see app.rag.retrieval's own
+module docstring and app.services.department_availability). Nothing ever wrote to or
+read from it since.
 """
 from __future__ import annotations
 
@@ -29,21 +36,8 @@ def get_chroma_client() -> chromadb.HttpClient:
     return _client
 
 
-def medical_kb_collection_name(clinic_slug: str) -> str:
-    return f"{clinic_slug}__medical-kb"
-
-
 def hospital_info_collection_name(clinic_slug: str) -> str:
     return f"{clinic_slug}__hospital-info"
-
-
-def kb_type_for_collection_name(collection_name: str) -> str:
-    """Recovers "medical_kb"/"hospital_info" from a stored collection name — lets
-    callers (e.g. serializing a KBDocument row) report which KB a document belongs to
-    without a separate DB column, since the collection name already encodes it."""
-    if collection_name.endswith("__hospital-info"):
-        return "hospital_info"
-    return "medical_kb"
 
 
 def _clinic_slug(db: Session, clinic_id: uuid.UUID) -> str:
@@ -51,11 +45,6 @@ def _clinic_slug(db: Session, clinic_id: uuid.UUID) -> str:
     if clinic is None:
         raise ValueError(f"Unknown clinic_id {clinic_id}")
     return clinic.slug
-
-
-def get_medical_kb_collection(db: Session, clinic_id: uuid.UUID) -> Collection:
-    slug = _clinic_slug(db, clinic_id)
-    return get_chroma_client().get_or_create_collection(medical_kb_collection_name(slug))
 
 
 def get_hospital_info_collection(db: Session, clinic_id: uuid.UUID) -> Collection:

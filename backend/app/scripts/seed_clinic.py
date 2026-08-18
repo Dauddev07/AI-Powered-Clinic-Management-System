@@ -4,9 +4,9 @@ first clinic. CLI only; no arguments, no prompts, no superadmin UI in this phase
 Usage (from backend/, with the venv activated):
     python -m app.scripts.seed_clinic
 
-Creates: the clinic row, exactly one admin user, and the clinic's two empty ChromaDB
-collections (medical-kb and hospital-info), named per clinic so they cannot collide
-with a future clinic N+1.
+Creates: the clinic row, exactly one admin user, and the clinic's empty ChromaDB
+hospital-info collection, named per clinic so it cannot collide with a future
+clinic N+1.
 
 SECURITY: CLINIC_ADMIN_PASSWORD below is used ONLY as input to the same bcrypt hashing
 function used everywhere else in the system (app.core.security.hash_password). Only the
@@ -73,16 +73,14 @@ def main() -> None:
     finally:
         db.close()
 
-    medical_kb_name = f"{slug}__medical-kb"
     hospital_info_name = f"{slug}__hospital-info"
 
     chroma = chromadb.HttpClient(host=settings.CHROMA_HOST, port=settings.CHROMA_PORT, ssl=settings.CHROMA_SSL)
-    chroma.get_or_create_collection(medical_kb_name)
     chroma.get_or_create_collection(hospital_info_name)
 
     print(f"Seeded clinic '{CLINIC_NAME}' (id={clinic.id}, slug={slug}).")
     print(f"Created admin user (id={admin.id}, email={admin.email}).")
-    print(f"Created ChromaDB collections: '{medical_kb_name}', '{hospital_info_name}'.")
+    print(f"Created ChromaDB collection: '{hospital_info_name}'.")
 
 
 if __name__ == "__main__":

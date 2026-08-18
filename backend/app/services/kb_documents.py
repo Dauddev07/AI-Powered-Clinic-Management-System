@@ -30,8 +30,9 @@ def delete_document_chunks(db: Session, clinic_id: uuid.UUID, document: KBDocume
     """Removes ALL of a document's chunks from the vector store — used by both the
     DELETE endpoint and the re-upload replacement path, so both clear chunks the
     same way. Reaches the collection by the document's own stored chroma_collection
-    name rather than re-deriving one from clinic_id, since a document may live in
-    either the medical-kb or hospital-info collection."""
+    name rather than re-deriving one from clinic_id — every document lives in the
+    hospital-info collection today, but this stays name-based rather than
+    re-deriving it, so a row ingested under an older scheme is still reachable."""
     collection = get_collection_by_name(document.chroma_collection)
     collection.delete(where={"kb_document_id": str(document.id)})
 
