@@ -26,6 +26,37 @@
   transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1), width 220ms ease, border-color 220ms ease;
 }
 
+/* Persistent Cura identity for the sidebar — unlike the empty-state welcome
+   screen's own mark (below), this stays visible for the entire life of the page,
+   including deep into a scrolled conversation, so the surface never stops
+   reading as Cura's. Sits above .sidebarHeader rather than replacing "New chat"
+   with a logo-shaped button, so the two stay visually distinct: one is identity,
+   the other is an action. */
+.sidebarBrand {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.9rem 0.9rem 0;
+  font-size: var(--font-size-label);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--app-text-title);
+}
+
+.sidebarBrandMark {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: linear-gradient(150deg, var(--app-accent-hover), var(--app-accent) 70%);
+  color: var(--app-accent-text);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--app-accent) 35%, transparent);
+}
+
 .sidebarHeader {
   flex-shrink: 0;
   display: flex;
@@ -87,6 +118,23 @@
   display: none;
 }
 
+/* Same mark as .sidebarBrand above, shrunk down for the 56px-wide collapsed rail —
+   collapsing the sidebar hides the wordmark version (no room for text at this
+   width) but must not lose Cura's identity from the page entirely. */
+.collapsedBrandMark {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  margin-bottom: 0.75rem;
+  background: linear-gradient(150deg, var(--app-accent-hover), var(--app-accent) 70%);
+  color: var(--app-accent-text);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--app-accent) 35%, transparent);
+}
+
 .expandSidebarBtn {
   flex-shrink: 0;
   width: 38px;
@@ -122,6 +170,7 @@
   /* The full header/session-list content is still in the DOM underneath (see
      the JSX) — hidden rather than removed, so no state is lost and reopening
      doesn't need to refetch anything. */
+  .sidebarCollapsed .sidebarBrand,
   .sidebarCollapsed .sidebarHeader,
   .sidebarCollapsed .sessionList {
     display: none;
@@ -409,9 +458,25 @@
 
 .topBarTitle {
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
   font-size: var(--font-size-label);
   font-weight: 700;
   color: var(--app-text-title);
+}
+
+.topBarBrandMark {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: linear-gradient(150deg, var(--app-accent-hover), var(--app-accent) 70%);
+  color: var(--app-accent-text);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--app-accent) 35%, transparent);
 }
 
 /* Warning-yellow banner, deliberately noticeable and never dismissible — uses
@@ -699,6 +764,9 @@
   min-width: 0;
 }
 
+/* Same gradient-fill treatment as .welcomeIcon (see below) rather than a flat
+   tinted circle — Cura's mark reads as a small solid badge next to every reply,
+   not a faint outline that blends into the page background. */
 .assistantAvatar {
   flex-shrink: 0;
   width: 26px;
@@ -708,8 +776,9 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--app-accent) 20%, var(--app-bg-card));
-  color: var(--app-accent);
+  background: linear-gradient(150deg, var(--app-accent-hover), var(--app-accent) 70%);
+  color: var(--app-accent-text);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--app-accent) 35%, transparent);
 }
 
 /* Reserves the same width as .assistantAvatar so consecutive assistant messages

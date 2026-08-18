@@ -9,6 +9,7 @@ import {
   submitFeedback,
 } from "../../api/chat";
 import { ApiError } from "../../api/client";
+import { CuraBubbleIcon, CuraSparkle } from "../../components/CuraMark";
 import DoctorRatingBadge from "../../components/DoctorRatingBadge";
 import Modal from "../../components/Modal";
 import StarIcon from "../../components/StarIcon";
@@ -135,17 +136,15 @@ function formatSessionTime(iso) {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-// Small clinic-appropriate avatar (a stethoscope glyph) that sits next to every
-// assistant bubble so a reply reads as coming from "the clinic assistant," not as an
-// unstyled floating block of text.
+// Cura's own mark (see CuraMark.jsx) — the same speech-bubble-and-dots identity
+// already used on the floating launcher, the mobile tab bar, and the landing page's
+// "Meet Cura" section — sits next to every assistant bubble so a reply visibly reads
+// as coming from Cura specifically, not a generic unbranded "the clinic assistant"
+// glyph (a plain stethoscope icon, previously).
 function AssistantAvatar() {
   return (
     <span className={styles.assistantAvatar} aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M5 3v5a3 3 0 0 0 6 0V3" />
-        <path d="M8 11v1a5 5 0 0 0 10 0V9" />
-        <circle cx="18" cy="7" r="2" />
-      </svg>
+      <CuraBubbleIcon size={15} />
     </span>
   );
 }
@@ -993,6 +992,9 @@ export default function ChatPage() {
             >=900px (see the CSS — sidebarCollapsed also gets set on mobile,
             where this must stay hidden). */}
         <div className={styles.collapsedRail}>
+          <span className={styles.collapsedBrandMark} aria-hidden="true">
+            <CuraBubbleIcon size={16} />
+          </span>
           <button
             type="button"
             className={styles.expandSidebarBtn}
@@ -1004,6 +1006,19 @@ export default function ChatPage() {
               <line x1="9" y1="4" x2="9" y2="20" />
             </svg>
           </button>
+        </div>
+
+        {/* Reported live: the sidebar (and, once a conversation had scrolled the
+            mobile-only topBar's "Cura" label out of reach, the whole page) had no
+            persistent Cura identity anywhere except the empty-state welcome screen
+            — mid-conversation on desktop, nothing distinguished this surface as
+            Cura's at all. This brand row is always visible, independent of
+            scroll/conversation state. */}
+        <div className={styles.sidebarBrand}>
+          <span className={styles.sidebarBrandMark} aria-hidden="true">
+            <CuraBubbleIcon size={16} />
+          </span>
+          Cura
         </div>
 
         <div className={styles.sidebarHeader}>
@@ -1104,7 +1119,12 @@ export default function ChatPage() {
               <line x1="9" y1="4" x2="9" y2="20" />
             </svg>
           </button>
-          <span className={styles.topBarTitle}>Cura</span>
+          <span className={styles.topBarTitle}>
+            <span className={styles.topBarBrandMark} aria-hidden="true">
+              <CuraBubbleIcon size={15} />
+            </span>
+            Cura
+          </span>
           <button type="button" className={styles.topBarNewChatBtn} onClick={startNewChat} aria-label="Start new chat">
             <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M12 5v14M5 12h14" />
@@ -1145,12 +1165,8 @@ export default function ChatPage() {
             <div className={styles.welcome}>
               <div className={styles.welcomeIconHalo} aria-hidden="true">
                 <div className={styles.welcomeIcon}>
-                  <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M4 12.5C4 7.81 8.03 4 13 4s9 3.81 9 8.5-4.03 8.5-9 8.5c-1.09 0-2.13-.19-3.1-.53L4 21l1.2-4.02A8.16 8.16 0 0 1 4 12.5Z" />
-                  </svg>
-                  <svg className={styles.welcomeSparkle} viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-                    <path d="M12 2 13.8 8.9 21 12l-7.2 3.1L12 22l-1.8-6.9L3 12l7.2-3.1L12 2Z" />
-                  </svg>
+                  <CuraBubbleIcon size={34} />
+                  <CuraSparkle size={14} className={styles.welcomeSparkle} />
                 </div>
               </div>
               <h1 className={styles.welcomeHeading}>
