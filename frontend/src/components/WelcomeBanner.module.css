@@ -152,77 +152,18 @@ html[data-theme="light"] .banner::after {
   animation-delay: 170ms;
 }
 
-/* The underline itself — grows in from 0 width right after the heading's
-   own text has settled (delay picks up where banner-text-in's 170ms delay +
-   800ms duration leaves off), rather than just appearing fully formed. */
+/* A plain static underline, sized to the exact rendered width of "Welcome,
+   Name" — instructed live to drop the grow-in + shimmer animation that used
+   to run here, so it's just present from first paint with no motion. */
 .heading::after {
   content: "";
   position: absolute;
   left: 0;
   bottom: 0;
   height: 3px;
-  width: 0;
+  width: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 25%, transparent));
-  animation: welcome-underline-grow 700ms cubic-bezier(0.22, 1, 0.36, 1) 520ms both;
-}
-
-@keyframes welcome-underline-grow {
-  from {
-    width: 0;
-  }
-  to {
-    width: 100%;
-  }
-}
-
-/* A single light sweep across the finished underline, once — starts right
-   as the grow-in above finishes. Same restrained "one-time flourish, not a
-   loop" rule the .name shimmer below already follows, so a dashboard left
-   open doesn't end up with a permanently animating card. forwards keeps it
-   parked at its final (invisible) frame afterward rather than reverting to
-   an un-animated pre-animation state that could flash back into view. */
-.heading::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  height: 3px;
-  width: 42%;
-  background: linear-gradient(100deg, transparent, color-mix(in srgb, white 75%, transparent) 55%, transparent);
-  transform: translateX(-140%) skewX(-20deg);
-  opacity: 0;
-  pointer-events: none;
-  animation: welcome-underline-shimmer 900ms cubic-bezier(0.4, 0, 0.2, 1) 1280ms 1 forwards;
-}
-
-@keyframes welcome-underline-shimmer {
-  0% {
-    transform: translateX(-140%) skewX(-20deg);
-    opacity: 0;
-  }
-  20% {
-    opacity: 1;
-  }
-  80% {
-    opacity: 1;
-  }
-  100% {
-    transform: translateX(240%) skewX(-20deg);
-    opacity: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .heading::after {
-    animation: none;
-    width: 100%;
-  }
-
-  .heading::before {
-    animation: none;
-    opacity: 0;
-  }
 }
 
 /* A little glow on the patient's own name — the one word in the banner that

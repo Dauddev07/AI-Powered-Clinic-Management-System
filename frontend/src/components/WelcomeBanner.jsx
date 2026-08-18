@@ -20,13 +20,10 @@ export default function WelcomeBanner({ name, tagline }) {
       <span className={styles.dotTexture} aria-hidden="true" />
       <div className={styles.text}>
         <span className={styles.eyebrow}>{greeting}</span>
-        {/* No watermark/icon — instructed live to drop both. The "Welcome,
-            Name" line itself is the one thing this card is built to draw the
-            eye to now: a gradient underline grows in under it (see
-            .heading::after) right after the text settles, then a single
-            light sweep passes across it once (.heading::before) — animated,
-            but a one-time flourish rather than a permanent loop, same
-            restraint the .name shimmer just above it already uses. */}
+        {/* No watermark/icon — instructed live to drop both. A static
+            gradient underline (see .heading::after) sits under "Welcome,
+            Name" — the animated grow-in/shimmer version was instructed live
+            to be removed. */}
         <h1 className={styles.heading}>
           Welcome{name && (
             <>
