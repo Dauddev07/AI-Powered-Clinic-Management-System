@@ -1,12 +1,14 @@
-/* Reported live: the previous version's spinning accent-colored conic
-   border plus a green diagonal wash across the whole card read as "too
-   green" rather than stylish — replaced with a plain neutral card (the
-   app's own surface/border tokens, no --app-accent anywhere in the
-   background) that gets its polish from depth and texture instead of
-   color: a soft lift shadow, a faint neutral dot-grid bleeding from one
-   corner (the same ambient texture language Landing.module.css's hero uses,
-   just toned to --app-text-subtitle instead of the brand accent), and a
-   subtle top-edge highlight for a touch of glass-like sheen. */
+/* Reported live twice now: first the old green-washed conic-bordered version
+   was "too green," then the plain flat-card replacement read as "just like
+   every other card" (every dashboard stat card already uses the same flat
+   --app-bg-card + 20px radius + soft shadow recipe — see
+   PatientDashboard.module.css). This version gets its own identity from
+   SHAPE and STRUCTURE instead of a full-surface color wash: a larger radius
+   and scale than any stat card uses, a bold accent spine down the left edge,
+   a real icon badge (not decoration — see WelcomeBanner.jsx's
+   iconForHour) giving it a focal point the way a stat card's own icon badge
+   does, and one soft accent spotlight anchored in a single corner rather
+   than tinting the whole surface. */
 .banner {
   position: relative;
   isolation: isolate;
@@ -15,20 +17,54 @@
   display: flex;
   align-items: center;
   gap: 1.75rem;
-  padding: 2.25rem 2.5rem;
+  padding: 2.5rem 2.75rem;
   margin-bottom: 1.75rem;
   border: 1px solid var(--app-border);
-  border-radius: 24px;
-  background: var(--app-bg-card);
-  box-shadow: 0 10px 28px var(--app-shadow), inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
+  border-radius: 28px;
+  background: linear-gradient(155deg, color-mix(in srgb, var(--app-text-title) 3%, var(--app-bg-card)), var(--app-bg-card) 55%);
+  box-shadow: 0 14px 36px var(--app-shadow), inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
 }
 
-/* A quiet dot-grid texture bleeding from the top-right corner — purely
-   neutral (--app-text-subtitle, not the brand accent), masked so it fades
-   out well before it reaches the text. Reads as a deliberate material
-   detail rather than a flat, empty card. */
+/* The one deliberate spot of brand color — a wide, soft glow anchored at a
+   single corner (not a wash across the whole surface, and blurred well past
+   the text) plus a slim gradient spine down the left edge, the same
+   "featured card" cue a colored accent border commonly signals. */
+.banner::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 5px;
+  z-index: 2;
+  background: linear-gradient(180deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 35%, transparent));
+}
+
 .banner::after {
   content: "";
+  position: absolute;
+  top: -55%;
+  right: -18%;
+  width: 24rem;
+  height: 24rem;
+  z-index: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 20%, transparent), transparent 72%);
+  filter: blur(4px);
+  pointer-events: none;
+}
+
+html[data-theme="light"] .banner::after {
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 26%, transparent), transparent 72%);
+}
+
+/* A quiet dot-grid texture layered under the corner glow — purely neutral
+   (--app-text-subtitle, not the brand accent), masked so it fades out well
+   before it reaches the text. The material detail that keeps the card from
+   reading as flat even where the glow above doesn't reach. A sibling
+   element rather than a third pseudo-element — .banner already uses both
+   ::before (the edge spine) and ::after (the corner glow). */
+.dotTexture {
   position: absolute;
   inset: 0;
   z-index: 0;
@@ -40,8 +76,36 @@
   background-size: 20px 20px;
   -webkit-mask-image: radial-gradient(ellipse 55% 85% at 100% 0%, black 0%, transparent 72%);
   mask-image: radial-gradient(ellipse 55% 85% at 100% 0%, black 0%, transparent 72%);
-  opacity: 0.6;
+  opacity: 0.5;
   pointer-events: none;
+}
+
+/* The time-of-day icon badge — same "icon in a soft tinted rounded square"
+   language the rest of the app already uses for card icon badges (see
+   PatientDashboard.module.css's stat icons, Landing.module.css's
+   .deptIcon/.featureIcon), scaled up to anchor a banner this size. */
+.iconBadge {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 4.75rem;
+  height: 4.75rem;
+  border-radius: 20px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--app-accent) 20%, var(--app-bg-card)), color-mix(in srgb, var(--app-accent) 5%, var(--app-bg-card)));
+  border: 1px solid color-mix(in srgb, var(--app-accent) 24%, var(--app-border));
+  color: var(--app-accent);
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--app-accent) 22%, transparent);
+}
+
+@media (max-width: 560px) {
+  .iconBadge {
+    width: 3.75rem;
+    height: 3.75rem;
+    border-radius: 16px;
+  }
 }
 
 .text {
