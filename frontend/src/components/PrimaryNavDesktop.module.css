@@ -57,30 +57,6 @@
   outline-offset: 1px;
 }
 
-/* Chat used to be its own floating action button (see the removed
-   FloatingChatButton) — now that it's promoted into this row, it keeps that
-   same "this one's special" visual weight instead of blending in as a plain
-   nav item, a solid accent pill rather than the others' quiet text-only
-   style. Declared after .active so it wins over the generic active tint on
-   the rare turn both apply (already on /patient/chat). */
-.navItem.chat {
-  color: var(--app-accent-text);
-  background: linear-gradient(135deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 78%, black));
-  box-shadow: 0 3px 10px color-mix(in srgb, var(--app-accent) 35%, transparent);
-}
-
-.navItem.chat:hover {
-  color: var(--app-accent-text);
-  background: linear-gradient(135deg, var(--app-accent-hover), color-mix(in srgb, var(--app-accent-hover) 78%, black));
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--app-accent) 45%, transparent);
-}
-
-.navItem.chat.active {
-  color: var(--app-accent-text);
-  background: linear-gradient(135deg, var(--app-accent-hover), color-mix(in srgb, var(--app-accent-hover) 78%, black));
-  box-shadow: 0 3px 10px color-mix(in srgb, var(--app-accent) 50%, transparent);
-}
-
 /* Same spin-on-click feedback the old header home button had — see
    PrimaryNavDesktop.jsx's own comment on why a click while already on the
    dashboard still counts as a real navigation. */

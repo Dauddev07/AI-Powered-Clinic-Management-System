@@ -28,7 +28,12 @@ export default function PrimaryNavDesktop() {
   if (!isAuthenticated || location.pathname === "/") return null;
 
   const dashboardPath = user?.role === "admin" ? "/admin" : "/patient";
-  const items = getNavItems(user?.role, dashboardPath);
+  // Chat is left out here (unlike PrimaryNavMobile's identical list) — reported
+  // live as a duplicate: FloatingChatButton already sits fixed bottom-left on the
+  // patient dashboard at this same ≥720px width (it's hidden below that — see its
+  // own module.css), so this row doesn't need its own second entry point to the
+  // same destination.
+  const items = getNavItems(user?.role, dashboardPath).filter((item) => item.key !== "chat");
 
   return (
     <nav className={styles.navRow} aria-label="Primary">
@@ -40,12 +45,11 @@ export default function PrimaryNavDesktop() {
       {items.map((item) => {
         const active = location.pathname === item.to;
         const isHome = item.key === "home";
-        const isChat = item.key === "chat";
         return (
           <Link
             key={item.key}
             to={item.to}
-            className={`${styles.navItem} ${active ? styles.active : ""} ${isChat ? styles.chat : ""}`}
+            className={`${styles.navItem} ${active ? styles.active : ""}`}
             aria-current={active ? "page" : undefined}
             onClick={
               isHome
