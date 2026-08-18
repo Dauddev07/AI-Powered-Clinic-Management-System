@@ -27,20 +27,32 @@ export default function WelcomeBanner({ name, tagline }) {
   const greeting = greetingForHour(hour);
   const icon = iconForHour(hour);
 
+  const iconPath =
+    icon === "sun" ? (
+      <>
+        <circle cx="12" cy="12" r="4.5" />
+        <path d="M12 2.5v2.5M12 19v2.5M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2.5 12H5M19 12h2.5M4.2 19.8 6 18M18 6l1.8-1.8" />
+      </>
+    ) : (
+      <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z" />
+    );
+
   return (
     <div className={`${styles.banner} reveal`} ref={revealRef}>
       <span className={styles.dotTexture} aria-hidden="true" />
+      {/* A large, very faint echo of the same icon bleeding off the bottom-right
+          edge — the kind of oversized watermark-glyph flourish an editorial
+          card/poster uses for depth, tying back to the badge instead of being
+          an unrelated shape. Low enough opacity it reads as texture, not a
+          second real icon competing with the first. */}
+      <svg className={styles.watermark} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" aria-hidden="true">
+        {iconPath}
+      </svg>
       <span className={styles.iconBadge} aria-hidden="true">
-        {icon === "sun" ? (
-          <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="4.5" />
-            <path d="M12 2.5v2.5M12 19v2.5M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2.5 12H5M19 12h2.5M4.2 19.8 6 18M18 6l1.8-1.8" />
-          </svg>
-        ) : (
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z" />
-          </svg>
-        )}
+        <span className={styles.iconBadgeHalo} />
+        <svg viewBox="0 0 24 24" width={icon === "sun" ? 30 : 28} height={icon === "sun" ? 30 : 28} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          {iconPath}
+        </svg>
       </span>
       <div className={styles.text}>
         <span className={styles.eyebrow}>{greeting}</span>
@@ -51,6 +63,7 @@ export default function WelcomeBanner({ name, tagline }) {
             </>
           )}
         </h1>
+        <span className={styles.headingRule} aria-hidden="true" />
         {tagline && <p className={styles.tagline}>{tagline}</p>}
       </div>
     </div>

@@ -80,6 +80,23 @@ html[data-theme="light"] .banner::after {
   pointer-events: none;
 }
 
+/* A large, faint echo of the badge's own icon bleeding off the card's
+   bottom-right corner — sized well past the visible card and clipped by
+   .banner's own overflow: hidden, so only a soft partial silhouette shows
+   through, like a watermark printed on stationery rather than a second
+   real icon. */
+.watermark {
+  position: absolute;
+  z-index: 0;
+  right: -2.5rem;
+  bottom: -3.5rem;
+  width: 11rem;
+  height: 11rem;
+  color: var(--app-text-title);
+  opacity: 0.05;
+  pointer-events: none;
+}
+
 /* The time-of-day icon badge — same "icon in a soft tinted rounded square"
    language the rest of the app already uses for card icon badges (see
    PatientDashboard.module.css's stat icons, Landing.module.css's
@@ -100,11 +117,52 @@ html[data-theme="light"] .banner::after {
   box-shadow: 0 8px 22px color-mix(in srgb, var(--app-accent) 22%, transparent);
 }
 
+/* A quiet breathing halo behind the badge — the same "AI/alive" pulse
+   language FloatingChatButton uses for Cura (see its own .pulse), reused
+   here at rest-state scale so the one genuinely dynamic element on the page
+   ties back to a pattern the app already establishes, instead of a new
+   one-off animation. Sits behind the badge (negative z-index within the
+   badge's own stacking context) so it never obscures the icon itself. */
+.iconBadgeHalo {
+  position: absolute;
+  inset: -8px;
+  z-index: -1;
+  border-radius: 24px;
+  background: var(--app-accent);
+  opacity: 0.22;
+  animation: welcome-badge-breathe 3.2s ease-in-out infinite;
+}
+
+@keyframes welcome-badge-breathe {
+  0%, 100% {
+    transform: scale(0.94);
+    opacity: 0.22;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iconBadgeHalo {
+    animation: none;
+    opacity: 0.12;
+  }
+}
+
 @media (max-width: 560px) {
   .iconBadge {
     width: 3.75rem;
     height: 3.75rem;
     border-radius: 16px;
+  }
+
+  .watermark {
+    width: 8rem;
+    height: 8rem;
+    right: -2rem;
+    bottom: -2.5rem;
   }
 }
 
@@ -237,6 +295,19 @@ html[data-theme="light"] .banner::after {
     animation: none;
     display: none;
   }
+}
+
+/* A short gradient rule between the heading and tagline — the same "small
+   typographic flourish under a big heading" language Landing.module.css's
+   .sectionTitle::after uses, in miniature, instead of the tagline just
+   sitting directly under the heading with nothing to separate the two. */
+.headingRule {
+  display: block;
+  width: 2.75rem;
+  height: 3px;
+  margin: 0.15rem 0 0.85rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 20%, transparent));
 }
 
 .tagline {
