@@ -209,7 +209,7 @@ function BookingConfirmationCard({ booking }) {
       <div className={styles.bookingCardRows}>
         {rows.map((row) => (
           <div key={row.key} className={styles.bookingCardRow}>
-            <span className={styles.bookingCardRowIcon} aria-hidden="true">
+            <span className={styles.bookingCardRowIcon} data-kind={row.key} aria-hidden="true">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d={BOOKING_ROW_ICONS[row.key]} />
               </svg>
