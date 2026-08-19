@@ -279,7 +279,14 @@
   }
 
   .emergencyBannerIcon {
-    margin-top: 0.15em;
+    /* align-items: flex-start above top-aligns the icon with the text block
+       (needed so a wrapped second line doesn't pull the icon down between
+       lines — see the comment above) — but the 20px icon circle is TALLER
+       than one line of this smaller mobile text, so top-aligning left the
+       icon sitting visibly lower than the text's own optical center. Pulled
+       up to match the first line's center instead of the old positive
+       offset, which was tuned for a smaller icon this element no longer uses. */
+    margin-top: -2px;
   }
 }
 
