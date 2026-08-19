@@ -487,8 +487,16 @@ export default function BookAppointment() {
         can see the full shape of each doctor's day.
       </p>
       <p className={styles.policyNote}>
-        Once booked, cancellations and reschedules aren't possible within 2 hours of the appointment time — for
-        last-minute changes after that, please contact the clinic directly.
+        <span className={styles.policyNoteIcon} aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 11v5.5M12 7.5v.01" />
+          </svg>
+        </span>
+        <span>
+          Once booked, cancellations and reschedules aren't possible within 2 hours of the appointment time — for
+          last-minute changes after that, please contact the clinic directly.
+        </span>
       </p>
 
       <div className={`${styles.card} reveal`} ref={revealRef}>

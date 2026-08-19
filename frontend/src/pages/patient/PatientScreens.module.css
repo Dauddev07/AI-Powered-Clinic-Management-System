@@ -13,15 +13,29 @@
 .policyNote {
   display: flex;
   align-items: flex-start;
-  gap: 0.5rem;
-  color: var(--app-text-subtitle);
+  gap: 0.6rem;
+  color: var(--app-info-text);
   font-size: var(--font-size-caption);
+  font-weight: 500;
   line-height: 1.5;
   margin: -0.5rem 0 1.25rem;
-  padding: 0.6rem 0.85rem;
+  padding: 0.7rem 0.9rem;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--app-accent) 8%, var(--app-bg-card));
-  border: 1px solid color-mix(in srgb, var(--app-accent) 20%, var(--app-border));
+  background: var(--app-info-bg);
+  border: 1px solid var(--app-info-border);
+  border-left: 3px solid var(--app-info-text);
+}
+
+.policyNoteIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-top: 0.05rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--app-info-text) 18%, transparent);
 }
 
 .dateHeading {

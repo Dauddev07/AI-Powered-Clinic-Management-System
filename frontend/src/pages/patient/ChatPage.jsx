@@ -514,6 +514,11 @@ function ChatMessage({ message, onSelectSlot, onSelectCandidate, disabled, group
   const departmentList = !isUser && !booking && !doctorOptions ? parseDepartmentList(message.content) : null;
   const doctorDisambiguation =
     !isUser && !booking && !doctorOptions && !departmentList ? parseDoctorDisambiguation(message.content) : null;
+  // A card type (booking confirmation, doctor options, ...) already draws its own
+  // background/border/radius — wrapping it in the plain .assistantBubble on top of
+  // that produced a visibly empty "card behind the card" frame around it, so cards
+  // render bare in the message flow instead of nested inside a second bubble.
+  const isCard = Boolean(booking || doctorOptions || departmentList || doctorDisambiguation);
   const time = formatMessageTime(message.createdAt);
 
   if (message.redFlag) {
@@ -534,7 +539,11 @@ function ChatMessage({ message, onSelectSlot, onSelectCandidate, disabled, group
     <div className={`${styles.bubbleRow} ${isUser ? styles.userRow : styles.assistantRow} ${grouped ? styles.groupedRow : ""}`}>
       {!isUser && (grouped ? <span className={styles.avatarSpacer} aria-hidden="true" /> : <AssistantAvatar />)}
       <div className={styles.bubbleCol}>
-        <div className={`${styles.bubble} ${isUser ? styles.userBubble : styles.assistantBubble} ${message.error ? styles.errorBubble : ""}`}>
+        <div
+          className={`${styles.bubble} ${isUser ? styles.userBubble : styles.assistantBubble} ${
+            message.error ? styles.errorBubble : ""
+          } ${isCard ? styles.bubbleCardless : ""}`}
+        >
           {booking ? (
             <BookingConfirmationCard booking={booking} />
           ) : doctorOptions ? (

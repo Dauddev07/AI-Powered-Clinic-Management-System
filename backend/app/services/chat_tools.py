@@ -174,10 +174,43 @@ _WEEKDAY_INDEX = {
 # avoid a false positive while still covering how patients actually type a
 # bare day-of-week reference.
 _FULL_WEEKDAY_RE = re.compile(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.IGNORECASE)
-_ABBR_WEEKDAY_RE = re.compile(
-    r"\b(?:on|for|this|next|by|until|til)\s+(mon|tue|tues|wed|thu|thurs|fri|sat|sun)\b",
+_ABBR_WEEKDAY_TOKEN_RE = re.compile(
+    r"\b(?:on|for|this|next|by|until|til)\s+([a-z]{3,9})\b",
     re.IGNORECASE,
 )
+_WEEKDAY_ABBR_CANDIDATES = ("mon", "tue", "tues", "wed", "thu", "thurs", "fri", "sat", "sun")
+
+
+def _levenshtein(a: str, b: str) -> int:
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, start=1):
+        curr = [i] + [0] * len(b)
+        for j, cb in enumerate(b, start=1):
+            curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + (ca != cb))
+        prev = curr
+    return prev[-1]
+
+
+def _closest_weekday_abbr(token: str) -> str | None:
+    """Reported live: "show me her available slots on thus" (a typo for
+    "thurs") silently matched no weekday at all and got treated as an
+    unrelated turn — the exact-string abbreviation match had zero typo
+    tolerance. Accepts a single-character-edit typo of a real weekday
+    abbreviation (e.g. "thus" -> "thu"/"thurs", "wedd" -> "wed") so a patient's
+    near-miss spelling still resolves instead of being silently dropped;
+    anything further off (genuinely unrelated words like "cardiology") stays
+    unmatched."""
+    token = token.lower()
+    if token in _WEEKDAY_INDEX:
+        return token
+    if not (3 <= len(token) <= 7):
+        return None
+    best_abbr, best_dist = None, 2
+    for abbr in _WEEKDAY_ABBR_CANDIDATES:
+        dist = _levenshtein(token, abbr)
+        if dist < best_dist:
+            best_abbr, best_dist = abbr, dist
+    return best_abbr
 
 
 def resolve_bare_weekday_window(message: str) -> tuple[str, str] | None:
@@ -194,11 +227,13 @@ def resolve_bare_weekday_window(message: str) -> tuple[str, str] | None:
     model passed. Returns None when the message names no single weekday (including
     when it names more than one, e.g. a real date range, which this deliberately
     doesn't try to resolve) so an unrelated turn is left completely untouched.
+    Also tolerates a single-character typo in an abbreviation (see
+    _closest_weekday_abbr) so "on thus" still resolves to Thursday.
     """
     matches = _FULL_WEEKDAY_RE.findall(message)
     if not matches:
-        abbr_matches = _ABBR_WEEKDAY_RE.findall(message)
-        matches = abbr_matches
+        abbr_tokens = _ABBR_WEEKDAY_TOKEN_RE.findall(message)
+        matches = [m for m in (_closest_weekday_abbr(t) for t in abbr_tokens) if m]
     if len(matches) != 1:
         return None
     target_weekday = _WEEKDAY_INDEX[matches[0].lower()]

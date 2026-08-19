@@ -550,6 +550,19 @@ def test_resolve_bare_weekday_window_none_when_more_than_one_weekday_named():
     assert resolve_bare_weekday_window("anything monday or tuesday?") is None
 
 
+def test_resolve_bare_weekday_window_tolerates_a_single_character_typo():
+    window = resolve_bare_weekday_window("show me her available slots on thus")
+    assert window is not None
+    earliest, latest = window
+    resolved = datetime.fromisoformat(earliest).date()
+    assert resolved.strftime("%A") == "Thursday"
+    assert earliest == latest
+
+
+def test_resolve_bare_weekday_window_none_when_typo_is_too_far_off():
+    assert resolve_bare_weekday_window("book a slot for cardiology") is None
+
+
 def test_build_tools_forces_the_resolved_weekday_window_regardless_of_model_args(
     db, clinic, department, doctor, patient, ctx
 ):

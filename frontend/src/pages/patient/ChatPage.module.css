@@ -890,6 +890,17 @@
   border-color: var(--app-error-border);
 }
 
+/* Cards (booking confirmation, doctor options, department list, disambiguation)
+   already draw their own background/border/radius — strip the plain bubble
+   frame so only the card itself shows, instead of a card nested inside a
+   second, visibly empty bubble. */
+.bubbleCardless {
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+}
+
 @media (max-width: 480px) {
   .bubbleCol {
     max-width: 84%;
