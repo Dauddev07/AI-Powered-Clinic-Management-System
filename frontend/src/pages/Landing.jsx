@@ -388,43 +388,6 @@ export default function Landing() {
                 <path className={styles.propCalendarCheck} d="M70.5 49.5l4 4 8-9" />
               </svg>
 
-              {/* Potted plant prop — gradient-shaded leaves (per-leaf tone,
-                  darkest at the back) and a pot with a rim highlight, redrawn
-                  from the earlier flat-fill version for more depth. */}
-              <svg className={styles.propPlant} viewBox="0 0 84 112" fill="none">
-                <defs>
-                  <linearGradient id="heroPlantLeafGradA" x1="0" y1="0" x2="1" y2="1">
-                    <stop className={styles.plantStopDark} offset="0%" />
-                    <stop className={styles.plantStopMid} offset="100%" />
-                  </linearGradient>
-                  <linearGradient id="heroPlantLeafGradB" x1="1" y1="0" x2="0" y2="1">
-                    <stop className={styles.plantStopMid} offset="0%" />
-                    <stop className={styles.plantStopLight} offset="100%" />
-                  </linearGradient>
-                  <linearGradient id="heroPlantPotGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop className={styles.plantPotStopLight} offset="0%" />
-                    <stop className={styles.plantPotStopDark} offset="100%" />
-                  </linearGradient>
-                </defs>
-                <ellipse className={styles.propPlantShadow} cx="42" cy="108" rx="26" ry="4" />
-                {/* Five blades fanning from one base point, outer two painted
-                    first (read as furthest back), the tall center blade
-                    painted last (frontmost) — gives the cluster depth
-                    instead of the previous two-leaf silhouette. */}
-                <path fill="url(#heroPlantLeafGradA)" d="M42,84C32,72 14,66 6,42C24,46 36,60 40,80Z" />
-                <path fill="url(#heroPlantLeafGradA)" d="M42,84C52,72 70,66 78,42C60,46 48,60 44,80Z" />
-                <path fill="url(#heroPlantLeafGradB)" d="M42,84C36,62 24,42 18,16C34,24 40,50 40,80Z" />
-                <path fill="url(#heroPlantLeafGradB)" d="M42,84C48,62 60,42 66,16C50,24 44,50 44,80Z" />
-                <path fill="url(#heroPlantLeafGradB)" d="M42,84C42,58 40,30 42,6C46,30 46,58 42,84Z" />
-                <path className={styles.propPlantPotRim} d="M14 82h56l-3 8H17Z" />
-                <path fill="url(#heroPlantPotGrad)" d="M17 90h50l-6 30a6 6 0 0 1-6 5H29a6 6 0 0 1-6-5Z" />
-                {/* A subtle horizontal groove near the pot's rim — the kind
-                    of thrown-clay banding real terracotta pots have, a
-                    small extra bit of "designed" detail rather than a flat
-                    tapered block. */}
-                <path className={styles.propPlantPotGroove} d="M18.5 97.5h47" />
-              </svg>
-
               <div className={styles.phoneMock}>
                 <span className={styles.phoneNotch} />
                 <div className={styles.phoneScreen}>

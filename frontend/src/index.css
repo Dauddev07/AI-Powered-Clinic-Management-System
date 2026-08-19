@@ -15,23 +15,23 @@
 html[data-theme="dark"] {
   color-scheme: dark;
 
-  --app-bg-page: #18191b;
-  --app-bg-card: #212224;
-  --app-surface: #27282b;
-  --app-text-title: #e6e7e9;
-  --app-text-heading: #e6e7e9;
-  --app-text-subtitle: #8f9196;
-  --app-text-label: #b4b6bb;
-  --app-text-body: #c2c4c8;
-  --app-border: #34363a;
-  --app-input-bg: #1c1d1f;
-  --app-input-text: #e6e7e9;
-  --app-input-placeholder: #75777c;
-  --app-accent: #77a877;
-  --app-accent-hover: #8fc794;
-  --app-accent-bg: #2b3a2c;
-  --app-accent-text: #ecfdee;
-  --app-link: #8fc794;
+  --app-bg-page: #05070c;
+  --app-bg-card: #0e121b;
+  --app-surface: #151a26;
+  --app-text-title: #f1f4fa;
+  --app-text-heading: #f1f4fa;
+  --app-text-subtitle: #8b96ac;
+  --app-text-label: #aeb7c7;
+  --app-text-body: #c7cedb;
+  --app-border: #1e2431;
+  --app-input-bg: #0b0e16;
+  --app-input-text: #f1f4fa;
+  --app-input-placeholder: #5b667a;
+  --app-accent: #5b8def;
+  --app-accent-hover: #7ca6f5;
+  --app-accent-bg: #16233f;
+  --app-accent-text: #05070c;
+  --app-link: #7ca6f5;
   --app-error-bg: #2c1f1f;
   --app-error-text: #d1908f;
   --app-error-border: #4d3535;
@@ -50,47 +50,55 @@ html[data-theme="dark"] {
      isn't a problem a light page has, so no extra darkening is needed there. */
   --app-warning-banner-bg: color-mix(in srgb, var(--app-warning-bg) 85%, black);
   --app-warning-banner-text: color-mix(in srgb, var(--app-warning-text) 85%, black);
-  --app-neutral-bg: #27282b;
-  --app-neutral-text: #a3a1a8;
-  --app-neutral-border: #403e42;
-  --app-info-bg: #1e262c;
-  --app-info-text: #9bb0c2;
-  --app-info-border: #34424e;
-  --app-shadow: rgba(0, 0, 0, 0.32);
+  --app-neutral-bg: #151a26;
+  --app-neutral-text: #94a0b4;
+  --app-neutral-border: #262d3d;
+  /* Kept a distinct cyan rather than a second blue — with --app-accent now
+     blue too, an info tone from the same hue family would blur into it the
+     same way accent/success used to collide (see the light theme's own note
+     below). */
+  --app-info-bg: #0b2530;
+  --app-info-text: #7dd3fc;
+  --app-info-border: #1b4657;
+  --app-shadow: rgba(0, 0, 0, 0.5);
   /* Elevation scale for interactive cards: a quiet resting shadow and a
      stronger one for hover/focus, so lifting off the page is an actual state
      change rather than the same shadow at every size (see .card rules in
      PatientDashboard/AdminHome/Dashboard/AdminScreens/PatientScreens). */
-  --app-shadow-resting: 0 1px 3px rgba(0, 0, 0, 0.24);
-  --app-shadow-hover: 0 14px 32px rgba(0, 0, 0, 0.4);
-  --app-overlay: rgba(0, 0, 0, 0.55);
+  --app-shadow-resting: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --app-shadow-hover: 0 14px 36px rgba(0, 0, 0, 0.6);
+  --app-overlay: rgba(0, 0, 0, 0.6);
 }
 
-/* Warm off-white (not stark white) with the same sage-green brand accent,
-   deepened a shade from its dark-mode value so it still clears AA contrast
-   against a light background. Every semantic bg/text/border pair below keeps
-   the dark theme's contrast RELATIONSHIP (soft tinted bg + saturated text +
-   pale border), just re-balanced for light-on-dark instead of dark-on-light. */
+/* Near-white (not stark white) with a royal-blue brand accent, deepened a
+   shade from its dark-mode value so it still clears AA contrast against a
+   light background. Every semantic bg/text/border pair below keeps the dark
+   theme's contrast RELATIONSHIP (soft tinted bg + saturated text + pale
+   border), just re-balanced for light-on-dark instead of dark-on-light.
+   Success/warning/error stay in their own hue families deliberately — with
+   the accent now blue, a blue "info" tone would collide with it the way
+   accent and success used to collide when both were green, so info was
+   moved to a distinct cyan instead of reusing the accent hue. */
 html[data-theme="light"] {
   color-scheme: light;
 
-  --app-bg-page: #f5f5f0;
+  --app-bg-page: #f7f9fe;
   --app-bg-card: #ffffff;
-  --app-surface: #eef0e7;
-  --app-text-title: #14171a;
-  --app-text-heading: #14171a;
-  --app-text-subtitle: #5c6067;
-  --app-text-label: #3d4149;
-  --app-text-body: #2a2d32;
-  --app-border: #dcdacf;
+  --app-surface: #eff3fc;
+  --app-text-title: #0b1220;
+  --app-text-heading: #0b1220;
+  --app-text-subtitle: #5b667a;
+  --app-text-label: #3d4756;
+  --app-text-body: #1e2733;
+  --app-border: #e4e9f5;
   --app-input-bg: #ffffff;
-  --app-input-text: #14171a;
-  --app-input-placeholder: #8b8e94;
-  --app-accent: #3f6b3f;
-  --app-accent-hover: #2f5330;
-  --app-accent-bg: #e2f0e0;
-  --app-accent-text: #f6f7f4;
-  --app-link: #2f5330;
+  --app-input-text: #0b1220;
+  --app-input-placeholder: #8b96ac;
+  --app-accent: #2563eb;
+  --app-accent-hover: #1d4ed8;
+  --app-accent-bg: #eaf0fe;
+  --app-accent-text: #ffffff;
+  --app-link: #1d4ed8;
   --app-error-bg: #fdedec;
   --app-error-text: #9c2b2b;
   --app-error-border: #edbcbc;
@@ -102,16 +110,16 @@ html[data-theme="light"] {
   --app-warning-border: #e5cd93;
   --app-warning-banner-bg: var(--app-warning-bg);
   --app-warning-banner-text: var(--app-warning-text);
-  --app-neutral-bg: #edece7;
-  --app-neutral-text: #52555b;
-  --app-neutral-border: #d3d1c9;
-  --app-info-bg: #e8f1f9;
-  --app-info-text: #205a79;
-  --app-info-border: #b9d7ec;
-  --app-shadow: rgba(24, 22, 16, 0.14);
-  --app-shadow-resting: 0 1px 3px rgba(24, 22, 16, 0.08);
-  --app-shadow-hover: 0 14px 32px rgba(24, 22, 16, 0.18);
-  --app-overlay: rgba(18, 18, 16, 0.42);
+  --app-neutral-bg: #edf1f8;
+  --app-neutral-text: #52596b;
+  --app-neutral-border: #d7deeb;
+  --app-info-bg: #e7f6fb;
+  --app-info-text: #0e7490;
+  --app-info-border: #bae6fd;
+  --app-shadow: rgba(15, 23, 42, 0.14);
+  --app-shadow-resting: 0 1px 3px rgba(15, 23, 42, 0.07);
+  --app-shadow-hover: 0 14px 32px rgba(15, 23, 42, 0.12);
+  --app-overlay: rgba(10, 14, 26, 0.42);
 }
 
 :root {

@@ -33,14 +33,14 @@ def _send_in_background(target, /, *args, **kwargs) -> None:
 
 _BREVO_SEND_URL = "https://api.brevo.com/v3/smtp/email"
 
-_ACCENT = "#3f6b3f"
-_ACCENT_DARK = "#2f5330"
-_ACCENT_SOFT = "#e2f0e0"
-_INK = "#14171a"
-_BODY_TEXT = "#3a3d42"
-_MUTED = "#6b6f76"
-_BORDER = "#e3e1da"
-_SURFACE = "#f5f5f0"
+_ACCENT = "#2563eb"
+_ACCENT_DARK = "#1d4ed8"
+_ACCENT_SOFT = "#eaf0fe"
+_INK = "#0b1220"
+_BODY_TEXT = "#33404f"
+_MUTED = "#5b667a"
+_BORDER = "#e4e9f5"
+_SURFACE = "#f7f9fe"
 _FONT = "-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif"
 
 
@@ -87,20 +87,20 @@ def _layout(*, preheader: str, icon: str, heading: str, body_html: str) -> str:
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{_SURFACE};padding:40px 16px;">
   <tr>
     <td align="center">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border:1px solid {_BORDER};border-radius:16px;overflow:hidden;box-shadow:0 8px 24px rgba(30,28,20,0.08);">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border:1px solid {_BORDER};border-radius:18px;overflow:hidden;box-shadow:0 12px 32px rgba(15,23,42,0.10);">
         <tr>
           <td style="height:5px;background:linear-gradient(90deg,{_ACCENT},{_ACCENT_DARK});font-size:0;line-height:0;">&nbsp;</td>
         </tr>
         <tr>
-          <td align="center" style="padding:34px 32px 8px;background:linear-gradient(180deg,{_ACCENT_SOFT},#ffffff);">
-            <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 14px;">
+          <td align="center" style="padding:36px 32px 10px;background:linear-gradient(180deg,{_ACCENT_SOFT},#ffffff);">
+            <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 16px;">
               <tr>
-                <td width="52" height="52" align="center" valign="middle" style="width:52px;height:52px;border-radius:50%;background:#ffffff;border:1px solid {_BORDER};font-size:24px;line-height:52px;">
+                <td width="56" height="56" align="center" valign="middle" style="width:56px;height:56px;border-radius:50%;background:#ffffff;border:1.5px solid {_ACCENT_SOFT};box-shadow:0 4px 12px rgba(15,23,42,0.08);font-size:25px;line-height:56px;">
                   {icon}
                 </td>
               </tr>
             </table>
-            <div style="font-family:{_FONT};font-size:14px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:{_ACCENT};">
+            <div style="font-family:{_FONT};font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:{_ACCENT};">
               QuickCheck Clinic
             </div>
           </td>
@@ -138,7 +138,7 @@ def send_password_reset_otp_email(*, to: str, full_name: str, otp_code: str, ttl
     </p>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;">
       <tr>
-        <td align="center" style="background:{_ACCENT_SOFT};border:1.5px dashed {_ACCENT};border-radius:12px;padding:22px 0;">
+        <td align="center" style="background:linear-gradient(180deg,{_ACCENT_SOFT},#ffffff);border:1.5px solid {_ACCENT_SOFT};border-radius:14px;padding:24px 0;box-shadow:inset 0 1px 0 #ffffff;">
           <span style="font-family:'Courier New',monospace;font-size:32px;font-weight:700;letter-spacing:0.4em;color:{_ACCENT_DARK};">
             {otp_code}
           </span>
@@ -171,7 +171,7 @@ def send_email_verification_otp_email(*, to: str, full_name: str, otp_code: str,
     </p>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;">
       <tr>
-        <td align="center" style="background:{_ACCENT_SOFT};border:1.5px dashed {_ACCENT};border-radius:12px;padding:22px 0;">
+        <td align="center" style="background:linear-gradient(180deg,{_ACCENT_SOFT},#ffffff);border:1.5px solid {_ACCENT_SOFT};border-radius:14px;padding:24px 0;box-shadow:inset 0 1px 0 #ffffff;">
           <span style="font-family:'Courier New',monospace;font-size:32px;font-weight:700;letter-spacing:0.4em;color:{_ACCENT_DARK};">
             {otp_code}
           </span>
@@ -198,7 +198,7 @@ def _feature_row(*, icon: str, text: str) -> str:
     return f"""\
     <tr>
       <td style="padding:0 0 10px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{_SURFACE};border-radius:10px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{_SURFACE};border-radius:12px;">
           <tr>
             <td width="46" align="center" valign="middle" style="width:46px;padding:14px 0 14px 12px;">
               <table role="presentation" cellpadding="0" cellspacing="0">
@@ -279,7 +279,7 @@ def send_appointment_booked_email(
         <p style="margin:0 0 20px;text-align:center;">
           Hi {full_name}, your appointment is confirmed.
         </p>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:{_SURFACE};border-radius:12px;padding:16px 20px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:{_SURFACE};border-radius:14px;padding:16px 20px;">
           {_detail_row(label="Doctor", value=doctor_name)}
           {_detail_row(label="Department", value=department_name)}
           {_detail_row(label="When", value=when_text)}
@@ -306,7 +306,7 @@ def send_appointment_cancelled_email(*, to: str, full_name: str, doctor_name: st
         <p style="margin:0 0 20px;text-align:center;">
           Hi {full_name}, your appointment has been cancelled.
         </p>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:{_SURFACE};border-radius:12px;padding:16px 20px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:{_SURFACE};border-radius:14px;padding:16px 20px;">
           {_detail_row(label="Doctor", value=doctor_name)}
           {_detail_row(label="Was set for", value=when_text)}
         </table>
@@ -346,7 +346,7 @@ def send_appointment_rescheduled_email(
         <p style="margin:0 0 20px;text-align:center;">
           Hi {full_name}, your appointment has been rescheduled.
         </p>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:{_SURFACE};border-radius:12px;padding:16px 20px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:{_SURFACE};border-radius:14px;padding:16px 20px;">
           {rows}
         </table>
         <p style="margin:0;font-size:13px;color:{_MUTED};border-top:1px solid {_BORDER};padding-top:16px;">
@@ -372,7 +372,7 @@ def send_appointment_reminder_email(*, to: str, full_name: str, doctor_name: str
           Hi {full_name}, this is a reminder that your appointment with
           <strong>{doctor_name}</strong> is coming up in about <strong>1 hour</strong>.
         </p>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:{_SURFACE};border-radius:12px;padding:16px 20px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:{_SURFACE};border-radius:14px;padding:16px 20px;">
           {_detail_row(label="Doctor", value=doctor_name)}
           {_detail_row(label="When", value=when_text)}
         </table>
