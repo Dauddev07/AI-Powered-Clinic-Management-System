@@ -129,8 +129,9 @@ _SYMPTOM_KEYWORDS = frozenset({
     # slip through undetected entirely.
     "broken", "break", "fracture", "fractured", "sprain", "sprained", "twisted",
     "dislocated", "dislocation",
-    # Swelling/bruising/wounds
-    "swollen", "swelling", "bruise", "bruised", "bleeding", "bled", "cut", "wound",
+    # Swelling/bruising/wounds — NOTE: "cut" is deliberately NOT here, see
+    # _AMBIGUOUS_ACTION_SYMPTOM_WORDS below.
+    "swollen", "swelling", "bruise", "bruised", "bleeding", "bled", "wound",
     "wounded", "gash", "blister", "blisters",
     # Sensation/weakness
     "numb", "numbness", "tingling", "weak", "weakness", "fatigue", "faint", "fainted",
@@ -144,9 +145,9 @@ _SYMPTOM_KEYWORDS = frozenset({
     "breathless", "breething", "wheeze", "wheezing", "palpitations", "chills", "sweating",
     # Digestive
     "diarrhea", "diarrhoea", "constipation", "cramp", "cramps", "bloating",
-    # Skin/infection
-    "infection", "infected", "itchy", "itching", "sting", "stung", "bite", "bitten",
-    "burn", "burned", "burning",
+    # Skin/infection — NOTE: "sting"/"stung"/"bite"/"bitten"/"burn"/"burned"/
+    # "burning" are deliberately NOT here, see _AMBIGUOUS_ACTION_SYMPTOM_WORDS below.
+    "infection", "infected", "itchy", "itching",
     # Common named complaints
     "migraine", "sore", "toothache", "earache", "backache", "stomachache", "nosebleed",
     "lump", "bump", "discharge",
@@ -196,6 +197,10 @@ _SYMPTOM_KEYWORDS = frozenset({
     # through to a generic conversational routing rule instead of reaching
     # symptom_agent's triage flow at all.
     "walk", "walking",
+    # Same gap, same fix, for standing rather than walking — "difficulty in
+    # standing"/"can't stand for long" is the same bare mobility complaint and
+    # was falling through to general_info_agent for the same reason.
+    "stand", "standing",
     "panic", "paralysis", "paralyzed", "pelvic", "period", "periods", "pimple",
     "pimples", "pregnancy", "pregnant", "redness", "respiratory", "sad",
     "sadness", "scrotal", "scrotum", "seizure", "seizures", "shoulder",
@@ -206,9 +211,85 @@ _SYMPTOM_KEYWORDS = frozenset({
     "urine", "vaginal", "vertigo", "wart", "warts", "wrist", "wrists",
 })
 
+# Reported live: "i cut my fruits with a knife" tripped is_symptom_message on the
+# bare word "cut" alone and got routed into symptom_agent's triage flow for a
+# message with nothing to do with an injury. Unlike every other word in
+# _SYMPTOM_KEYWORDS above, these few are genuinely dual-meaning in everyday
+# English — "cut", "burn"/"burned"/"burning" (fruit/toast/a CD, sunburn from
+# weather, calories burned), "bite"/"bitten" (food, a joke that "bites"),
+# "sting"/"stung" (a comment that "stings", a bee vs. a wasp discussion) can all
+# appear with zero connection to a real injury. Kept OUT of _SYMPTOM_KEYWORDS and
+# gated instead behind is_symptom_message's own corroboration check just below:
+# one of these words only counts as a symptom signal when a body-part noun or an
+# injury-severity word also appears in the SAME message. Every other symptom word
+# above stays unambiguous and ungated — this module's fail-safe "when in doubt,
+# over-trigger toward symptom" bias is unchanged for all of them, this is a
+# narrowly-scoped exception for the handful of words where that bias produces a
+# clearly wrong routing.
+_AMBIGUOUS_ACTION_SYMPTOM_WORDS = frozenset({
+    "cut", "burn", "burned", "burning", "bite", "bitten", "sting", "stung",
+})
+
+# Corroboration vocabulary for _AMBIGUOUS_ACTION_SYMPTOM_WORDS — deliberately
+# generous (same "err toward matching too much" philosophy as every other set in
+# this file), since a false negative here is the costly direction: a real injury
+# described without one of these words would silently fall through to
+# general_info_agent instead of symptom_agent's triage flow. Body-part nouns
+# reuse every body part already in _SYMPTOM_KEYWORDS above plus the common ones
+# that weren't already there (bare "finger"/"toe"/etc. isn't itself
+# symptom-indicative standalone, same reasoning as "weight" in symptom_hints.py,
+# so they were never added to the main set) — a patient describing an injury
+# names the part far more often than not ("cut my finger", "burned my hand").
+_BODY_PART_CORROBORATION_WORDS = frozenset({
+    "abdomen", "ankle", "arm", "arms", "back", "calf", "cheek", "cheeks", "chest",
+    "chin", "ear", "ears", "elbow", "elbows", "eye", "eyes", "face", "finger",
+    "fingers", "foot", "feet", "forearm", "forehead", "groin", "gum", "gums",
+    "hand", "hands", "head", "heel", "heels", "hip", "hips", "jaw", "knee",
+    "knuckle", "knuckles", "leg", "legs", "lip", "lips", "mouth", "nail", "nails",
+    "neck", "nose", "palm", "palms", "scalp", "shin", "shoulder", "shoulders",
+    "skin", "sole", "soles", "spine", "stomach", "thigh", "throat", "thumb",
+    "toe", "toes", "tongue", "tooth", "teeth", "wrist", "wrists",
+})
+
+# Injury-severity corroboration — largely a subset of _SYMPTOM_KEYWORDS already
+# (so a message containing one of these usually returns True from the main check
+# before this even runs), kept as its own explicit set anyway so the
+# corroboration logic stays self-contained and correct even if the main list
+# above is ever edited independently.
+_INJURY_SEVERITY_CORROBORATION_WORDS = frozenset({
+    "bleeding", "bled", "blood", "hurt", "hurts", "hurting", "pain", "painful",
+    "wound", "wounded", "deep", "stitches", "gash", "swollen", "swelling",
+    "bruise", "bruised", "infected", "infection", "sore",
+})
+
+# Reported live: "my dog bit me" fell through entirely — "bit" (the actual
+# past-tense token the patient typed) was never in any keyword set at all, only
+# "bite"/"bitten" (present tense), so a real animal-bite report with no body part
+# named went unrecognized both before and after the corroboration change above.
+# Bare "bit" itself can never safely join a keyword set the way the words above
+# do — it's overwhelmingly a quantity word in everyday English ("a bit", "wait a
+# bit", "quite a bit", "bit by bit", "a little bit"), far more often than not an
+# injury at all, so gating it behind body-part/severity corroboration the same
+# way as _AMBIGUOUS_ACTION_SYMPTOM_WORDS would still leave it too noisy (a "bit"
+# of pain relief, "a bit of blood [loss] is normal" style incidental co-occurrence
+# reads very differently from an actual "bit me" report). Phrase-matched instead,
+# same technique as _BOOKING_ACTION_PHRASES/_PATH2_SYMPTOM_PHRASES elsewhere in
+# this file: only the object-marking shapes that are unambiguously about being
+# bitten, never the bare "bit" quantity word alone.
+_BIT_INJURY_PHRASES = (
+    "bit me", "bit him", "bit her", "bit us", "bit them",
+    "bit my", "bit his", "bit their",
+    "bitten by", "got bit", "got bitten", "bite me", "bite him", "bite her",
+)
+
 # Deliberately broad and erring toward false positives (routing more things to
 # knowledge_seeking than strictly necessary) per this module's fail-safe design.
-_KNOWLEDGE_KEYWORDS = _LOGISTICS_KEYWORDS | _SYMPTOM_KEYWORDS
+# This heuristic is CONVERSATIONAL-vs-KNOWLEDGE_SEEKING only (never symptom
+# routing itself), a much lower-stakes distinction than is_symptom_message's own
+# symptom-vs-general_info call below — so the ambiguous action words stay folded
+# in here unconditionally, same as before this change, rather than gated behind
+# the same corroboration check.
+_KNOWLEDGE_KEYWORDS = _LOGISTICS_KEYWORDS | _SYMPTOM_KEYWORDS | _AMBIGUOUS_ACTION_SYMPTOM_WORDS
 
 
 # PATH 2's own named-symptom list (llm.py's _TRIAGE_SECTION) — mirrored here only
@@ -528,8 +609,22 @@ def is_symptom_message(message: str) -> bool:
     lowered = message.lower()
     for phrase in _DEPARTMENT_PHRASES_CONTAINING_SYMPTOM_WORDS:
         lowered = lowered.replace(phrase, "")
-    words = re.findall(r"[a-z0-9]+", lowered)
-    return any(word in _SYMPTOM_KEYWORDS for word in words)
+    words = set(re.findall(r"[a-z0-9]+", lowered))
+    if words & _SYMPTOM_KEYWORDS:
+        return True
+    # A dual-meaning action word ("cut", "burn", "bite", "sting" — see
+    # _AMBIGUOUS_ACTION_SYMPTOM_WORDS' own comment) only counts as a symptom
+    # signal when corroborated by a body part or an injury-severity word in the
+    # SAME message — "i cut my fruits with a knife" has neither and stays
+    # general_info; "i cut my finger"/"i cut myself and it's bleeding" has one
+    # and still reaches symptom triage.
+    if words & _AMBIGUOUS_ACTION_SYMPTOM_WORDS and (
+        words & _BODY_PART_CORROBORATION_WORDS or words & _INJURY_SEVERITY_CORROBORATION_WORDS
+    ):
+        return True
+    if any(phrase in lowered for phrase in _BIT_INJURY_PHRASES):
+        return True
+    return False
 
 
 def _preceding_assistant_turn_looks_like_a_question(history) -> bool:

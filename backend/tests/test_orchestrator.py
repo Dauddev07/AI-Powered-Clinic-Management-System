@@ -2114,23 +2114,50 @@ def test_run_appointment_agent_unambiguous_doctor_name_proceeds_to_the_llm(monke
 def test_run_appointment_agent_tells_the_patient_plainly_when_a_named_doctor_does_not_exist(
     monkeypatch, db, ctx, doctor
 ):
-    # Reported live: "dr ahmed rana in pulmonology dept" (no such doctor at this
-    # clinic — "doctor" fixture is "Dr. Ahmed Khan", unrelated) silently showed the
-    # WHOLE Pulmonology department's real doctors instead of telling the patient
-    # plainly that "Dr. Ahmed Rana" isn't here. Must never reach the LLM at all —
-    # same "never silently substitute a different doctor" principle as the
-    # ambiguous-name short-circuit above.
+    # Reported live: "dr zeeshan qureshi in pulmonology dept" (no such doctor at
+    # this clinic — "doctor" fixture is "Dr. Ahmed Khan", and shares no word with
+    # "Zeeshan Qureshi" at all, so find_doctors_by_name's word-overlap fallback
+    # can't produce even a partial match) silently showed the WHOLE Pulmonology
+    # department's real doctors instead of telling the patient plainly that "Dr.
+    # Zeeshan Qureshi" isn't here. Must never reach the LLM at all — same "never
+    # silently substitute a different doctor" principle as the ambiguous-name
+    # short-circuit above. NOTE: this is deliberately a name with ZERO word
+    # overlap with any real doctor — see
+    # test_run_appointment_agent_suggests_a_partial_name_match_instead_of_flatly_refusing
+    # just below for the (also deliberate) different behavior when the attempted
+    # name DOES share a word with a real doctor.
     def _fail_if_called(*args, **kwargs):
         raise AssertionError("run_tool_calling_agent must not be called when the named doctor doesn't exist")
 
     monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
 
     result = appointment_agent.run_appointment_agent(
+        db, ctx, "dr zeeshan qureshi in pulmonology dept", "en", []
+    )
+
+    assert "Zeeshan Qureshi" in result
+    assert "couldn't find a doctor" in result.lower()
+
+
+def test_run_appointment_agent_suggests_a_partial_name_match_instead_of_flatly_refusing(
+    monkeypatch, db, ctx, doctor
+):
+    """"dr ahmed rana in pulmonology dept" shares "ahmed" with the real "Dr. Ahmed
+    Khan" fixture doctor — find_doctors_by_name's word-overlap fallback surfaces
+    that as a partial match (see its own docstring), so the patient should be
+    asked a one-line confirming question ("Did you mean Dr. Ahmed Khan?") rather
+    than being flatly told no such doctor exists. This is deliberate, intended
+    behavior — not the same case as the zero-overlap "doesn't exist" test above."""
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Did you mean Dr. Ahmed Khan in Cardiology?"
+    )
+
+    result = appointment_agent.run_appointment_agent(
         db, ctx, "dr ahmed rana in pulmonology dept", "en", []
     )
 
-    assert "Ahmed Rana" in result
-    assert "couldn't find a doctor" in result.lower()
+    assert "Ahmed Khan" in result
+    assert "couldn't find a doctor" not in result.lower()
 
 
 def test_run_appointment_agent_reschedule_cap_reached_is_told_before_showing_new_slots(

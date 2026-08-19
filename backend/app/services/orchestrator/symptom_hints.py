@@ -282,6 +282,10 @@ _LIMB_JOINT_WORDS = frozenset({
     "back", "backache", "spine", "shoulder", "shoulders", "arm", "arms",
     "hand", "hands", "hip", "hips", "wrist", "wrists", "elbow", "elbows",
     "walk", "walking", "gait", "limp", "limping",
+    # Same bare mobility complaint as "difficulty in walking" above, just standing
+    # rather than walking — same default (General Medicine, escalates via the
+    # existing injury/weight-bearing or numbness/weakness triggers below).
+    "stand", "standing",
 })
 # "neck"/"necks" deliberately NOT in this set — it gets its own dedicated
 # co-occurrence branch below (_NECK_NEUROLOGICAL_SIGNAL_WORDS) rather than
