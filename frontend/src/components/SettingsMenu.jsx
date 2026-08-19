@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchMyAccount } from "../api/auth";
 import { useAuth } from "../auth/AuthContext";
+import { useTheme } from "../theme/ThemeContext";
 import styles from "./SettingsMenu.module.css";
 
 const ICONS = {
@@ -54,11 +55,31 @@ const SUBVIEWS = {
     // (/admin/profile vs /patient/profile) — it's prepended at render time,
     // see subviewItems below.
     items: [
-      { to: "/theme", icon: "theme", section: "Appearance", label: "Theme" },
+      // Theme is a single on/off control, not a whole screen worth its own
+      // route — rendered inline as the actual toggle right here (see
+      // ThemeToggleRow below) instead of a Link to a separate page that just
+      // showed the same control one extra click away.
+      { kind: "themeToggle", key: "theme", icon: "theme", section: "Appearance", label: "Theme" },
       { to: "/change-password", icon: "lock", section: "Security", label: "Change password" },
     ],
   },
 };
+
+// The actual theme switch, inline in Settings -> Appearance — same
+// whole-row-is-the-button + visual switch-indicator pattern the standalone
+// Theme page used before this replaced it.
+function ThemeToggleRow() {
+  const { isDark, toggleTheme } = useTheme();
+  return (
+    <button type="button" className={styles.subMenuButton} role="menuitemcheckbox" aria-checked={isDark} onClick={toggleTheme}>
+      <ItemIcon name="theme" />
+      <span className={styles.subMenuButtonLabel}>{isDark ? "Dark" : "Light"}</span>
+      <span className={styles.themeSwitchTrack} data-on={isDark} aria-hidden="true">
+        <span className={styles.themeSwitchKnob} />
+      </span>
+    </button>
+  );
+}
 
 function ItemIcon({ name }) {
   return (
@@ -298,17 +319,21 @@ export default function SettingsMenu() {
               </div>
               <nav className={styles.subMenuList} aria-label={SUBVIEWS[view].heading}>
                 {subviewItems.map((item) => (
-                  <div key={item.to} className={styles.subMenuGroup}>
+                  <div key={item.to || item.key} className={styles.subMenuGroup}>
                     <span className={styles.subMenuSectionLabel}>{item.section}</span>
-                    <Link
-                      to={item.to}
-                      className={styles.subMenuButton}
-                      role="menuitem"
-                      onClick={() => setOpen(false)}
-                    >
-                      <ItemIcon name={item.icon} />
-                      <span className={styles.subMenuButtonLabel}>{item.label}</span>
-                    </Link>
+                    {item.kind === "themeToggle" ? (
+                      <ThemeToggleRow />
+                    ) : (
+                      <Link
+                        to={item.to}
+                        className={styles.subMenuButton}
+                        role="menuitem"
+                        onClick={() => setOpen(false)}
+                      >
+                        <ItemIcon name={item.icon} />
+                        <span className={styles.subMenuButtonLabel}>{item.label}</span>
+                      </Link>
+                    )}
                   </div>
                 ))}
               </nav>
