@@ -479,21 +479,22 @@
   box-shadow: 0 2px 6px color-mix(in srgb, var(--app-accent) 35%, transparent);
 }
 
-/* Same soft "caution notice" theme as the booking-confirmation card's 2-hour
-   policy chip (see .bookingCardPolicy below) — a rounded, inset panel with a
-   semi-transparent amber tint and an icon-in-a-circle badge, rather than the
-   old full-bleed edge-to-edge strip with a left accent stripe and a pulsing
-   icon. Never dismissible, but reads as a calm, considered notice instead of
-   an alarm. disclaimerInner caps the text to a readable line length on wide
-   screens instead of stretching one sentence across the whole viewport. */
+/* Same blue "info" theme as BookAppointment's .policyNote (PatientScreens.module.css)
+   — the actual reference design for this whole family of "here's a rule you should
+   know" notices, reused verbatim (--app-info-* tokens) rather than the amber
+   warning tokens this used before. Never dismissible, but reads as a calm,
+   considered notice, not an alarm. disclaimerInner caps the text to a readable
+   line length on wide screens instead of stretching one sentence across the
+   whole viewport. */
 .disclaimer {
   flex-shrink: 0;
   box-sizing: border-box;
   margin: 0.75rem 1.25rem 0;
   padding: 0.7rem 0.9rem;
   border-radius: 14px;
-  background: color-mix(in srgb, var(--app-warning-banner-bg) 55%, transparent);
-  border: 1px solid color-mix(in srgb, var(--app-warning-border) 70%, transparent);
+  background: var(--app-info-bg);
+  border: 1px solid var(--app-info-border);
+  border-left: 3px solid var(--app-info-text);
   font-size: var(--font-size-label);
   line-height: 1.45;
 }
@@ -516,12 +517,12 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--app-warning-banner-text) 18%, transparent);
-  color: var(--app-warning-banner-text);
+  background: color-mix(in srgb, var(--app-info-text) 18%, transparent);
+  color: var(--app-info-text);
 }
 
 .disclaimerText {
-  color: var(--app-warning-banner-text);
+  color: var(--app-info-text);
 }
 
 .disclaimerLabel {
@@ -530,8 +531,8 @@
   margin-right: 0.5rem;
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
-  background: var(--app-warning-border);
-  color: var(--app-warning-banner-text);
+  background: var(--app-info-border);
+  color: var(--app-info-text);
   font-weight: 700;
   font-size: var(--font-size-caption);
   letter-spacing: 0.02em;
@@ -1027,11 +1028,11 @@
   color: var(--app-accent-hover);
 }
 
-/* Own soft caution chip rather than plain dashed-border text — the 2-hour cutoff
-   is a rule the patient actually needs to notice, not fine print, so it gets the
-   same amber warning family as the landing/chat disclaimer banners (a scope/
-   caution notice, not an error) instead of blending into the card's own neutral
-   subtitle color. */
+/* Own soft info chip rather than plain dashed-border text — the 2-hour cutoff is
+   a rule the patient actually needs to notice, not fine print. Same blue "info"
+   theme as BookAppointment's .policyNote (PatientScreens.module.css), the actual
+   reference design for this whole family of "here's a rule you should know"
+   notices, instead of blending into the card's own neutral subtitle color. */
 .bookingCardPolicy {
   display: flex;
   align-items: flex-start;
@@ -1039,8 +1040,9 @@
   margin-top: 0.15rem;
   padding: 0.55rem 0.65rem;
   border-radius: 12px;
-  background: color-mix(in srgb, var(--app-warning-banner-bg) 55%, transparent);
-  border: 1px solid color-mix(in srgb, var(--app-warning-border) 70%, transparent);
+  background: var(--app-info-bg);
+  border: 1px solid var(--app-info-border);
+  border-left: 3px solid var(--app-info-text);
 }
 
 .bookingCardPolicyIcon {
@@ -1052,15 +1054,15 @@
   height: 20px;
   margin-top: 0.05rem;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--app-warning-banner-text) 18%, transparent);
-  color: var(--app-warning-banner-text);
+  background: color-mix(in srgb, var(--app-info-text) 18%, transparent);
+  color: var(--app-info-text);
 }
 
 .bookingCardPolicyText {
   margin: 0;
   font-size: var(--font-size-caption);
   line-height: 1.5;
-  color: var(--app-warning-banner-text);
+  color: var(--app-info-text);
 }
 
 /* A soft card of its own (was invisible layout-only chrome before, relying

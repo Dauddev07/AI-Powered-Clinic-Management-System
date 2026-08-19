@@ -266,8 +266,9 @@ function BookingConfirmationCard({ booking }) {
       </div>
       <div className={styles.bookingCardPolicy}>
         <span className={styles.bookingCardPolicyIcon} aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 11v5.5M12 7.5v.01" />
           </svg>
         </span>
         <p className={styles.bookingCardPolicyText}>
@@ -1213,16 +1214,14 @@ export default function ChatPage() {
           </button>
         </div>
 
-        {/* Permanent, always-visible medical disclaimer — never dismissible. Warning-
-            yellow banner, brightness dialed down a notch (see the CSS) so it stays
-            noticeable without glaring against the rest of the dark theme. */}
+        {/* Permanent, always-visible medical disclaimer — never dismissible. Same
+            blue "info" theme as BookAppointment's .policyNote (see the CSS). */}
         <div className={styles.disclaimer} role="note">
           <div className={styles.disclaimerInner}>
             <span className={styles.disclaimerIcon} aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M12 3.5 22 20H2L12 3.5Z" />
-                <line x1="12" y1="10" x2="12" y2="14.5" />
-                <circle cx="12" cy="17.25" r="0.9" fill="currentColor" stroke="none" />
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 11v5.5M12 7.5v.01" />
               </svg>
             </span>
             <span className={styles.disclaimerText}>
