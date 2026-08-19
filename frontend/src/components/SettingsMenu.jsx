@@ -302,7 +302,12 @@ export default function SettingsMenu() {
                     <span className={styles.subMenuSectionLabel}>Appearance</span>
                     <div className={styles.subMenuButton}>
                       <ItemIcon name="theme" />
-                      <span className={styles.subMenuButtonLabel}>{isDark ? "Dark mode" : "Light mode"}</span>
+                      <span className={styles.subMenuButtonLabelStacked}>
+                        <span>Theme</span>
+                        <span className={styles.subMenuButtonCaption}>
+                          {isDark ? "Set to Dark by default — tap to switch to Light" : "Set to Light — tap to switch back to Dark"}
+                        </span>
+                      </span>
                       <ThemeToggle />
                     </div>
                   </div>
