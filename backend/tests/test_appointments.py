@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -215,4 +215,58 @@ def test_reschedule_enforces_daily_department_reschedule_cap(db, clinic):
     assert exc_info.value.status_code == 409
     assert "reschedules" in exc_info.value.detail
 
-    assert exc_info.value.status_code == 409
+
+def test_reschedule_to_a_different_time_same_day_same_department_is_not_blocked_by_booking_cap(db, clinic):
+    """Reported live: with the daily booking cap (2) already fully used by 2 real
+    bookings in a department/day, rescheduling ONE of them to a later time the
+    SAME day in the SAME department was wrongly refused with "you already have 2
+    appointments" — moving an appointment's time within its own department/day
+    isn't a NEW use of that day's booking cap, it's the same appointment that was
+    already counted. Only the (separate) reschedule cap should govern this case."""
+    dept = Department(clinic_id=clinic.id, name="Cardiology")
+    db.add(dept)
+    db.flush()
+    doctor = Doctor(
+        clinic_id=clinic.id, department_id=dept.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:6]}",
+        full_name="Dr. Cardio One", is_active=True,
+    )
+    db.add(doctor)
+    db.flush()
+    patient = User(
+        clinic_id=clinic.id, role="patient", email=f"{uuid.uuid4().hex}@example.com",
+        hashed_password="x", full_name="Pat Ient",
+    )
+    db.add(patient)
+    db.flush()
+
+    def _slot(hour):
+        s = Slot(
+            clinic_id=clinic.id, doctor_id=doctor.id,
+            start_utc=datetime(2030, 6, 10, hour, 0, tzinfo=timezone.utc),
+            end_utc=datetime(2030, 6, 10, hour, 30, tzinfo=timezone.utc),
+        )
+        db.add(s)
+        db.flush()
+        return s
+
+    # Two real bookings in (Cardiology, 2030-06-10) — the daily booking cap (2)
+    # for that department/day is now fully used, same as booking through the
+    # real book_appointment() would leave it.
+    appt_a = Appointment(clinic_id=clinic.id, slot_id=_slot(9).id, patient_id=patient.id, doctor_id=doctor.id, status="confirmed")
+    db.add(appt_a)
+    appt_b = Appointment(clinic_id=clinic.id, slot_id=_slot(11).id, patient_id=patient.id, doctor_id=doctor.id, status="confirmed")
+    db.add(appt_b)
+    db.flush()
+    from app.models.appointment_department_day_use import AppointmentDepartmentDayUse
+    db.add(AppointmentDepartmentDayUse(clinic_id=clinic.id, patient_id=patient.id, department_id=dept.id, appointment_id=appt_a.id, local_date=date(2030, 6, 10)))
+    db.add(AppointmentDepartmentDayUse(clinic_id=clinic.id, patient_id=patient.id, department_id=dept.id, appointment_id=appt_b.id, local_date=date(2030, 6, 10)))
+    db.flush()
+
+    # Move appt_a to a later time, SAME day, SAME department — must succeed
+    # despite the booking cap already sitting at 2 for that department/day.
+    new_time_slot = _slot(15)
+    result = booking_engine.reschedule_appointment(
+        db, clinic_id=clinic.id, patient_id=patient.id, appointment_id=appt_a.id, new_slot_id=new_time_slot.id
+    )
+
+    assert result.slot_id == new_time_slot.id

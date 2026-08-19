@@ -88,6 +88,37 @@ def test_match_is_exact_not_fuzzy_or_substring(db, clinic):
 # --- not-found case -------------------------------------------------------------------
 
 
+def test_professional_title_falls_back_to_the_real_department_it_maps_to(db, clinic):
+    # Reported live: "available slots for cardiologist" reached this tool with
+    # department_name="cardiologist" and failed with not-found, even though the
+    # exact same title is already recognized by DEPARTMENT_TITLE_HINTS elsewhere
+    # in the app (appointment_agent's deterministic checks). This is a curated
+    # synonym table, not fuzzy/substring guessing, so it doesn't weaken the exact-
+    # match-only guarantee test_match_is_exact_not_fuzzy_or_substring covers above.
+    dept = _department(db, clinic, name="Cardiology")
+    doctor = _doctor(db, clinic, dept)
+    future = datetime.now(timezone.utc) + timedelta(days=1)
+    _slot(db, clinic, doctor, future)
+
+    result = get_department_availability(db, clinic.id, "cardiologist")
+
+    assert result.found is True
+    assert result.department_name == "Cardiology"
+    assert len(result.doctors) == 1
+
+
+def test_professional_title_fallback_works_for_dermatologist_too(db, clinic):
+    dept = _department(db, clinic, name="Dermatology")
+    doctor = _doctor(db, clinic, dept)
+    future = datetime.now(timezone.utc) + timedelta(days=1)
+    _slot(db, clinic, doctor, future)
+
+    result = get_department_availability(db, clinic.id, "Dermatologist")
+
+    assert result.found is True
+    assert result.department_name == "Dermatology"
+
+
 def test_unknown_department_name_returns_not_found_with_real_department_list(db, clinic):
     _department(db, clinic, name="Cardiology")
     _department(db, clinic, name="Dermatology")

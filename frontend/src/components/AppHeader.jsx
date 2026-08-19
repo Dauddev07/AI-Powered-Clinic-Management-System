@@ -161,9 +161,6 @@ export default function AppHeader() {
 
         {showPublicNav && (
           <div className={styles.publicActions}>
-            {/* Before everything else on the right side of the landing header. */}
-            <ThemeToggle />
-
             <button
               type="button"
               className={styles.navToggle}

@@ -23,6 +23,7 @@ from app.models.clinic import Clinic
 from app.models.department import Department
 from app.models.doctor import Doctor
 from app.models.slot import Slot
+from app.services.message_classifier import DEPARTMENT_TITLE_HINTS
 
 # Reported live: "only show me available slots of dr farhan rehman after 12 pm
 # on monday" and "show me his available slots after 12 pm" both returned the
@@ -159,9 +160,15 @@ def get_department_availability(
     earliest_time: time | None = None,
     latest_time: time | None = None,
 ) -> DepartmentAvailabilityResult:
-    """Exact (case-insensitive, trimmed) department-name match only — deliberately no
-    fuzzy/closest-match guessing, so a typo'd or nonexistent department is reported as
-    not found rather than silently routed to the wrong one.
+    """Exact (case-insensitive, trimmed) department-name match first, falling back to
+    the same curated DEPARTMENT_TITLE_HINTS professional-title synonym table
+    appointment_agent's own deterministic checks already use (e.g. "cardiologist" ->
+    a department whose name contains "cardio") — reported live: "available slots for
+    cardiologist" reached this tool with department_name="cardiologist" and failed
+    with not-found, even though the exact same title is already recognized elsewhere
+    in the app. Deliberately still not fuzzy/closest-match guessing beyond that fixed
+    table — a genuine typo or a made-up department name is still reported as not
+    found rather than silently routed to the wrong one.
 
     `earliest_date`, when given, restricts results to slots starting on or after
     midnight UTC of that date — lets a "do you have anything on Friday instead"
@@ -197,6 +204,27 @@ def get_department_availability(
             Department.name.ilike(department_name.strip()),
         )
     ).scalar_one_or_none()
+
+    if department is None:
+        # Exact match failed — try the curated title-synonym table before giving
+        # up (see the docstring above). department_name here is the argument the
+        # LLM composed, typically just the title itself ("cardiologist"), so an
+        # exact (not substring) match against each known title is safe — this is
+        # not fuzzy guessing, just recognizing a professional title as a synonym
+        # for the department it always maps to.
+        lowered = department_name.strip().lower()
+        active_departments = db.execute(
+            select(Department).where(Department.clinic_id == clinic_id, Department.is_active.is_(True))
+        ).scalars().all()
+        for title, hint in DEPARTMENT_TITLE_HINTS:
+            if lowered != title:
+                continue
+            for candidate in active_departments:
+                if re.search(rf"\b{re.escape(hint)}", candidate.name.lower()):
+                    department = candidate
+                    break
+            if department is not None:
+                break
 
     if department is None:
         return DepartmentAvailabilityResult(

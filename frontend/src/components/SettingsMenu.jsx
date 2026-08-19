@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchMyAccount } from "../api/auth";
 import { useAuth } from "../auth/AuthContext";
-import ThemeToggle from "./ThemeToggle";
-import { useTheme } from "../theme/ThemeContext";
 import styles from "./SettingsMenu.module.css";
 
 const ICONS = {
@@ -55,7 +53,10 @@ const SUBVIEWS = {
     // "View Profile" isn't listed here since its target path is role-aware
     // (/admin/profile vs /patient/profile) — it's prepended at render time,
     // see subviewItems below.
-    items: [{ to: "/change-password", icon: "lock", section: "Security", label: "Change password" }],
+    items: [
+      { to: "/theme", icon: "theme", section: "Appearance", label: "Theme" },
+      { to: "/change-password", icon: "lock", section: "Security", label: "Change password" },
+    ],
   },
 };
 
@@ -95,7 +96,6 @@ function MenuRow({ icon, children, chevron }) {
 // independent of any page's own stacking context.
 export default function SettingsMenu() {
   const { user, logout } = useAuth();
-  const { isDark } = useTheme();
   const [open, setOpen] = useState(false);
   // "account" is the default menu; any other value is a key into SUBVIEWS
   // above, reached via that item's button in the account menu — swapped in
@@ -297,21 +297,6 @@ export default function SettingsMenu() {
                 <p className={styles.subViewDescription}>{SUBVIEWS[view].description}</p>
               </div>
               <nav className={styles.subMenuList} aria-label={SUBVIEWS[view].heading}>
-                {view === "settings" && (
-                  <div className={styles.subMenuGroup}>
-                    <span className={styles.subMenuSectionLabel}>Appearance</span>
-                    <div className={styles.subMenuButton}>
-                      <ItemIcon name="theme" />
-                      <span className={styles.subMenuButtonLabelStacked}>
-                        <span>Theme</span>
-                        <span className={styles.subMenuButtonCaption}>
-                          {isDark ? "Set to Dark by default — tap to switch to Light" : "Set to Light — tap to switch back to Dark"}
-                        </span>
-                      </span>
-                      <ThemeToggle />
-                    </div>
-                  </div>
-                )}
                 {subviewItems.map((item) => (
                   <div key={item.to} className={styles.subMenuGroup}>
                     <span className={styles.subMenuSectionLabel}>{item.section}</span>

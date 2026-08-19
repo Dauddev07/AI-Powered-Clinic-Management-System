@@ -982,9 +982,9 @@
   padding: 1.1rem 1.15rem 1rem;
   border-radius: 18px;
   background:
-    radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--app-success-text) 16%, transparent), transparent 60%),
-    linear-gradient(165deg, color-mix(in srgb, var(--app-success-text) 14%, var(--app-bg-card)), color-mix(in srgb, var(--app-accent) 6%, var(--app-bg-card)) 100%);
-  border: 1px solid color-mix(in srgb, var(--app-success-text) 32%, var(--app-border));
+    radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--app-accent) 16%, transparent), transparent 60%),
+    linear-gradient(165deg, color-mix(in srgb, var(--app-accent) 14%, var(--app-bg-card)), color-mix(in srgb, var(--app-accent) 6%, var(--app-bg-card)) 100%);
+  border: 1px solid color-mix(in srgb, var(--app-accent) 32%, var(--app-border));
   box-shadow: 0 10px 26px var(--app-shadow);
 }
 
@@ -993,7 +993,7 @@
   position: absolute;
   inset: 0 0 auto 0;
   height: 3px;
-  background: linear-gradient(90deg, var(--app-success-text), var(--app-accent));
+  background: linear-gradient(90deg, var(--app-accent), var(--app-accent-hover));
 }
 
 .bookingCardHeader {
@@ -1006,8 +1006,8 @@
   font-weight: 700;
   font-size: var(--font-size-label);
   letter-spacing: 0.01em;
-  color: var(--app-success-text);
-  background: color-mix(in srgb, var(--app-success-text) 16%, transparent);
+  color: var(--app-accent);
+  background: color-mix(in srgb, var(--app-accent) 16%, transparent);
 }
 
 .bookingCardCheck {
@@ -1018,9 +1018,9 @@
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: var(--app-success-text);
-  color: var(--app-bg-card);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--app-success-text) 18%, transparent);
+  background: var(--app-accent);
+  color: var(--app-accent-text);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--app-accent) 18%, transparent);
 }
 
 .bookingCardRows {
@@ -1054,19 +1054,15 @@
   color: var(--app-accent);
 }
 
-.bookingCardRowIcon[data-kind="department"] {
-  filter: hue-rotate(28deg) saturate(1.2);
-}
-
 .bookingCardRowIcon[data-kind="when"] {
-  background: color-mix(in srgb, var(--app-success-text) 20%, transparent);
-  color: var(--app-success-text);
+  background: color-mix(in srgb, var(--app-accent-hover) 22%, transparent);
+  color: var(--app-accent-hover);
 }
 
 .bookingCardPolicy {
   margin: 0;
   padding: 0.65rem 0.7rem 0;
-  border-top: 1px dashed color-mix(in srgb, var(--app-success-text) 24%, var(--app-border));
+  border-top: 1px dashed color-mix(in srgb, var(--app-accent) 24%, var(--app-border));
   font-size: var(--font-size-caption);
   line-height: 1.5;
   color: var(--app-text-subtitle);

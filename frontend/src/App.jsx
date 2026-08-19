@@ -12,6 +12,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import Register from "./pages/Register";
 import VerifyEmail from "./pages/VerifyEmail";
 import ChangePassword from "./pages/ChangePassword";
+import Theme from "./pages/Theme";
 import AdminHome from "./pages/AdminHome";
 import AdminLayout from "./pages/admin/AdminLayout";
 import AdminViewProfile from "./pages/admin/ViewProfile";
@@ -67,6 +68,14 @@ export default function App() {
             element={
               <RequireAuth>
                 <ChangePassword />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/theme"
+            element={
+              <RequireAuth>
+                <Theme />
               </RequireAuth>
             }
           />

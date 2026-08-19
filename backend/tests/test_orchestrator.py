@@ -2133,6 +2133,47 @@ def test_run_appointment_agent_tells_the_patient_plainly_when_a_named_doctor_doe
     assert "couldn't find a doctor" in result.lower()
 
 
+def test_run_appointment_agent_reschedule_cap_reached_is_told_before_showing_new_slots(
+    monkeypatch, db, ctx, clinic, department, doctor, patient
+):
+    # Same "check before asking" principle as the 2-hour cancel/reschedule
+    # cutoff: if the daily reschedule cap for this appointment's own department/
+    # day is already used up, the patient should be told directly instead of
+    # being shown a full list of new times to pick from, only for the actual
+    # reschedule to fail once they've chosen one. See
+    # appointment_agent._reschedule_cap_reached.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.appointment import Appointment
+    from app.models.appointment_department_day_reschedule_use import AppointmentDepartmentDayRescheduleUse
+    from app.models.slot import Slot
+
+    appt_start = datetime.now(timezone.utc) + timedelta(days=1)
+    slot = Slot(clinic_id=clinic.id, doctor_id=doctor.id, start_utc=appt_start, end_utc=appt_start + timedelta(minutes=30))
+    db.add(slot)
+    db.flush()
+    appointment = Appointment(clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id, status="confirmed")
+    db.add(appointment)
+    db.flush()
+
+    # Pre-fill the reschedule cap (2) for (Cardiology, appt_start's date) — as if
+    # two reschedules out of that department/day already happened.
+    local_date = appt_start.date()
+    db.add(AppointmentDepartmentDayRescheduleUse(clinic_id=clinic.id, patient_id=patient.id, department_id=department.id, appointment_id=appointment.id, local_date=local_date))
+    db.add(AppointmentDepartmentDayRescheduleUse(clinic_id=clinic.id, patient_id=patient.id, department_id=department.id, appointment_id=appointment.id, local_date=local_date))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called once the reschedule cap is already reached")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "i want to reschedule my appointment", "en", [])
+
+    assert "Cardiology" in result
+    assert "already been rescheduled" in result.lower()
+
+
 def test_run_appointment_agent_generic_doctor_availability_question_falls_through_normally(
     monkeypatch, db, ctx, doctor
 ):
@@ -3764,6 +3805,72 @@ def test_run_appointment_agent_warns_when_general_doc_names_a_mismatched_departm
 
     assert "Orthopedics" in result
     assert "General Medicine" in result
+
+
+def test_run_appointment_agent_two_independent_direct_specialty_requests_do_not_warn(
+    monkeypatch, db, ctx, clinic, patient
+):
+    # Reported live (found during verification, not a symptom-triage case at
+    # all): "available slots for cardiologist" then, later, "available slots for
+    # dermatologist" — two unrelated, independently-named specialties, no
+    # symptoms ever described. The fallback mismatch check (see the test above)
+    # must NOT fire here just because a DIFFERENT department was shown earlier —
+    # that earlier card's `note` is null (the patient named Cardiology
+    # themselves, nothing was inferred), so there's no real recommendation to
+    # contradict. Only a `note`-carrying (genuinely symptom-inferred) earlier
+    # card should ever trigger this fallback.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    cardiology = Department(clinic_id=clinic.id, name="Cardiology")
+    db.add(cardiology)
+    derma = Department(clinic_id=clinic.id, name="Dermatology")
+    db.add(derma)
+    db.flush()
+    derma_doctor = Doctor(
+        clinic_id=clinic.id, department_id=derma.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Sara Khan", is_active=True,
+    )
+    db.add(derma_doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=derma_doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    # Expected to reach the normal LLM/tool-calling path — this fixture just
+    # needs to prove that path was reached (no deterministic mismatch
+    # short-circuit fired first), not exercise the LLM call itself.
+    def _fake_reply(*args, **kwargs):
+        return "Here's Dermatology availability."
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fake_reply)
+
+    # A direct request's own card — `note` is null, since the patient named the
+    # department themselves (see chat_tools._doctor_options_payload).
+    cardiology_card = json.dumps(
+        {
+            "note": None,
+            "department_name": "Cardiology",
+            "doctors": [{"doctor_id": "d1", "doctor_name": "Dr. Ahmed Farooq", "specialization": None, "slots": []}],
+        }
+    )
+    history = [
+        _row("user", "available slots for cardiologist"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + cardiology_card),
+    ]
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "available slots for dermatologist", "en", history
+    )
+
+    assert result == "Here's Dermatology availability."
+    assert "might be a better fit" not in result
 
 
 def test_run_appointment_agent_warns_when_a_professional_title_names_a_mismatched_department(

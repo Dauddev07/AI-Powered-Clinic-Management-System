@@ -1,0 +1,35 @@
+.statusCard {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 1rem 1.1rem;
+  margin-bottom: 1.25rem;
+  background: var(--app-bg-page);
+  border: 1px solid var(--app-border);
+  border-radius: 16px;
+}
+
+.statusIcon {
+  flex: none;
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.statusText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.statusLabel {
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  color: var(--app-text-title);
+}
+
+.statusCaption {
+  font-size: var(--font-size-label);
+  color: var(--app-text-subtitle);
+  overflow-wrap: anywhere;
+}

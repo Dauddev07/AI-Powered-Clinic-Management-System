@@ -62,11 +62,13 @@ import json
 import re
 import uuid
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
 from app.core.tenancy import ClinicContext
 from app.models.conversation_memory import ConversationMemory
+from app.models.doctor import Doctor
 from app.services import booking_engine, llm
 from app.services.chat_markers import DEPARTMENT_LIST_MARKER, DOCTOR_DISAMBIGUATION_MARKER, DOCTOR_OPTIONS_MARKER
 from app.services.chat_tools import (
@@ -330,6 +332,36 @@ def _cancel_reschedule_cutoff_reply(appointment: dict, action: str) -> str:
         f"Your appointment with {appointment['doctor_name']} in {appointment['department_name']} "
         f"on {appointment['when']} is coming up in less than 2 hours, so it can no longer be "
         f"{verb} online. Please contact the clinic directly for last-minute changes."
+    )
+
+
+def _reschedule_cap_reached(db: Session, ctx: ClinicContext, appointment: dict) -> bool:
+    """Same "check before asking" principle as the 2-hour cutoff above, for the
+    daily per-department reschedule cap (booking_engine.DAILY_DEPARTMENT_RESCHEDULE_
+    CAP) — keyed by the appointment's OWN department/day being rescheduled away
+    from, same as booking_engine.reschedule_appointment's own real check. Without
+    this, the patient gets shown a full list of new times to pick from, only for
+    the actual reschedule to fail once they've already chosen one."""
+    doctor_id = appointment.get("doctor_id")
+    raw_start_utc = appointment.get("start_utc")
+    if not doctor_id or not raw_start_utc:
+        return False
+    doctor = db.get(Doctor, uuid.UUID(doctor_id))
+    if doctor is None:
+        return False
+    tz = ZoneInfo(_clinic_timezone(db, ctx.clinic_id))
+    local_date = datetime.fromisoformat(raw_start_utc).astimezone(tz).date()
+    return (
+        booking_engine._department_day_reschedule_count(db, ctx.clinic_id, ctx.user_id, doctor.department_id, local_date)
+        >= booking_engine.DAILY_DEPARTMENT_RESCHEDULE_CAP
+    )
+
+
+def _reschedule_cap_reply(appointment: dict) -> str:
+    return (
+        f"Your appointment with {appointment['doctor_name']} in {appointment['department_name']} has "
+        f"already been rescheduled {booking_engine.DAILY_DEPARTMENT_RESCHEDULE_CAP} times today for that "
+        f"department — please contact the clinic directly for any further changes to it today."
     )
 
 
@@ -1119,6 +1151,8 @@ def run_appointment_agent(
     ):
         if _is_within_cancel_reschedule_cutoff(resolved_appointment):
             return _cancel_reschedule_cutoff_reply(resolved_appointment, "reschedule")
+        if _reschedule_cap_reached(db, ctx, resolved_appointment):
+            return _reschedule_cap_reply(resolved_appointment)
         forced_window = resolve_bare_weekday_window(message)
         earliest_date = date.fromisoformat(forced_window[0]) if forced_window else None
         latest_date = date.fromisoformat(forced_window[1]) if forced_window else None
@@ -1196,7 +1230,15 @@ def run_appointment_agent(
             # re-guessed keyword hint) catches this gap the keyword table alone
             # cannot.
             last_shown = _most_recent_availability_marker(history)
-            last_department = last_shown.get("department_name") if last_shown else None
+            # Only when that card carried a real `note` — i.e. was actually
+            # symptom-inferred (see `note`'s own omission rule in llm.py: it's
+            # null whenever the patient named the department themselves). Two
+            # independent direct specialty requests in a row ("cardiologist",
+            # then "dermatologist") are the patient's own free choice each
+            # time, not a contradiction — nothing to warn about.
+            last_department = (
+                last_shown.get("department_name") if last_shown and last_shown.get("note") else None
+            )
             if last_department in department_names:
                 for named in named_departments:
                     if named != last_department and not _already_warned_about_department_mismatch(history, named):

@@ -393,8 +393,28 @@ def reschedule_appointment(
         new_doctor = db.get(Doctor, new_slot.doctor_id)
         new_department = db.get(Department, new_doctor.department_id)
         new_local_date = new_slot.start_utc.astimezone(tz).date()
+        old_department = db.get(Department, old_doctor.department_id) if old_doctor is not None else None
+        old_local_date = old_slot.start_utc.astimezone(tz).date()
 
-        if (
+        # Moving to a genuinely different department and/or day counts against
+        # THAT day's booking cap same as a fresh booking would. Moving to a new
+        # TIME on the SAME day in the SAME department does not — the appointment
+        # already occupied one of that day's slots from its original booking;
+        # re-checking/re-recording the booking cap here would double-count it
+        # against itself, and since department_day_uses rows are never removed,
+        # every same-day time change would permanently inflate the count and
+        # eventually lock the patient out of moving their own appointment's time
+        # at all. Reported live: with the daily cap already fully used by 2 real
+        # bookings, rescheduling one of them to a later time the SAME day was
+        # wrongly refused as "you already have 2 appointments" — the reschedule
+        # cap below is what should govern this case, not the booking cap.
+        same_day_same_department = (
+            old_department is not None
+            and new_department.id == old_department.id
+            and new_local_date == old_local_date
+        )
+
+        if not same_day_same_department and (
             _department_day_use_count(db, clinic_id, patient_id, new_department.id, new_local_date)
             >= DAILY_DEPARTMENT_BOOKING_CAP
         ):
@@ -409,9 +429,8 @@ def reschedule_appointment(
         # Independent reschedule allowance, keyed by the OLD appointment's own
         # department/day (the one being moved AWAY from) — how many times an
         # appointment that was on THAT day/department has already been rescheduled,
-        # not how many new bookings exist on the target day.
-        old_department = db.get(Department, old_doctor.department_id) if old_doctor is not None else None
-        old_local_date = old_slot.start_utc.astimezone(tz).date()
+        # not how many new bookings exist on the target day. Always checked,
+        # same-day move or not.
         if old_department is not None and (
             _department_day_reschedule_count(db, clinic_id, patient_id, old_department.id, old_local_date)
             >= DAILY_DEPARTMENT_RESCHEDULE_CAP
@@ -429,7 +448,8 @@ def reschedule_appointment(
         appointment.slot_id = new_slot.id
         appointment.doctor_id = new_slot.doctor_id
         db.flush()
-        _record_department_day_use(db, clinic_id, patient_id, new_department.id, appointment.id, new_local_date)
+        if not same_day_same_department:
+            _record_department_day_use(db, clinic_id, patient_id, new_department.id, appointment.id, new_local_date)
         if old_department is not None:
             _record_department_day_reschedule_use(
                 db, clinic_id, patient_id, old_department.id, appointment.id, old_local_date
