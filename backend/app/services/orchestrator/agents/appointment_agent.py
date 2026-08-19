@@ -1038,6 +1038,7 @@ def _build_system_prompt(
     tail = llm._TAIL_STYLE_RULES.format(language_name=language_name)
     return (
         f"{_INTRO}\n\n"
+        f"{llm._OFF_TOPIC_AND_INTEGRITY_RULES}"
         f"TOOL USE RULES:\n{llm._TOOL_RULES_SHARED}{llm._TOOL_RULES_APPOINTMENT_ACTIONS}\n"
         f"{resolved_match_block}"
         f"{resolved_appointment_block}"

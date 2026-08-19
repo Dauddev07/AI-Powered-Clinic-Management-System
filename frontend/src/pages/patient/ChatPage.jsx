@@ -264,10 +264,17 @@ function BookingConfirmationCard({ booking }) {
           </div>
         ))}
       </div>
-      <p className={styles.bookingCardPolicy}>
-        Cancellations and reschedules aren't possible within 2 hours of the appointment time — for last-minute
-        changes after that, please contact the clinic directly.
-      </p>
+      <div className={styles.bookingCardPolicy}>
+        <span className={styles.bookingCardPolicyIcon} aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+        </span>
+        <p className={styles.bookingCardPolicyText}>
+          Cancellations and reschedules aren't possible within 2 hours of the appointment time — for last-minute
+          changes after that, please contact the clinic directly.
+        </p>
+      </div>
     </div>
   );
 }

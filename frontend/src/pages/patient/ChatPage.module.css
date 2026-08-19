@@ -1059,13 +1059,40 @@
   color: var(--app-accent-hover);
 }
 
+/* Own soft caution chip rather than plain dashed-border text — the 2-hour cutoff
+   is a rule the patient actually needs to notice, not fine print, so it gets the
+   same amber warning family as the landing/chat disclaimer banners (a scope/
+   caution notice, not an error) instead of blending into the card's own neutral
+   subtitle color. */
 .bookingCardPolicy {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.15rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--app-warning-banner-bg) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-warning-border) 70%, transparent);
+}
+
+.bookingCardPolicyIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-top: 0.05rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--app-warning-banner-text) 18%, transparent);
+  color: var(--app-warning-banner-text);
+}
+
+.bookingCardPolicyText {
   margin: 0;
-  padding: 0.65rem 0.7rem 0;
-  border-top: 1px dashed color-mix(in srgb, var(--app-accent) 24%, var(--app-border));
   font-size: var(--font-size-caption);
   line-height: 1.5;
-  color: var(--app-text-subtitle);
+  color: var(--app-warning-banner-text);
 }
 
 /* A soft card of its own (was invisible layout-only chrome before, relying

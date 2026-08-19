@@ -216,9 +216,11 @@
   gap: 1rem;
 }
 
-/* Full-width red banner, first thing on the page (above the hero) — the app's own
-   error tokens (same red used for .errorText/StatusBadge's error tone elsewhere),
-   kept to one short line so it reads instantly rather than needing to be parsed. */
+/* Full-width caution banner, first thing on the page (above the hero) — this is a
+   scope notice, not an error, so it uses the app's amber warning tokens (same
+   family as ChatPage.module.css's .disclaimer) rather than the alarm-red error
+   tokens: it reads as a caution against the blue theme without clashing like a
+   plain red bar dropped on top of it. */
 .emergencyBanner {
   display: flex;
   align-items: center;
@@ -228,9 +230,9 @@
   padding: 0.5rem 1.25rem;
   width: 100%;
   box-sizing: border-box;
-  background: var(--app-error-bg);
-  border-bottom: 1px solid var(--app-error-border);
-  color: var(--app-error-text);
+  background: var(--app-warning-banner-bg);
+  border-bottom: 1px solid var(--app-warning-border);
+  color: var(--app-warning-banner-text);
   font-size: var(--font-size-caption);
   font-weight: 600;
   line-height: 1.4;

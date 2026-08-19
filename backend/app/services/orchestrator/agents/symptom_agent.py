@@ -9,21 +9,24 @@ collection or retrieval step here.
 
 Tools bound: get_department_availability, find_doctors_by_name only.
 
-System prompt = the triage rules (_TRIAGE_ALWAYS + conditional _TRIAGE_PATH2, reused
-verbatim from app.services.llm/message_classifier.needs_path2_screening) + the
-TOOL USE RULES governing these two tools specifically + the shared style rules —
-all sliced verbatim from the original single-pipeline _AGENT_SYSTEM_PROMPT, never
-retyped. The original prompt's STRICT GROUNDING RULE and
-"`note` ALSO doubles as..." paragraphs are deliberately NOT included here: both are
-about grounding an answer in KB-retrieved "Retrieved context," which this agent no
-longer has (see the no-KB-retrieval note above) — a real, deliberate capability
-change from the original single-pipeline behavior, not an oversight. A patient's
-inline factual aside ("what's your address, also do you have anyone free in
-Cardiology?") is no longer answered in the same reply by this agent; it needs its
-own message, which the router sends to general_info_agent instead. Note-composition
-for the ROUTING-REASONING purpose (explaining why a department was chosen) is
-already fully self-contained inside _TRIAGE_ALWAYS's own tail rules and doesn't
-depend on either dropped paragraph.
+System prompt = llm._OFF_TOPIC_AND_INTEGRITY_RULES (off-topic/general-knowledge
+refusal + instruction-integrity, shared with appointment_agent — see llm.py's own
+comment on why this is a separate constant from STRICT GROUNDING RULE below) + the
+triage rules (_TRIAGE_ALWAYS + conditional _TRIAGE_PATH2, reused verbatim from
+app.services.llm/message_classifier.needs_path2_screening) + the TOOL USE RULES
+governing these two tools specifically + the shared style rules — all sliced
+verbatim from the original single-pipeline _AGENT_SYSTEM_PROMPT, never retyped. The
+original prompt's STRICT GROUNDING RULE and "`note` ALSO doubles as..." paragraphs
+are deliberately NOT included here: both are about grounding an answer in
+KB-retrieved "Retrieved context," which this agent no longer has (see the
+no-KB-retrieval note above) — a real, deliberate capability change from the
+original single-pipeline behavior, not an oversight. A patient's inline factual
+aside ("what's your address, also do you have anyone free in Cardiology?") is no
+longer answered in the same reply by this agent; it needs its own message, which
+the router sends to general_info_agent instead. Note-composition for the
+ROUTING-REASONING purpose (explaining why a department was chosen) is already
+fully self-contained inside _TRIAGE_ALWAYS's own tail rules and doesn't depend on
+either dropped paragraph.
 """
 import json
 import re
@@ -281,6 +284,7 @@ def _build_system_prompt(language_name: str, department_names: list[str], includ
     tail = llm._TAIL_STYLE_RULES.format(language_name=language_name)
     return (
         f"{_INTRO}\n\n"
+        f"{llm._OFF_TOPIC_AND_INTEGRITY_RULES}"
         f"{llm._triage_section(include_path2)}\n"
         f"TOOL USE RULES:\n{llm._TOOL_RULES_SHARED}{llm._TOOL_RULES_FIND_DOCTORS_BY_NAME}\n"
         f"{tail}"
