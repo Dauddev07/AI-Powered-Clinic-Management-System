@@ -218,6 +218,10 @@ function BookingConfirmationCard({ booking }) {
           </div>
         ))}
       </div>
+      <p className={styles.bookingCardPolicy}>
+        Cancellations and reschedules aren't possible within 2 hours of the appointment time — for last-minute
+        changes after that, please contact the clinic directly.
+      </p>
     </div>
   );
 }

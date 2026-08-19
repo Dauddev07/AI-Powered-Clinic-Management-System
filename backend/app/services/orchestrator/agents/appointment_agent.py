@@ -74,9 +74,12 @@ from app.services.chat_tools import (
     _doctor_options_payload,
     _format_when,
     _no_slots_message,
+    book_appointment_now,
     build_tools,
     cancel_appointment_now,
+    get_slot_summary,
     list_upcoming_appointments,
+    reschedule_appointment_now,
     resolve_bare_weekday_window,
     resolve_time_of_day_window,
 )
@@ -199,6 +202,17 @@ def _message_has_explicit_slot_id(message: str) -> bool:
     return bool(_EXPLICIT_SLOT_ID_RE.search(message))
 
 
+# Capturing variant of _EXPLICIT_SLOT_ID_RE above — used only by the book/reschedule
+# confirmation gate below, which needs the actual id value (to look up the real slot
+# via get_slot_summary), not just whether one is present.
+_EXPLICIT_SLOT_ID_CAPTURE_RE = re.compile(r"slot_id:\s*([0-9a-f-]{8,})", re.IGNORECASE)
+
+
+def _extract_slot_id(message: str) -> str | None:
+    match = _EXPLICIT_SLOT_ID_CAPTURE_RE.search(message)
+    return match.group(1) if match else None
+
+
 # Reported live: patient asked "show me my upcoming appointment" (one appointment
 # shown), then "can i cancel that?" — a QUESTION, not a command — and the
 # appointment was cancelled outright with no confirmation. Root cause:
@@ -293,6 +307,55 @@ def _pending_cancel_confirmation(history: list[ConversationMemory]) -> dict | No
     later message, mirroring _pending_appointment_disambiguation below."""
     payload = _last_assistant_disambiguation_payload(history)
     if payload is None or payload.get("kind") != "cancel_confirm":
+        return None
+    return payload.get("candidate")
+
+
+# Instructed live: cancel already gets a code-enforced confirm-then-act gate (see
+# _cancel_confirmation_reply above) — book and reschedule get the exact same
+# treatment here, even though picking a slot from a shown list already signals
+# clear intent. Same "the LLM never freehands a mutating action" principle: a
+# patient's explicit slot pick is composed into a real, DB-backed confirming
+# question (via get_slot_summary — never model-generated) and only actually
+# booked/rescheduled once _is_short_affirmative_reply sees an explicit "yes" to
+# THAT exact question, mirroring cancel's own kind/payload/pending-check shape
+# exactly so this reuses the very same _last_assistant_disambiguation_payload
+# lookup instead of a parallel one.
+def _book_confirmation_reply(slot: dict) -> str:
+    question = (
+        f"Just to confirm — book your appointment with {slot['doctor_name']} in "
+        f"{slot['department_name']} on {slot['when']}?"
+    )
+    payload = {"kind": "book_confirm", "question": question, "candidate": slot}
+    return DOCTOR_DISAMBIGUATION_MARKER + json.dumps(payload)
+
+
+def _pending_book_confirmation(history: list[ConversationMemory]) -> dict | None:
+    payload = _last_assistant_disambiguation_payload(history)
+    if payload is None or payload.get("kind") != "book_confirm":
+        return None
+    return payload.get("candidate")
+
+
+def _reschedule_confirmation_reply(appointment: dict, new_slot: dict) -> str:
+    question = (
+        f"Just to confirm — reschedule your appointment with {appointment['doctor_name']} in "
+        f"{appointment['department_name']} from {appointment['when']} to {new_slot['when']}?"
+    )
+    candidate = {
+        "appointment_id": appointment["appointment_id"],
+        "new_slot_id": new_slot["slot_id"],
+        "doctor_name": appointment["doctor_name"],
+        "department_name": appointment["department_name"],
+        "when": new_slot["when"],
+    }
+    payload = {"kind": "reschedule_confirm", "question": question, "candidate": candidate}
+    return DOCTOR_DISAMBIGUATION_MARKER + json.dumps(payload)
+
+
+def _pending_reschedule_confirmation(history: list[ConversationMemory]) -> dict | None:
+    payload = _last_assistant_disambiguation_payload(history)
+    if payload is None or payload.get("kind") != "reschedule_confirm":
         return None
     return payload.get("candidate")
 
@@ -911,6 +974,33 @@ def run_appointment_agent(
         # yes/no box — worst case it re-asks, which is always safe for a mutating
         # action like this.
 
+    # Book/reschedule-confirmation handoffs — same reasoning and same "resolved
+    # before anything else" placement as cancel's above, so a reply to either
+    # confirming question is never re-interpreted as an unrelated fresh message.
+    book_pending = _pending_book_confirmation(history)
+    if book_pending is not None:
+        if _is_short_affirmative_reply(message):
+            return book_appointment_now(db, ctx, book_pending["slot_id"])
+        if _is_short_negative_reply(message):
+            return (
+                f"No problem — the appointment with {book_pending['doctor_name']} in "
+                f"{book_pending['department_name']} on {book_pending['when']} was not booked."
+            )
+        # Falls through otherwise, same as cancel's own pending check above.
+
+    reschedule_pending = _pending_reschedule_confirmation(history)
+    if reschedule_pending is not None:
+        if _is_short_affirmative_reply(message):
+            return reschedule_appointment_now(
+                db, ctx, reschedule_pending["appointment_id"], reschedule_pending["new_slot_id"]
+            )
+        if _is_short_negative_reply(message):
+            return (
+                f"No problem — your appointment with {reschedule_pending['doctor_name']} in "
+                f"{reschedule_pending['department_name']} was not rescheduled."
+            )
+        # Falls through otherwise, same as cancel's own pending check above.
+
     pending = _pending_appointment_disambiguation(history)
     if pending is not None:
         candidate = _match_candidate(message, pending["candidates"])
@@ -999,6 +1089,24 @@ def run_appointment_agent(
                 )
             return f"{resolved_appointment['doctor_name']} doesn't have any open slots right now. Please check back later."
         return _doctor_options_payload(db, ctx.clinic_id, availability)
+
+    # Instructed live: reschedule now gets the same code-enforced confirm-then-act
+    # gate as cancel — the patient has already picked a specific new slot at this
+    # point (that's exactly what _message_has_explicit_slot_id is true for, the
+    # complementary case to the block just above), so this composes a real,
+    # DB-backed confirming question from it via get_slot_summary rather than
+    # letting the LLM call reschedule_appointment immediately. Falls through to
+    # the normal LLM/tool-calling path only if the slot lookup itself fails (e.g. a
+    # stale/tampered slot_id) — never silently reschedules without confirmation.
+    if (
+        resolved_appointment is not None
+        and resolved_appointment_action == "reschedule"
+        and _message_has_explicit_slot_id(message)
+    ):
+        picked_slot_id = _extract_slot_id(message)
+        new_slot = get_slot_summary(db, ctx.clinic_id, picked_slot_id) if picked_slot_id else None
+        if new_slot is not None:
+            return _reschedule_confirmation_reply(resolved_appointment, new_slot)
 
     # Symptom-vs-department mismatch check: only for a fresh booking-department
     # reference, never for a cancel/reschedule action already resolved above (that's
@@ -1221,6 +1329,20 @@ def run_appointment_agent(
                 )
             return f"{resolved_match.full_name} doesn't have any open slots right now. Please check back later."
         return _doctor_options_payload(db, ctx.clinic_id, availability)
+
+    # Instructed live: booking now gets the same code-enforced confirm-then-act
+    # gate as cancel/reschedule above. This is the fresh-booking counterpart —
+    # resolved_appointment is None here (no cancel/reschedule action in play), and
+    # the message carries an explicit slot_id from a shown DOCTOR_OPTIONS card's
+    # slot-pick button. Composes a real, DB-backed confirming question via
+    # get_slot_summary rather than letting the LLM call book_appointment
+    # immediately. Falls through to the normal LLM/tool-calling path only if the
+    # slot lookup fails (e.g. a stale/tampered slot_id).
+    if resolved_appointment is None and _message_has_explicit_slot_id(message):
+        picked_slot_id = _extract_slot_id(message)
+        picked_slot = get_slot_summary(db, ctx.clinic_id, picked_slot_id) if picked_slot_id else None
+        if picked_slot is not None:
+            return _book_confirmation_reply(picked_slot)
 
     # Handoff step 2: recover the most recent card (if any) and render it into the
     # prompt so the model can resolve a natural-language reference against it.

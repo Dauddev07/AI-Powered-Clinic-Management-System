@@ -3213,6 +3213,229 @@ def test_run_appointment_agent_declining_confirmation_leaves_appointment_untouch
     assert appt.status == "confirmed"
 
 
+# --- book/reschedule confirmation (instructed live: same code-enforced confirm-
+# then-act gate as cancel, applied to booking and rescheduling too) ---
+
+
+def _future_slot(db, clinic, doctor, days_from_now=2):
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.slot import Slot
+
+    slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=days_from_now),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=days_from_now, minutes=30),
+        status="open",
+    )
+    db.add(slot)
+    db.flush()
+    return slot
+
+
+def test_run_appointment_agent_asks_to_confirm_before_booking_a_fresh_slot_pick(
+    monkeypatch, db, ctx, clinic, doctor
+):
+    slot = _future_slot(db, clinic, doctor)
+    db.commit()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not book directly off a slot pick — must ask to confirm first")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    message = f"I'd like to book the appointment with Dr. Ahmed Khan at Mon, Aug 10 at 9:00 AM (slot_id: {slot.id})."
+    result = appointment_agent.run_appointment_agent(db, ctx, message, "en", [])
+
+    assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "book_confirm"
+    assert payload["candidate"]["slot_id"] == str(slot.id)
+    assert payload["candidate"]["doctor_name"] == "Dr. Ahmed Khan"
+    assert payload["candidate"]["department_name"] == "Cardiology"
+
+    db.refresh(slot)
+    assert slot.status == "open"
+
+
+def test_run_appointment_agent_books_only_after_explicit_yes_to_book_confirmation(
+    monkeypatch, db, ctx, clinic, doctor
+):
+    slot = _future_slot(db, clinic, doctor)
+    db.commit()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must never be involved in the actual booking action")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    candidate = {
+        "slot_id": str(slot.id),
+        "doctor_name": "Dr. Ahmed Khan",
+        "department_name": "Cardiology",
+        "when": "Mon, Aug 10 at 9:00 AM",
+    }
+    pending = appointment_agent.DOCTOR_DISAMBIGUATION_MARKER + json.dumps(
+        {"kind": "book_confirm", "question": "confirm?", "candidate": candidate}
+    )
+    history = [_row("assistant", pending)]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "yes", "en", history)
+
+    assert "confirmed" in result.lower()
+    db.refresh(slot)
+    assert slot.status == "booked"
+
+
+def test_run_appointment_agent_declining_book_confirmation_leaves_slot_open(
+    monkeypatch, db, ctx, clinic, doctor
+):
+    slot = _future_slot(db, clinic, doctor)
+    db.commit()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be called when the patient declines the booking")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    candidate = {
+        "slot_id": str(slot.id),
+        "doctor_name": "Dr. Ahmed Khan",
+        "department_name": "Cardiology",
+        "when": "Mon, Aug 10 at 9:00 AM",
+    }
+    pending = appointment_agent.DOCTOR_DISAMBIGUATION_MARKER + json.dumps(
+        {"kind": "book_confirm", "question": "confirm?", "candidate": candidate}
+    )
+    history = [_row("assistant", pending)]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "no", "en", history)
+
+    assert "not booked" in result
+    db.refresh(slot)
+    assert slot.status == "open"
+
+
+def test_run_appointment_agent_asks_to_confirm_before_rescheduling_to_a_picked_slot(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    appt = _future_appointment(db, clinic, patient, doctor, days_from_now=1)
+    new_slot = _future_slot(db, clinic, doctor, days_from_now=3)
+    db.commit()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not reschedule directly off a slot pick — must ask to confirm first")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    candidate = {
+        "appointment_id": str(appt.id),
+        "doctor_name": "Dr. Ahmed Khan",
+        "department_name": "Cardiology",
+        "when": "Mon, Aug 10 at 9:00 AM",
+    }
+    pending_disambiguation = appointment_agent.DOCTOR_DISAMBIGUATION_MARKER + json.dumps(
+        {"kind": "appointment", "action": "reschedule", "candidates": [candidate]}
+    )
+    history = [
+        _row("user", "reschedule my appointment"),
+        _row("assistant", pending_disambiguation),
+        _row("user", "the one with Dr. Ahmed Khan"),
+        _row(
+            "assistant",
+            DOCTOR_OPTIONS_MARKER
+            + json.dumps(
+                {
+                    "department_name": "Cardiology",
+                    "doctors": [
+                        {
+                            "doctor_id": str(doctor.id),
+                            "doctor_name": "Dr. Ahmed Khan",
+                            "specialization": None,
+                            "slots": [{"slot_id": str(new_slot.id), "when": "Wed, Aug 12 at 9:00 AM"}],
+                        }
+                    ],
+                }
+            ),
+        ),
+    ]
+
+    message = f"I'd like to book the appointment with Dr. Ahmed Khan at Wed, Aug 12 at 9:00 AM (slot_id: {new_slot.id})."
+    result = appointment_agent.run_appointment_agent(db, ctx, message, "en", history)
+
+    assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "reschedule_confirm"
+    assert payload["candidate"]["appointment_id"] == str(appt.id)
+    assert payload["candidate"]["new_slot_id"] == str(new_slot.id)
+
+    db.refresh(appt)
+    assert appt.slot_id != new_slot.id
+
+
+def test_run_appointment_agent_reschedules_only_after_explicit_yes_to_reschedule_confirmation(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    appt = _future_appointment(db, clinic, patient, doctor, days_from_now=1)
+    new_slot = _future_slot(db, clinic, doctor, days_from_now=3)
+    db.commit()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must never be involved in the actual reschedule action")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    candidate = {
+        "appointment_id": str(appt.id),
+        "new_slot_id": str(new_slot.id),
+        "doctor_name": "Dr. Ahmed Khan",
+        "department_name": "Cardiology",
+        "when": "Wed, Aug 12 at 9:00 AM",
+    }
+    pending = appointment_agent.DOCTOR_DISAMBIGUATION_MARKER + json.dumps(
+        {"kind": "reschedule_confirm", "question": "confirm?", "candidate": candidate}
+    )
+    history = [_row("assistant", pending)]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "yes", "en", history)
+
+    assert "rescheduled" in result.lower()
+    db.refresh(appt)
+    assert appt.slot_id == new_slot.id
+
+
+def test_run_appointment_agent_declining_reschedule_confirmation_leaves_appointment_untouched(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    appt = _future_appointment(db, clinic, patient, doctor, days_from_now=1)
+    original_slot_id = appt.slot_id
+    new_slot = _future_slot(db, clinic, doctor, days_from_now=3)
+    db.commit()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be called when the patient declines the reschedule")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    candidate = {
+        "appointment_id": str(appt.id),
+        "new_slot_id": str(new_slot.id),
+        "doctor_name": "Dr. Ahmed Khan",
+        "department_name": "Cardiology",
+        "when": "Wed, Aug 12 at 9:00 AM",
+    }
+    pending = appointment_agent.DOCTOR_DISAMBIGUATION_MARKER + json.dumps(
+        {"kind": "reschedule_confirm", "question": "confirm?", "candidate": candidate}
+    )
+    history = [_row("assistant", pending)]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "no", "en", history)
+
+    assert "not rescheduled" in result
+    db.refresh(appt)
+    assert appt.slot_id == original_slot_id
+
+
 def test_run_appointment_agent_short_circuits_asking_which_when_multiple_active_and_no_doctor_named(
     monkeypatch, db, ctx, clinic, doctor, other_doctor, patient
 ):

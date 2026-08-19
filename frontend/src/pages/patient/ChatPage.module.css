@@ -1024,6 +1024,15 @@
   color: var(--app-accent);
 }
 
+.bookingCardPolicy {
+  margin: 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid color-mix(in srgb, var(--app-success-text) 18%, var(--app-border));
+  font-size: var(--font-size-caption);
+  line-height: 1.5;
+  color: var(--app-text-subtitle);
+}
+
 /* A soft card of its own (was invisible layout-only chrome before, relying
    entirely on the surrounding chat bubble) so a multi-doctor/multi-slot
    reply reads as one considered panel rather than options floating loose

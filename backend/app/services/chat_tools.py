@@ -462,6 +462,53 @@ def cancel_appointment_now(db: Session, ctx: ClinicContext, appointment_id: str)
     return _cancel_appointment_impl(db, ctx, appointment_id)
 
 
+def book_appointment_now(db: Session, ctx: ClinicContext, slot_id: str, reason: str | None = None) -> str:
+    """Public entry point for appointment_agent's deterministic book-confirmation
+    handoff — books immediately once the patient has explicitly confirmed a specific
+    slot, without going through the LLM tool-calling loop at all. Same
+    never-let-the-model-freehand-a-mutating-action reasoning as cancel_appointment_now
+    above, applied to booking instead of cancelling.
+    """
+    return _book_appointment_impl(db, ctx, slot_id, reason)
+
+
+def reschedule_appointment_now(db: Session, ctx: ClinicContext, appointment_id: str, new_slot_id: str) -> str:
+    """Public entry point for appointment_agent's deterministic reschedule-
+    confirmation handoff — reschedules immediately once the patient has explicitly
+    confirmed the new slot, without going through the LLM tool-calling loop at all.
+    Same reasoning as cancel_appointment_now/book_appointment_now above.
+    """
+    return _reschedule_appointment_impl(db, ctx, appointment_id, new_slot_id)
+
+
+def get_slot_summary(db: Session, clinic_id: uuid.UUID, slot_id: str) -> dict | None:
+    """Real doctor/department/time data for a given slot_id, composed entirely from
+    the DB — used by appointment_agent to build its deterministic book/reschedule
+    confirmation questions, so the confirming question is never freehanded by the
+    model (same principle as _booking_card_payload etc.). Returns None for a
+    malformed id, an unknown slot, or a slot belonging to a different clinic — the
+    caller falls back to the normal LLM tool-calling path in that case.
+    """
+    try:
+        parsed_slot_id = uuid.UUID(slot_id)
+    except (ValueError, TypeError, AttributeError):
+        return None
+    slot = db.get(Slot, parsed_slot_id)
+    if slot is None or slot.clinic_id != clinic_id:
+        return None
+    doctor = db.get(Doctor, slot.doctor_id)
+    if doctor is None:
+        return None
+    department_name = _department_name_for_slot(db, clinic_id, slot)
+    tz = _clinic_timezone(db, clinic_id)
+    return {
+        "slot_id": slot_id,
+        "doctor_name": doctor.full_name,
+        "department_name": department_name,
+        "when": _format_when(slot.start_utc, tz),
+    }
+
+
 def list_upcoming_appointments(db: Session, ctx: ClinicContext) -> list[dict]:
     """Real, current confirmed-and-future appointments for this patient — used by
     appointment_agent's deterministic pre-check (see
