@@ -228,8 +228,8 @@ _TIME_OF_DAY_PHRASES: tuple[tuple[str, time, time], ...] = (
     ("night", time(21, 0), time(23, 59, 59)),
 )
 
-_AFTER_CLOCK_RE = re.compile(r"\bafter\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", re.IGNORECASE)
-_BEFORE_CLOCK_RE = re.compile(r"\bbefore\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", re.IGNORECASE)
+_AFTER_CLOCK_RE = re.compile(r"\bafter\s+(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)\b", re.IGNORECASE)
+_BEFORE_CLOCK_RE = re.compile(r"\bbefore\s+(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)\b", re.IGNORECASE)
 
 
 def _parse_12_hour_clock(hour_str: str, minute_str: str | None, meridiem: str) -> time:

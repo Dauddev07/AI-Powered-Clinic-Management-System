@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
@@ -22,6 +22,7 @@ from app.services.chat_tools import (
     build_tools,
     combine_department_availability_results,
     resolve_bare_weekday_window,
+    resolve_time_of_day_window,
 )
 from app.services.department_availability import MAX_SLOTS_PER_DOCTOR
 
@@ -764,3 +765,34 @@ def test_build_tools_includes_booking_action_tools_when_explicitly_true(db, ctx)
     names = {t.name for t in tools}
 
     assert names == _INFO_TOOL_NAMES | _BOOKING_ACTION_TOOL_NAMES
+
+
+# --- resolve_time_of_day_window -----------------------------------------------------
+# Reported live: "on fri after 7.20 pm" returned the day's earliest slots (6:00pm
+# onward) instead of nothing-before-7:20pm — the "after Xpm" regex only accepted a
+# colon between hour and minute, so a dot-separated time like "7.20 pm" silently
+# failed to match at all and no time-of-day constraint was ever applied.
+
+
+def test_resolve_time_of_day_window_accepts_colon_separated_after_time():
+    assert resolve_time_of_day_window("after 7:20 pm") == (time(19, 20), None)
+
+
+def test_resolve_time_of_day_window_accepts_dot_separated_after_time():
+    assert resolve_time_of_day_window("on fri after 7.20 pm") == (time(19, 20), None)
+
+
+def test_resolve_time_of_day_window_accepts_dot_separated_before_time():
+    assert resolve_time_of_day_window("before 9.30am") == (None, time(9, 30))
+
+
+def test_resolve_time_of_day_window_accepts_bare_hour_after_time():
+    assert resolve_time_of_day_window("after 12 pm") == (time(12, 0), None)
+
+
+def test_resolve_time_of_day_window_falls_back_to_time_of_day_phrase():
+    assert resolve_time_of_day_window("anything in the evening?") == (time(17, 0), time(21, 0))
+
+
+def test_resolve_time_of_day_window_none_when_no_time_named():
+    assert resolve_time_of_day_window("book a slot for cardiology") is None
