@@ -324,9 +324,13 @@ def test_build_tools_redirects_book_appointment_to_reschedule_when_redirect_id_s
     # duplicate appointment instead of moving the existing one. This is the
     # deterministic enforcement that makes the outcome correct regardless of which
     # tool the model actually calls.
-    existing_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=1))
+    existing_start = datetime.now(timezone.utc) + timedelta(days=1)
+    existing_slot = _slot(db, clinic, doctor, existing_start)
     appointment = _appointment(db, clinic, patient, doctor, existing_slot)
-    new_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=3))
+    # Reschedules are same-day-only now — a couple hours later, same calendar
+    # day as existing_slot, not a different day.
+    shift = timedelta(hours=-2) if existing_start.hour >= 20 else timedelta(hours=2)
+    new_slot = _slot(db, clinic, doctor, existing_start + shift)
 
     tools = build_tools(db, ctx, reschedule_redirect_appointment_id=str(appointment.id))
     book_tool = next(t for t in tools if t.name == "book_appointment")

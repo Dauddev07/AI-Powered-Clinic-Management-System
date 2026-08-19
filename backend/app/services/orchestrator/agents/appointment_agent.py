@@ -365,6 +365,26 @@ def _reschedule_cap_reply(appointment: dict) -> str:
     )
 
 
+def _appointment_local_date(db: Session, ctx: ClinicContext, appointment: dict) -> date | None:
+    raw_start_utc = appointment.get("start_utc")
+    if not raw_start_utc:
+        return None
+    tz = ZoneInfo(_clinic_timezone(db, ctx.clinic_id))
+    return datetime.fromisoformat(raw_start_utc).astimezone(tz).date()
+
+
+def _reschedule_different_day_reply(appointment: dict) -> str:
+    """Matches booking_engine.reschedule_appointment's own same-day-only rule
+    (see its docstring) — checked here too, deterministically, before ever
+    showing the patient a different day's slots, rather than letting them pick
+    one only for the real reschedule call to fail afterward."""
+    return (
+        f"Your appointment with {appointment['doctor_name']} in {appointment['department_name']} on "
+        f"{appointment['when']} can only be rescheduled to a different time on the SAME day. To move it "
+        f"to a different day, please cancel this appointment and book a new one for that day instead."
+    )
+
+
 def _cancel_confirmation_reply(appointment: dict, phrased_as_capability_question: bool = False) -> str:
     """Composed entirely from a real, current appointment row — never model-
     generated, same principle as _disambiguation_marker_reply/
@@ -1154,8 +1174,18 @@ def run_appointment_agent(
         if _reschedule_cap_reached(db, ctx, resolved_appointment):
             return _reschedule_cap_reply(resolved_appointment)
         forced_window = resolve_bare_weekday_window(message)
-        earliest_date = date.fromisoformat(forced_window[0]) if forced_window else None
-        latest_date = date.fromisoformat(forced_window[1]) if forced_window else None
+        appointment_date = _appointment_local_date(db, ctx, resolved_appointment)
+        if forced_window is not None and appointment_date is not None:
+            requested_start = date.fromisoformat(forced_window[0])
+            requested_end = date.fromisoformat(forced_window[1])
+            if not (requested_start <= appointment_date <= requested_end):
+                return _reschedule_different_day_reply(resolved_appointment)
+        # Reschedule only ever offers same-day times (see booking_engine.
+        # reschedule_appointment's own hard rule) — whether or not the patient
+        # named a day at all, the window is always pinned to the appointment's
+        # own day, never left open to "earliest available across any day".
+        earliest_date = appointment_date
+        latest_date = appointment_date
         time_window = resolve_time_of_day_window(message)
         earliest_time, latest_time = time_window if time_window else (None, None)
         availability = get_department_availability(

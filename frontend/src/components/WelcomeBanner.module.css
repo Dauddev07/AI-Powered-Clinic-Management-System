@@ -83,6 +83,18 @@ html[data-theme="light"] .banner::after {
   z-index: 1;
   min-width: 0;
   max-width: 34rem;
+  /* .heading is inline-block (needed so its own ::after underline sizes to
+     the rendered text width, not the full card width) — without a flex
+     column forcing each child onto its own row, that inline-block heading
+     had nothing to break the line after the eyebrow span before it, so both
+     could end up sharing one visual row instead of the intended eyebrow /
+     heading / tagline stack. align-items: flex-start keeps each child
+     shrink-to-fit its own content instead of stretching to the column's
+     full width, which would otherwise break the heading's own auto-width
+     underline sizing. */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 /* Each line settles in on its own, staggered beat — separate from (and on

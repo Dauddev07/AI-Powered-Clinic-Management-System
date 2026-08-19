@@ -85,6 +85,18 @@ def _future_slot(db, clinic, doctor, hours_from_now=48):
     return slot
 
 
+def _same_day_slot(db, clinic, doctor, base_start):
+    # Reschedules are same-day-only (see booking_engine.reschedule_appointment)
+    # — a couple hours off from base_start, shifted earlier or later so it
+    # never crosses a calendar-day boundary regardless of base_start's hour.
+    shift = timedelta(hours=-2) if base_start.hour >= 20 else timedelta(hours=2)
+    start = base_start + shift
+    slot = Slot(clinic_id=clinic.id, doctor_id=doctor.id, start_utc=start, end_utc=start + timedelta(minutes=30))
+    db.add(slot)
+    db.flush()
+    return slot
+
+
 # --- format_appointment_datetime -------------------------------------------------
 
 def test_format_appointment_datetime_matches_clinic_timezone():
@@ -134,7 +146,7 @@ def test_cancelling_appointment_creates_appointment_cancelled_notification(db, c
 
 def test_rescheduling_appointment_creates_appointment_rescheduled_notification(db, clinic, patient, doctor):
     slot = _future_slot(db, clinic, doctor, hours_from_now=72)
-    new_slot = _future_slot(db, clinic, doctor, hours_from_now=96)
+    new_slot = _same_day_slot(db, clinic, doctor, slot.start_utc)
     appointment = booking_engine.book_appointment(db, clinic_id=clinic.id, patient_id=patient.id, slot_id=slot.id)
 
     booking_engine.reschedule_appointment(
@@ -153,7 +165,7 @@ def test_rescheduling_appointment_creates_appointment_rescheduled_notification(d
 
 def test_rescheduling_appointment_to_a_different_doctor_names_both_doctors(db, clinic, patient, doctor, other_doctor):
     slot = _future_slot(db, clinic, doctor, hours_from_now=72)
-    new_slot = _future_slot(db, clinic, other_doctor, hours_from_now=96)
+    new_slot = _same_day_slot(db, clinic, other_doctor, slot.start_utc)
     appointment = booking_engine.book_appointment(db, clinic_id=clinic.id, patient_id=patient.id, slot_id=slot.id)
 
     booking_engine.reschedule_appointment(
@@ -207,7 +219,7 @@ def test_rescheduling_appointment_sends_a_reschedule_email(db, clinic, patient, 
     sent = []
     monkeypatch.setattr(booking_engine, "send_appointment_rescheduled_email", lambda **kwargs: sent.append(kwargs))
     slot = _future_slot(db, clinic, doctor, hours_from_now=72)
-    new_slot = _future_slot(db, clinic, doctor, hours_from_now=96)
+    new_slot = _same_day_slot(db, clinic, doctor, slot.start_utc)
     appointment = booking_engine.book_appointment(db, clinic_id=clinic.id, patient_id=patient.id, slot_id=slot.id)
 
     booking_engine.reschedule_appointment(
@@ -226,7 +238,7 @@ def test_rescheduling_to_a_different_doctor_names_both_doctors_in_the_email(
     sent = []
     monkeypatch.setattr(booking_engine, "send_appointment_rescheduled_email", lambda **kwargs: sent.append(kwargs))
     slot = _future_slot(db, clinic, doctor, hours_from_now=72)
-    new_slot = _future_slot(db, clinic, other_doctor, hours_from_now=96)
+    new_slot = _same_day_slot(db, clinic, other_doctor, slot.start_utc)
     appointment = booking_engine.book_appointment(db, clinic_id=clinic.id, patient_id=patient.id, slot_id=slot.id)
 
     booking_engine.reschedule_appointment(

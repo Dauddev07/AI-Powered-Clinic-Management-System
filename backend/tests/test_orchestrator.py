@@ -2174,6 +2174,47 @@ def test_run_appointment_agent_reschedule_cap_reached_is_told_before_showing_new
     assert "already been rescheduled" in result.lower()
 
 
+def test_run_appointment_agent_refuses_a_reschedule_request_naming_a_different_day(
+    monkeypatch, db, ctx, clinic, department, doctor, patient
+):
+    # Same "check before asking" principle again: a reschedule can only move to
+    # a different TIME on the SAME day (see booking_engine.reschedule_
+    # appointment's own hard rule) — if the patient explicitly names a
+    # different day, they're told to cancel-and-rebook immediately, never shown
+    # slots for that other day. See appointment_agent._reschedule_different_day_reply.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.appointment import Appointment
+    from app.models.slot import Slot
+
+    appt_start = datetime.now(timezone.utc) + timedelta(days=1)
+    slot = Slot(clinic_id=clinic.id, doctor_id=doctor.id, start_utc=appt_start, end_utc=appt_start + timedelta(minutes=30))
+    db.add(slot)
+    db.flush()
+    appointment = Appointment(clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id, status="confirmed")
+    db.add(appointment)
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("get_department_availability must not be queried for a different day")
+
+    monkeypatch.setattr(appointment_agent, "get_department_availability", _fail_if_called)
+
+    # resolve_bare_weekday_window only recognizes an actual weekday NAME (not a
+    # raw date) — pick whichever weekday name is guaranteed to resolve to a
+    # date other than the appointment's own, by walking forward from the
+    # appointment's own weekday.
+    weekday_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    different_weekday = weekday_names[(appt_start.weekday() + 1) % 7]
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, f"reschedule my appointment to {different_weekday}", "en", []
+    )
+
+    assert "same day" in result.lower()
+    assert "cancel" in result.lower()
+
+
 def test_run_appointment_agent_generic_doctor_availability_question_falls_through_normally(
     monkeypatch, db, ctx, doctor
 ):
@@ -3482,8 +3523,27 @@ def test_run_appointment_agent_asks_to_confirm_before_rescheduling_to_a_picked_s
 def test_run_appointment_agent_reschedules_only_after_explicit_yes_to_reschedule_confirmation(
     monkeypatch, db, ctx, clinic, doctor, patient
 ):
+    from datetime import timedelta
+
+    from app.models.slot import Slot
+
     appt = _future_appointment(db, clinic, patient, doctor, days_from_now=1)
-    new_slot = _future_slot(db, clinic, doctor, days_from_now=3)
+    # A reschedule may only move to a different TIME on the SAME day (see
+    # booking_engine.reschedule_appointment) — a couple hours off, same day as
+    # appt's own slot, not _future_slot's default cross-day offset. Shifted
+    # earlier or later depending on the hour so the +/- 2h never crosses a
+    # calendar-day boundary regardless of what time "now" happens to be.
+    old_slot = db.get(Slot, appt.slot_id)
+    shift = timedelta(hours=-2) if old_slot.start_utc.hour >= 20 else timedelta(hours=2)
+    new_start = old_slot.start_utc + shift
+    new_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=new_start,
+        end_utc=new_start + timedelta(minutes=30),
+        status="open",
+    )
+    db.add(new_slot)
+    db.flush()
     db.commit()
 
     def _fail_if_called(*args, **kwargs):

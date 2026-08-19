@@ -133,17 +133,14 @@ def test_confirm_visit_rejects_appointment_not_in_confirmed_status(db, clinic):
 
 
 def test_reschedule_enforces_daily_department_reschedule_cap(db, clinic):
-    """DAILY_DEPARTMENT_RESCHEDULE_CAP (2) is keyed by the OLD appointment's own
-    department/day (the one being moved AWAY from) and is independent of the
-    booking cap. Three separate appointments all originally in the same
-    department on the same day — rescheduling the first two of them (each to a
-    DIFFERENT department, so the booking cap on the target day/department never
-    itself becomes the blocker) is allowed; rescheduling the third, from that
-    same original department/day, is refused once the cap is already used up."""
+    """DAILY_DEPARTMENT_RESCHEDULE_CAP (2) is keyed by the appointment's own
+    department/day and is independent of the booking cap. Three separate
+    appointments all originally in the same department on the same day —
+    rescheduling the first two (same department, same day, just a different
+    time/doctor — the only kind of reschedule allowed at all) is fine; the
+    third is refused once the cap is already used up."""
     dept1 = Department(clinic_id=clinic.id, name="Cardiology")
-    dept2 = Department(clinic_id=clinic.id, name="General Medicine")
-    dept3 = Department(clinic_id=clinic.id, name="Dermatology")
-    db.add_all([dept1, dept2, dept3])
+    db.add(dept1)
     db.flush()
 
     doctor1 = Doctor(
@@ -151,14 +148,10 @@ def test_reschedule_enforces_daily_department_reschedule_cap(db, clinic):
         full_name="Dr. Cardio One", is_active=True,
     )
     doctor2 = Doctor(
-        clinic_id=clinic.id, department_id=dept2.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:6]}",
-        full_name="Dr. General One", is_active=True,
+        clinic_id=clinic.id, department_id=dept1.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:6]}",
+        full_name="Dr. Cardio Two", is_active=True,
     )
-    doctor3 = Doctor(
-        clinic_id=clinic.id, department_id=dept3.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:6]}",
-        full_name="Dr. Derma One", is_active=True,
-    )
-    db.add_all([doctor1, doctor2, doctor3])
+    db.add_all([doctor1, doctor2])
     db.flush()
 
     patient = User(
@@ -192,20 +185,17 @@ def test_reschedule_enforces_daily_department_reschedule_cap(db, clinic):
     appt_b = _booked_appointment(_slot(doctor1, 10))
     appt_c = _booked_appointment(_slot(doctor1, 12))
 
-    # Reschedule #1 out of (Cardiology, 2030-06-10), into General Medicine: allowed.
+    # Reschedule #1 out of (Cardiology, 2030-06-10) to a new time, same day,
+    # same department (the only kind allowed): allowed.
     booking_engine.reschedule_appointment(
         db, clinic_id=clinic.id, patient_id=patient.id, appointment_id=appt_a.id, new_slot_id=_slot(doctor2, 14).id
     )
-    # Reschedule #2 out of (Cardiology, 2030-06-10), into Dermatology this time —
-    # a DIFFERENT target department, so the target-side booking cap (also 2, but
-    # per target department/day) never itself becomes the blocker here: allowed.
+    # Reschedule #2, same department/day again: allowed.
     booking_engine.reschedule_appointment(
-        db, clinic_id=clinic.id, patient_id=patient.id, appointment_id=appt_b.id, new_slot_id=_slot(doctor3, 16).id
+        db, clinic_id=clinic.id, patient_id=patient.id, appointment_id=appt_b.id, new_slot_id=_slot(doctor1, 16).id
     )
-    # Reschedule #3 out of that same (Cardiology, 2030-06-10), into yet another
-    # fresh target (General Medicine again, but only its SECOND use — still well
-    # under ITS cap): the cap (2) on the ORIGIN (Cardiology, 2030-06-10) is what
-    # blocks this one.
+    # Reschedule #3 out of that same (Cardiology, 2030-06-10): the cap (2) is
+    # already used up.
     target_slot = _slot(doctor2, 18)
     with pytest.raises(HTTPException) as exc_info:
         booking_engine.reschedule_appointment(
@@ -270,3 +260,70 @@ def test_reschedule_to_a_different_time_same_day_same_department_is_not_blocked_
     )
 
     assert result.slot_id == new_time_slot.id
+
+
+def test_reschedule_to_a_different_day_is_refused(db, clinic):
+    """A reschedule may only move an appointment to a different TIME on the SAME
+    calendar day — moving to a different day at all is refused outright, telling
+    the patient to cancel and book fresh instead. This is what makes the daily
+    booking cap trustworthy: an appointment can't day-hop via reschedule without
+    ever properly freeing the day it leaves (AppointmentDepartmentDayUse rows are
+    permanent, never decremented)."""
+    appointment = _appointment(
+        db, clinic, datetime(2030, 6, 10, 9, 0, tzinfo=timezone.utc), datetime(2030, 6, 10, 9, 30, tzinfo=timezone.utc)
+    )
+    doctor = db.get(Doctor, appointment.doctor_id)
+    different_day_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime(2030, 6, 11, 9, 0, tzinfo=timezone.utc),
+        end_utc=datetime(2030, 6, 11, 9, 30, tzinfo=timezone.utc),
+    )
+    db.add(different_day_slot)
+    db.flush()
+
+    with pytest.raises(HTTPException) as exc_info:
+        booking_engine.reschedule_appointment(
+            db, clinic_id=clinic.id, patient_id=appointment.patient_id, appointment_id=appointment.id,
+            new_slot_id=different_day_slot.id,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "same day" in exc_info.value.detail
+    assert "cancel" in exc_info.value.detail.lower()
+
+
+def test_reschedule_to_a_different_department_is_refused(db, clinic):
+    """A reschedule may only move to a different time with a doctor in the SAME
+    department — switching department entirely is a different kind of visit,
+    not a time change to this one. Same day, different department: still
+    refused, telling the patient to cancel and book fresh instead."""
+    appointment = _appointment(
+        db, clinic, datetime(2030, 6, 10, 9, 0, tzinfo=timezone.utc), datetime(2030, 6, 10, 9, 30, tzinfo=timezone.utc)
+    )
+    other_dept = Department(clinic_id=clinic.id, name="Dermatology")
+    db.add(other_dept)
+    db.flush()
+    other_doctor = Doctor(
+        clinic_id=clinic.id, department_id=other_dept.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:6]}",
+        full_name="Dr. Derma One", is_active=True,
+    )
+    db.add(other_doctor)
+    db.flush()
+    other_dept_slot = Slot(
+        clinic_id=clinic.id, doctor_id=other_doctor.id,
+        start_utc=datetime(2030, 6, 10, 11, 0, tzinfo=timezone.utc),
+        end_utc=datetime(2030, 6, 10, 11, 30, tzinfo=timezone.utc),
+    )
+    db.add(other_dept_slot)
+    db.flush()
+
+    with pytest.raises(HTTPException) as exc_info:
+        booking_engine.reschedule_appointment(
+            db, clinic_id=clinic.id, patient_id=appointment.patient_id, appointment_id=appointment.id,
+            new_slot_id=other_dept_slot.id,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "same" in exc_info.value.detail.lower()
+    assert "department" in exc_info.value.detail.lower()
+    assert "cancel" in exc_info.value.detail.lower()

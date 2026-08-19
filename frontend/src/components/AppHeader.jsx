@@ -5,7 +5,6 @@ import Logo from "./Logo";
 import NotificationBell from "./NotificationBell";
 import PrimaryNavDesktop from "./PrimaryNavDesktop";
 import SettingsMenu from "./SettingsMenu";
-import ThemeToggle from "./ThemeToggle";
 import styles from "./AppHeader.module.css";
 
 const SECTION_IDS = ["departments-heading", "why-us-heading", "cura-heading", "how-it-works-heading", "about-heading"];
@@ -227,14 +226,6 @@ export default function AppHeader() {
           </div>
         )}
 
-        {/* Neither authenticated nor the landing page (e.g. Login/Register) —
-            still a global, app-wide setting, so it stays available here too
-            rather than only existing on two of the app's several screens. */}
-        {!isAuthenticated && !showPublicNav && (
-          <div className={styles.publicActions}>
-            <ThemeToggle />
-          </div>
-        )}
       </div>
 
       {/* Second row — the always-visible destinations (Book Appointment,

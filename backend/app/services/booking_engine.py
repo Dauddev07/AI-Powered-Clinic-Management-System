@@ -336,6 +336,13 @@ def reschedule_appointment(
     mutated until every check has passed, and any failure (including a DB-level
     conflict on the new slot) rolls back cleanly, leaving the patient holding their
     original appointment: never zero, never two.
+
+    Restricted to the SAME calendar day AND the SAME department as the
+    appointment's current slot — moving to a different day, or a different
+    department, is refused outright (see the checks below), on the principle
+    that either kind of change is really a fresh booking, not a reschedule.
+    The patient cancels and books fresh instead, which correctly frees/uses
+    the daily booking cap either way.
     """
     appointment = db.execute(
         select(Appointment).where(
@@ -396,41 +403,45 @@ def reschedule_appointment(
         old_department = db.get(Department, old_doctor.department_id) if old_doctor is not None else None
         old_local_date = old_slot.start_utc.astimezone(tz).date()
 
-        # Moving to a genuinely different department and/or day counts against
-        # THAT day's booking cap same as a fresh booking would. Moving to a new
-        # TIME on the SAME day in the SAME department does not — the appointment
-        # already occupied one of that day's slots from its original booking;
-        # re-checking/re-recording the booking cap here would double-count it
-        # against itself, and since department_day_uses rows are never removed,
-        # every same-day time change would permanently inflate the count and
-        # eventually lock the patient out of moving their own appointment's time
-        # at all. Reported live: with the daily cap already fully used by 2 real
-        # bookings, rescheduling one of them to a later time the SAME day was
-        # wrongly refused as "you already have 2 appointments" — the reschedule
-        # cap below is what should govern this case, not the booking cap.
-        same_day_same_department = (
-            old_department is not None
-            and new_department.id == old_department.id
-            and new_local_date == old_local_date
-        )
-
-        if not same_day_same_department and (
-            _department_day_use_count(db, clinic_id, patient_id, new_department.id, new_local_date)
-            >= DAILY_DEPARTMENT_BOOKING_CAP
-        ):
+        # A reschedule may only move an appointment's TIME within its own
+        # calendar day, never to a different day — moving to a different day is
+        # a fresh booking in disguise (new department-day quota, potentially a
+        # new department entirely), and letting it through here bypassed the
+        # daily booking cap: rows in AppointmentDepartmentDayUse are never
+        # deleted, so a patient could keep hopping an appointment day-to-day
+        # without ever actually freeing the day it left. Simpler and more
+        # predictable to just require cancel-then-rebook for a real day change,
+        # same principle patients already expect from most booking systems.
+        if new_local_date != old_local_date:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    f"You've reached the limit of {DAILY_DEPARTMENT_BOOKING_CAP} appointments "
-                    f"in {new_department.name} for this day."
+                    "Appointments can only be rescheduled to a different time on the same day. "
+                    "To move to a different day, please cancel this appointment and book a new one."
                 ),
             )
 
-        # Independent reschedule allowance, keyed by the OLD appointment's own
-        # department/day (the one being moved AWAY from) — how many times an
-        # appointment that was on THAT day/department has already been rescheduled,
-        # not how many new bookings exist on the target day. Always checked,
-        # same-day move or not.
+        # A reschedule may also only stay within the SAME department — moving
+        # to a different specialty entirely is a different kind of visit, not
+        # a time change to this one. Same principle as the day restriction
+        # above: a real department change is cancel-then-rebook, not a
+        # reschedule. (The daily booking cap this used to double-check against
+        # the target department is now moot — department can no longer change,
+        # so a reschedule never adds a new use of any department's day cap.)
+        if old_department is None or new_department.id != old_department.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Appointments can only be rescheduled to a different time with a doctor in the SAME "
+                    "department. To switch department, please cancel this appointment and book a new one."
+                ),
+            )
+
+        # Independent reschedule allowance, keyed by the appointment's own
+        # department/day (the day it's guaranteed to still be on, per the
+        # same-day-only rule above) — how many times an appointment that was on
+        # THAT day/department has already been rescheduled, separate from how
+        # many new bookings exist that day.
         if old_department is not None and (
             _department_day_reschedule_count(db, clinic_id, patient_id, old_department.id, old_local_date)
             >= DAILY_DEPARTMENT_RESCHEDULE_CAP
@@ -448,8 +459,6 @@ def reschedule_appointment(
         appointment.slot_id = new_slot.id
         appointment.doctor_id = new_slot.doctor_id
         db.flush()
-        if not same_day_same_department:
-            _record_department_day_use(db, clinic_id, patient_id, new_department.id, appointment.id, new_local_date)
         if old_department is not None:
             _record_department_day_reschedule_use(
                 db, clinic_id, patient_id, old_department.id, appointment.id, old_local_date
