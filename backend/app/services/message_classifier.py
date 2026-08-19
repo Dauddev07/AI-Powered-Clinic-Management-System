@@ -209,6 +209,15 @@ _SYMPTOM_KEYWORDS = frozenset({
     "testicular", "testies", "thigh", "thirst", "thirsty", "throat", "tooth",
     "tremor", "tremors", "urinary", "urinate", "urinating", "urination",
     "urine", "vaginal", "vertigo", "wart", "warts", "wrist", "wrists",
+    # Reported live: "i am having blury vision" (and the correctly-spelled
+    # "blurry vision") matched no keyword at all — "vision" alone is deliberately
+    # excluded above (too ambiguous standalone, see the comment on that
+    # exclusion), but "blur"/"blurry"/"blurred" has no such everyday-language
+    # double meaning in this chat context, so it's safe unambiguous coverage on
+    # its own, unlike "vision".
+    # "blury" (missing the second "r") is the exact typo reported live — same
+    # typo-tolerance pattern as "diziness"/"breething" above.
+    "blur", "blurry", "blurred", "blury",
 })
 
 # Reported live: "i cut my fruits with a knife" tripped is_symptom_message on the

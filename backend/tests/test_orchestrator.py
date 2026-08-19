@@ -2160,6 +2160,35 @@ def test_run_appointment_agent_suggests_a_partial_name_match_instead_of_flatly_r
     assert "couldn't find a doctor" not in result.lower()
 
 
+def test_run_appointment_agent_recovers_a_doctor_named_only_in_assistant_prose(monkeypatch, db, ctx, doctor):
+    """Reported live: "i am having blury vision" got answered by general_info_agent
+    with plain KB prose naming a real doctor (never a structured DOCTOR_OPTIONS
+    card, and the PATIENT never typed the doctor's name themselves) — then "show
+    me available slots for him" failed to resolve "him" at all, since
+    _most_recently_named_doctor used to only scan the patient's own messages.
+    Must now fall back to the assistant's last plain-prose reply and recover the
+    same real doctor from it."""
+    history = [
+        _row("user", "i am having blury vision"),
+        _row(
+            "assistant",
+            f"If you're experiencing blurry vision, you may want to see an ophthalmologist. "
+            f"{doctor.full_name} sees patients for general ophthalmology on Tuesday, Thursday "
+            f"and Saturday from 10:00 am to 6:00 pm.",
+        ),
+    ]
+    monkeypatch.setattr(
+        appointment_agent.llm,
+        "run_tool_calling_agent",
+        lambda *a, **k: f"Did you mean {doctor.full_name}?",
+    )
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "show me available slots for him", "en", history)
+
+    assert doctor.full_name in result
+    assert "which department" not in result.lower()
+
+
 def test_run_appointment_agent_reschedule_cap_reached_is_told_before_showing_new_slots(
     monkeypatch, db, ctx, clinic, department, doctor, patient
 ):

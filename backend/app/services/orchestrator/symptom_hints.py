@@ -42,7 +42,11 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
         ("ent", "otolaryn"),
         "throat/nose symptoms",
     ),
-    (frozenset({"eye", "eyes", "vision"}), ("ophthal", "eye"), "eye symptoms"),
+    (
+        frozenset({"eye", "eyes", "vision", "blur", "blurry", "blurred", "blury"}),
+        ("ophthal", "eye"),
+        "eye symptoms",
+    ),
     # Reported live: "pain in my teeths" (a common typo — extra "s" on the already-
     # plural "teeth") matched no keyword at all, so Dentistry was silently missing
     # from `hinted` even though the LLM itself had already correctly shown a

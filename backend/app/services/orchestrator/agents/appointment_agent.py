@@ -70,7 +70,13 @@ from app.core.tenancy import ClinicContext
 from app.models.conversation_memory import ConversationMemory
 from app.models.doctor import Doctor
 from app.services import booking_engine, llm
-from app.services.chat_markers import DEPARTMENT_LIST_MARKER, DOCTOR_DISAMBIGUATION_MARKER, DOCTOR_OPTIONS_MARKER
+from app.services.chat_markers import (
+    BOOKING_MARKER,
+    DEPARTMENT_LIST_MARKER,
+    DOCTOR_DISAMBIGUATION_MARKER,
+    DOCTOR_OPTIONS_MARKER,
+    NO_SLOTS_MARKER,
+)
 from app.services.chat_tools import (
     _clinic_timezone,
     _doctor_options_payload,
@@ -515,17 +521,58 @@ def _scan_recent_user_messages(history: list[ConversationMemory], matcher, limit
 _DOCTOR_REFERENCE_LOOKBACK_TURNS = 6
 
 
+_STRUCTURED_ASSISTANT_MARKERS = (
+    BOOKING_MARKER, DOCTOR_OPTIONS_MARKER, DEPARTMENT_LIST_MARKER, NO_SLOTS_MARKER, DOCTOR_DISAMBIGUATION_MARKER,
+)
+
+
+# Reported live: "i am having blury vision" was answered by general_info_agent
+# (plain KB prose naming Dr. Farhan Mirza and his schedule — symptom_agent never
+# saw this turn at all) rather than a real DOCTOR_OPTIONS card, so the doctor's
+# name exists only inside that free-text assistant reply, not in any structured
+# marker payload and not in anything the PATIENT typed. "show me available slots
+# for him" right after then failed to resolve at all — _most_recently_named_doctor
+# only ever scanned patient turns, so a doctor the ASSISTANT named in plain prose
+# was invisible to it, and the patient got asked to repeat a department name the
+# assistant itself had just given them. Scans assistant turns too, but only as a
+# fallback after the patient-turn scan finds nothing (a patient's own naming
+# should always win when both exist) and only over plain prose — a
+# marker-prefixed reply (a real DOCTOR_OPTIONS/BOOKING/etc. card) is deliberately
+# skipped here since that's already handled by its own dedicated mechanism (see
+# "PREVIOUSLY SHOWN OPTIONS"/doctor_already_shown above), and scanning it again
+# here with a plain word-overlap matcher would just duplicate/race that path.
+def _most_recently_named_doctor_in_assistant_prose(db: Session, clinic_id, history: list[ConversationMemory]):
+    assistant_messages = [
+        getattr(row, "content", "") or ""
+        for row in history
+        if getattr(row, "role", None) == "assistant"
+    ][-_DOCTOR_REFERENCE_LOOKBACK_TURNS:]
+    for content in reversed(assistant_messages):
+        if content.startswith(_STRUCTURED_ASSISTANT_MARKERS):
+            continue
+        matches = find_doctors_by_name(db, clinic_id, content)
+        if len(matches) == 1:
+            return matches[0]
+    return None
+
+
 def _most_recently_named_doctor(db: Session, clinic_id, history: list[ConversationMemory]):
     """Recovers a doctor named a turn or two ago when the patient's current message
     only references them by pronoun ("his"/"her"/"their") instead of repeating the
     name — bounded lookback over user turns only, mirroring
     _most_recent_action_intent's own bounded scan, so this can't reach back into an
-    unrelated, much older part of the conversation."""
+    unrelated, much older part of the conversation. Falls back to the assistant's
+    own recent plain-prose replies (see
+    _most_recently_named_doctor_in_assistant_prose) only when no patient turn names
+    one at all."""
     def matcher(content: str):
         matches = find_doctors_by_name(db, clinic_id, content)
         return matches[0] if len(matches) == 1 else None
 
-    return _scan_recent_user_messages(history, matcher, limit=_DOCTOR_REFERENCE_LOOKBACK_TURNS)
+    from_patient = _scan_recent_user_messages(history, matcher, limit=_DOCTOR_REFERENCE_LOOKBACK_TURNS)
+    if from_patient is not None:
+        return from_patient
+    return _most_recently_named_doctor_in_assistant_prose(db, clinic_id, history)
 
 
 # Reported live: after a two-doctor DOCTOR_OPTIONS card was shown (General
