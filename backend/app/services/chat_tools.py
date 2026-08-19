@@ -266,10 +266,30 @@ _TIME_OF_DAY_PHRASES: tuple[tuple[str, time, time], ...] = (
 _AFTER_CLOCK_RE = re.compile(r"\bafter\s+(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)\b", re.IGNORECASE)
 _BEFORE_CLOCK_RE = re.compile(r"\bbefore\s+(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)\b", re.IGNORECASE)
 
+# Reported live: "book me with dr waqas on mon aug 24 at 3.30 instead" and its
+# follow-up "at 3.30" were both silently ignored by resolve_time_of_day_window —
+# only "after"/"before" were recognized, so a bare "at X" request fell through
+# with no time bound at all and the caller got the day's earliest slots instead.
+# "at X" is treated the same as "after X" (an inclusive lower bound rather than
+# an exact-only match) since the caller always surfaces a short list of
+# candidate slots rather than a single exact one, so "at 3:30" naturally reads
+# as "3:30 or the nearest slots after it."
+_AT_CLOCK_RE = re.compile(r"\bat\s+(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\b", re.IGNORECASE)
 
-def _parse_12_hour_clock(hour_str: str, minute_str: str | None, meridiem: str) -> time:
-    hour = int(hour_str) % 12
-    if meridiem.lower() == "pm":
+
+def _infer_meridiem(hour: int) -> str:
+    """Best-effort default for "at X" when no am/pm was said at all — a bare
+    hour in a same-day scheduling chat is read the way a patient means it: 1-7
+    as afternoon/evening, 12 as noon, 8-11 as morning. "after"/"before" never
+    hit this path since they always require an explicit am/pm."""
+    return "pm" if hour == 12 or 1 <= hour <= 7 else "am"
+
+
+def _parse_12_hour_clock(hour_str: str, minute_str: str | None, meridiem: str | None) -> time:
+    hour_value = int(hour_str)
+    resolved_meridiem = (meridiem or _infer_meridiem(hour_value)).lower()
+    hour = hour_value % 12
+    if resolved_meridiem == "pm":
         hour += 12
     return time(hour, int(minute_str or 0))
 
@@ -287,6 +307,10 @@ def resolve_time_of_day_window(message: str) -> tuple[time | None, time | None] 
         earliest = _parse_12_hour_clock(*after_match.groups()) if after_match else None
         latest = _parse_12_hour_clock(*before_match.groups()) if before_match else None
         return (earliest, latest)
+
+    at_match = _AT_CLOCK_RE.search(message)
+    if at_match:
+        return (_parse_12_hour_clock(*at_match.groups()), None)
 
     lowered = message.lower()
     for phrase, start, end in _TIME_OF_DAY_PHRASES:

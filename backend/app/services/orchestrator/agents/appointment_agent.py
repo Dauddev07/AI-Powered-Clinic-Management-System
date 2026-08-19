@@ -229,9 +229,33 @@ _NEGATIVE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Reported live: "no,book me with dr waqas on mon aug 24 at 3.30 instead" — a
+# decline PLUS a real new request packed into one message — matched _NEGATIVE_RE's
+# prefix check and was treated as a flat decline, silently discarding the new
+# request entirely. A pure decline only has filler (punctuation, "thanks",
+# "please") after the negative word, e.g. "no thanks" or "don't book that" —
+# anything naming a doctor, a date/weekday, a clock time, or "instead" after the
+# negative word means the patient moved straight on to a new instruction in the
+# same breath, which must fall through to normal handling below instead of
+# being swallowed here.
+_NEGATIVE_TRAILING_FILLER_RE = re.compile(r"^[\s,.!]*(?:thanks?|thank you|please)?[\s,.!]*$", re.IGNORECASE)
+_NEGATIVE_NEW_INSTRUCTION_SIGNAL_RE = re.compile(
+    r"\binstead\b|\bdr\.?\b|\bdoctor\b|\bslot_id:|\d"
+    r"|\b(?:mon|tue|tues|wed|thu|thurs|fri|sat|sun"
+    r"|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+    re.IGNORECASE,
+)
+
 
 def _is_short_negative_reply(message: str) -> bool:
-    return bool(_NEGATIVE_RE.match(message.strip()))
+    stripped = message.strip()
+    match = _NEGATIVE_RE.match(stripped)
+    if not match:
+        return False
+    remainder = stripped[match.end():]
+    if _NEGATIVE_TRAILING_FILLER_RE.match(remainder):
+        return True
+    return not _NEGATIVE_NEW_INSTRUCTION_SIGNAL_RE.search(remainder)
 
 
 # Reported live: "can i also cancel my appointment?" got the same "Just to confirm
