@@ -229,6 +229,18 @@ def test_router_rule1_5_department_list_request_routes_to_general_info_despite_a
     assert _heuristic_classify(message) == GENERAL_INFO
 
 
+def test_router_rule1_5_department_list_request_overrides_marker_continuity():
+    # Reported live: "how many total depts are there in this clinic" asked right
+    # after a DOCTOR_OPTIONS_MARKER card was shown still matched rule 1 (marker
+    # continuity — not a symptom message) and got routed to appointment_agent,
+    # which has no department-LIST capability at all and just re-showed the
+    # same stale card instead of answering. Rule 1.5 now runs before rule 1 so
+    # an explicit, unambiguous new department-list request wins regardless of
+    # what card was shown a moment ago.
+    history = [_row("assistant", DOCTOR_OPTIONS_MARKER + '{"doctors": []}')]
+    assert _heuristic_classify("how many total depts are there in this clinic", history) == GENERAL_INFO
+
+
 def test_router_rule1_6_doctor_count_question_routes_to_appointment():
     # Reported live: "how many cardiologist are there in this clinic??" has no
     # booking-action keyword and isn't a symptom, so it fell through to
@@ -2809,6 +2821,62 @@ def test_run_appointment_agent_answers_a_doctor_count_question_referencing_this_
     assert payload["department_name"] == "Cardiology"
     assert len(payload["doctors"]) == 2
     assert payload["note"] == "There are currently 2 doctors in Cardiology:"
+
+
+def test_run_appointment_agent_gives_doctor_info_without_slots_when_asked(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    """Reported live: "just give me general info about them not show slots" —
+    asked right after a Cardiology DOCTOR_OPTIONS card was shown — got the exact
+    same slots card shown back again instead of an answer, since
+    appointment_agent's only tool (get_department_availability) always returns a
+    full card with slots and has no way to omit them. Must answer with a real,
+    code-computed doctor listing with NO slots, never routed through the LLM at
+    all. Also exercises the "them" fallback path specifically: neither a
+    department named directly in this message nor a "there" pronoun applies
+    here, so it must recover Cardiology from the most recently shown card."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.slot import Slot
+
+    other = Doctor(
+        clinic_id=clinic.id, department_id=department.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Farhan Malik", is_active=True,
+    )
+    db.add(other)
+    db.flush()
+    db.add_all([
+        Slot(
+            clinic_id=clinic.id, doctor_id=doctor.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ),
+        Slot(
+            clinic_id=clinic.id, doctor_id=other.id,
+            start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+            end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+            status="open",
+        ),
+    ])
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be involved in answering a no-slots doctor-info question")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row("assistant", DOCTOR_OPTIONS_MARKER + json.dumps({"department_name": "Cardiology", "doctors": []})),
+    ]
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "just give me general info about them not show slots", "en", history
+    )
+
+    assert not result.startswith(DOCTOR_OPTIONS_MARKER)
+    assert doctor.full_name in result
+    assert other.full_name in result
+    assert "Cardiology" in result
 
 
 def test_run_appointment_agent_pronoun_followup_stays_filtered_to_that_doctor_with_date(

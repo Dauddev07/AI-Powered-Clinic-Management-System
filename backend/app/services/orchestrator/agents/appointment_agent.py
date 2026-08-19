@@ -806,6 +806,37 @@ def _message_asks_about_doctor_count(message: str) -> bool:
     return bool(words & {"only", "just"})
 
 
+# Reported live: "just give me general info about them not show slots" — asked
+# right after a Cardiology DOCTOR_OPTIONS card was shown — got the exact same
+# slots card shown back again instead of an answer, because appointment_agent's
+# only tool (get_department_availability) always returns a full card with
+# slots; there was no way for it to relay "just the doctors, no slots" at all.
+# Deliberately broad phrase set (this module's usual fail-safe bias) so it
+# catches the common ways a patient asks for this without the word "slots"
+# necessarily appearing at all (e.g. "just tell me about them").
+_DOCTOR_INFO_NO_SLOTS_RE = re.compile(
+    r"\b(general\s+info|just\s+(?:the\s+)?info|just\s+tell\s+me\s+about|"
+    r"no\s+slots?\b|not\s+(?:the\s+)?slots?\b|without\s+(?:the\s+)?slots?\b|"
+    r"don'?t\s+show\s+(?:the\s+)?slots?\b|not\s+show\s+(?:the\s+)?slots?\b)",
+    re.IGNORECASE,
+)
+
+
+def _message_asks_for_doctor_info_no_slots(message: str) -> bool:
+    return bool(_DOCTOR_INFO_NO_SLOTS_RE.search(message))
+
+
+def _doctor_info_no_slots_reply(department_name: str, doctors) -> str:
+    """A real, code-computed doctor listing with NO slots — never left to the
+    model, which has no tool that can omit slots from get_department_availability's
+    card (see _DOCTOR_INFO_NO_SLOTS_RE's own comment)."""
+    lines = [
+        f"- {d.full_name} — {d.specialization}" if d.specialization else f"- {d.full_name}"
+        for d in doctors
+    ]
+    return f"Here are the doctors in {department_name}:\n" + "\n".join(lines)
+
+
 # Requested directly: once a slot list has been shown, "how do I book an
 # appointment"/"how to book"/"how do I choose a slot" should get an exact,
 # deterministic two-step answer — never left to the LLM to freehand (same
@@ -1320,6 +1351,29 @@ def run_appointment_agent(
     if resolved_appointment is None:
         department_names = list_active_department_names(db, ctx.clinic_id)
         named_departments = _departments_named_directly_in_message(message, department_names)
+
+        if _message_asks_for_doctor_info_no_slots(message):
+            # Resolves the department the same three ways every other "about
+            # what was just shown" follow-up in this module does: named
+            # directly in THIS message, a "there" pronoun back-reference, or —
+            # since "them" here refers to doctors, not a department, neither of
+            # those necessarily fires — falling back to whatever card was most
+            # recently actually shown.
+            referenced_department = (
+                named_departments[0]
+                if len(named_departments) == 1
+                else _most_recently_referenced_department(history, department_names)
+            )
+            if referenced_department is None:
+                last_shown = _most_recent_availability_marker(history)
+                if last_shown and last_shown.get("department_name") in department_names:
+                    referenced_department = last_shown["department_name"]
+            if referenced_department is not None:
+                availability = get_department_availability(db, ctx.clinic_id, referenced_department)
+                if not availability.doctors:
+                    return _no_slots_message(referenced_department)
+                return _doctor_info_no_slots_reply(referenced_department, availability.doctors)
+
         if named_departments:
             hinted = departments_hinted_by_patient_symptom_words("", history, department_names, set())
             for named in named_departments:

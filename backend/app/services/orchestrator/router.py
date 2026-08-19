@@ -180,7 +180,11 @@ def _rule_1_marker_continuity(message, history, last_role, last_content):
     a symptom") but could never fire for a marker-preceded turn, since this
     rule always won first. A genuine slot-pick reply ("the 9am one", "Dr.
     Farooq please") contains no symptom keyword, so is_symptom_message stays
-    False for it and this rule still applies normally."""
+    False for it and this rule still applies normally.
+
+    Now checked AFTER rule 1.5 (department-list request) rather than before it —
+    see that rule's own docstring for the live report explaining why an explicit
+    "how many departments" question must win over marker continuity too."""
     if (
         last_role == "assistant"
         and last_content.startswith((DOCTOR_OPTIONS_MARKER, DOCTOR_DISAMBIGUATION_MARKER))
@@ -191,14 +195,22 @@ def _rule_1_marker_continuity(message, history, last_role, last_content):
 
 
 def _rule_1_5_department_list_request(message, history, last_role, last_content):
-    """Explicit request for the full department list. Reported live: "what are
-    the available depts" wasn't recognized at all — it contains "available", one
-    of needs_booking_action_tools' own keywords, so without this rule it would
-    fall to rule 3 below and reach appointment_agent, which has no tool that can
-    list every department (get_department_availability requires one specific
-    name). Checked before screening/booking continuity since it's an explicit,
-    unambiguous new request that should win regardless of what the conversation
-    was doing a moment ago."""
+    """Explicit request for the full department list. Reported live (1st report):
+    "what are the available depts" wasn't recognized at all — it contains
+    "available", one of needs_booking_action_tools' own keywords, so without this
+    rule it would fall to rule 3 below and reach appointment_agent, which has no
+    tool that can list every department (get_department_availability requires one
+    specific name).
+
+    Reported live (2nd report): checked before screening/booking continuity but
+    NOT before rule 1 (marker continuity) — "how many total depts are there in
+    this clinic" asked right after a DOCTOR_OPTIONS card was shown still matched
+    rule 1 first (not a symptom message) and got routed to appointment_agent,
+    which has no department-LIST capability at all and just re-showed the same
+    stale card instead of answering. Moved ahead of rule 1 in the cascade so an
+    explicit, unambiguous new department-list request wins regardless of what
+    card was shown a moment ago — same principle rules 0.5/0.6 already apply for
+    their own categories."""
     if is_department_list_request(message):
         return GENERAL_INFO
     return None
@@ -294,8 +306,8 @@ def _rule_6_signal_free_short_statement(message, history, last_role, last_conten
 _RULE_CASCADE = (
     ("0.5", _rule_0_5_department_recommendation),
     ("0.6", _rule_0_6_department_scope_question),
-    ("1", _rule_1_marker_continuity),
     ("1.5", _rule_1_5_department_list_request),
+    ("1", _rule_1_marker_continuity),
     ("1.6", _rule_1_6_doctor_count_or_listing_request),
     ("1.8", _rule_1_8_current_message_states_a_symptom),
     ("2", _rule_2_screening_continuity),
