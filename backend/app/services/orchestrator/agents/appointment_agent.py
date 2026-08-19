@@ -806,6 +806,30 @@ def _message_asks_about_doctor_count(message: str) -> bool:
     return bool(words & {"only", "just"})
 
 
+# Requested directly: once a slot list has been shown, "how do I book an
+# appointment"/"how to book"/"how do I choose a slot" should get an exact,
+# deterministic two-step answer — never left to the LLM to freehand (same
+# "never let the model freehand it" principle as every other reply in this
+# module). Deliberately narrow — requires "how" plus a booking/choosing verb —
+# so it can't misfire on an unrelated message that merely contains "book".
+_HOW_TO_BOOK_RE = re.compile(
+    r"\bhow\s+(?:do|can|could|would|to|does)\b.{0,20}\b"
+    r"(?:book|booking|choose|choosing|pick|picking|select|selecting)\b",
+    re.IGNORECASE,
+)
+
+
+def _message_asks_how_to_book(message: str) -> bool:
+    return bool(_HOW_TO_BOOK_RE.search(message))
+
+
+_HOW_TO_BOOK_REPLY = (
+    "Here's how to book:\n\n"
+    "1) Choose any one of the available slots above — they're clickable, you can pick any of them.\n"
+    "2) Or just tell me the exact date and time you'd like, and I'll book that slot for you."
+)
+
+
 def _doctor_count_note(department_name: str, count: int) -> str:
     """A real, code-computed answer to a "how many doctors" question — never
     left to the model's own note-writing, which live testing showed doesn't
@@ -1152,6 +1176,15 @@ def run_appointment_agent(
                 f"{reschedule_pending['department_name']} was not rescheduled."
             )
         # Falls through otherwise, same as cancel's own pending check above.
+
+    # "How do I book an appointment" once slots have already been shown gets an
+    # exact, deterministic two-step answer instead of the LLM freehanding one —
+    # see _HOW_TO_BOOK_REPLY's own comment. Only fires when a real slot list is
+    # actually on screen (a DOCTOR_OPTIONS_MARKER/DEPARTMENT_LIST_MARKER card
+    # somewhere in history) — otherwise there's nothing to "choose from above"
+    # yet, and the message falls through to the normal LLM/tool-calling flow.
+    if _message_asks_how_to_book(message) and _most_recent_availability_marker(history) is not None:
+        return _HOW_TO_BOOK_REPLY
 
     pending = _pending_appointment_disambiguation(history)
     if pending is not None:

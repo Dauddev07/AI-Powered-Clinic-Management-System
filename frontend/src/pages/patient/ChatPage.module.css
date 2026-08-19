@@ -479,39 +479,23 @@
   box-shadow: 0 2px 6px color-mix(in srgb, var(--app-accent) 35%, transparent);
 }
 
-/* Warning-yellow banner, deliberately noticeable and never dismissible — uses
-   the dedicated --app-warning-banner-* tokens (index.css), not the raw
-   --app-warning-* pair directly: dark theme dials both down a notch toward
-   black so it stays legible/prominent without glaring against a dark page;
-   light theme just passes the raw tokens through unchanged, since "too
-   bright against a dark background" isn't something a light page needs
-   correcting for. Spans the full width of the main column (edge-to-edge,
-   matching .page/.topBar/.messages below); disclaimerInner caps the text
-   itself to a readable line length on wide screens instead of stretching one
-   sentence across the whole viewport. */
+/* Same soft "caution notice" theme as the booking-confirmation card's 2-hour
+   policy chip (see .bookingCardPolicy below) — a rounded, inset panel with a
+   semi-transparent amber tint and an icon-in-a-circle badge, rather than the
+   old full-bleed edge-to-edge strip with a left accent stripe and a pulsing
+   icon. Never dismissible, but reads as a calm, considered notice instead of
+   an alarm. disclaimerInner caps the text to a readable line length on wide
+   screens instead of stretching one sentence across the whole viewport. */
 .disclaimer {
   flex-shrink: 0;
-  position: relative;
-  padding: 0.7rem 1.25rem 0.7rem 1.5rem;
-  background: var(--app-warning-banner-bg);
-  color: var(--app-warning-text);
-  border-bottom: 1px solid var(--app-warning-border);
+  box-sizing: border-box;
+  margin: 0.75rem 1.25rem 0;
+  padding: 0.7rem 0.9rem;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-warning-banner-bg) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-warning-border) 70%, transparent);
   font-size: var(--font-size-label);
   line-height: 1.45;
-  box-sizing: border-box;
-}
-
-/* Solid stripe down the left edge — the same "this needs attention" cue used for
-   the emergency chat bubble, so the two read as one consistent visual language for
-   "this is not a normal message" rather than two unrelated styles. */
-.disclaimer::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  background: var(--app-warning-banner-text);
 }
 
 .disclaimerInner {
@@ -532,24 +516,8 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: var(--app-warning-border);
+  background: color-mix(in srgb, var(--app-warning-banner-text) 18%, transparent);
   color: var(--app-warning-banner-text);
-  animation: disclaimer-pulse 2.6s ease-in-out infinite;
-}
-
-@keyframes disclaimer-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(167, 143, 101, 0.35);
-  }
-  50% {
-    box-shadow: 0 0 0 5px rgba(167, 143, 101, 0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .disclaimerIcon {
-    animation: none;
-  }
 }
 
 .disclaimerText {

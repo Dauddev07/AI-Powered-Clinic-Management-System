@@ -2160,6 +2160,39 @@ def test_run_appointment_agent_suggests_a_partial_name_match_instead_of_flatly_r
     assert "couldn't find a doctor" not in result.lower()
 
 
+def test_run_appointment_agent_gives_the_deterministic_how_to_book_steps_after_slots_shown(
+    monkeypatch, db, ctx
+):
+    """Requested directly: once a slot list is on screen, "how do I book an
+    appointment" gets an exact, deterministic two-step answer, never left to the
+    LLM to freehand."""
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for a deterministic how-to-book reply")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [_row("assistant", DOCTOR_OPTIONS_MARKER + '{"doctors": []}')]
+    result = appointment_agent.run_appointment_agent(db, ctx, "how do i book an appointment", "en", history)
+
+    assert "1)" in result and "2)" in result
+    assert "clickable" in result.lower()
+
+
+def test_run_appointment_agent_how_to_book_falls_through_normally_with_no_slots_shown(
+    monkeypatch, db, ctx
+):
+    """The deterministic how-to-book reply only fires once a real slot list is
+    actually on screen — with nothing shown yet, "how do I book an appointment"
+    has nothing to point back at "above", so it must fall through to the normal
+    LLM/tool-calling flow instead."""
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", lambda *a, **k: "some normal reply")
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "how do i book an appointment", "en", [])
+
+    assert result == "some normal reply"
+
+
 def test_run_appointment_agent_recovers_a_doctor_named_only_in_assistant_prose(monkeypatch, db, ctx, doctor):
     """Reported live: "i am having blury vision" got answered by general_info_agent
     with plain KB prose naming a real doctor (never a structured DOCTOR_OPTIONS

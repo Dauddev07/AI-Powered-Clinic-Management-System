@@ -180,11 +180,13 @@ export default function Landing() {
           bar at the very top of the page, above the hero entirely, the way
           it worked before that redesign. */}
       <p className={styles.emergencyBanner} role="note">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M12 3.5 22 20H2L12 3.5Z" />
-          <line x1="12" y1="10" x2="12" y2="14.5" />
-          <circle cx="12" cy="17.25" r="0.9" fill="currentColor" stroke="none" />
-        </svg>
+        <span className={styles.emergencyBannerIcon} aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3.5 22 20H2L12 3.5Z" />
+            <line x1="12" y1="10" x2="12" y2="14.5" />
+            <circle cx="12" cy="17.25" r="0.9" fill="currentColor" stroke="none" />
+          </svg>
+        </span>
         Routine checkups only — not for medical emergencies.
       </p>
 

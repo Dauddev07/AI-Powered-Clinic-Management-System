@@ -216,22 +216,25 @@
   gap: 1rem;
 }
 
-/* Full-width caution banner, first thing on the page (above the hero) — this is a
-   scope notice, not an error, so it uses the app's amber warning tokens (same
-   family as ChatPage.module.css's .disclaimer) rather than the alarm-red error
-   tokens: it reads as a caution against the blue theme without clashing like a
-   plain red bar dropped on top of it. */
+/* Full-width caution banner, first thing on the page (above the hero) — same
+   soft "caution notice" theme as the booking-confirmation card's 2-hour policy
+   chip and the chat page's disclaimer (see ChatPage.module.css's
+   .bookingCardPolicy/.disclaimer): a semi-transparent amber tint and an
+   icon-in-a-circle badge, rather than a flat solid-color strip. Stays full-bleed
+   edge-to-edge rather than an inset rounded card, deliberately — an inset
+   version was tried before and reported as cramped/broken once it wrapped to
+   two lines on short screens (see the comment on the landing markup above). */
 .emergencyBanner {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 0.55rem;
   margin: 0;
   padding: 0.5rem 1.25rem;
   width: 100%;
   box-sizing: border-box;
-  background: var(--app-warning-banner-bg);
-  border-bottom: 1px solid var(--app-warning-border);
+  background: color-mix(in srgb, var(--app-warning-banner-bg) 55%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--app-warning-border) 70%, transparent);
   color: var(--app-warning-banner-text);
   font-size: var(--font-size-caption);
   font-weight: 600;
@@ -239,8 +242,16 @@
   text-align: center;
 }
 
-.emergencyBanner svg {
+.emergencyBannerIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--app-warning-banner-text) 18%, transparent);
+  color: var(--app-warning-banner-text);
 }
 
 @media (max-width: 480px) {
@@ -261,7 +272,7 @@
     font-size: calc(var(--font-size-caption) * 0.94);
   }
 
-  .emergencyBanner svg {
+  .emergencyBannerIcon {
     margin-top: 0.15em;
   }
 }
