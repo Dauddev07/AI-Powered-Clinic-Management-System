@@ -61,7 +61,7 @@
   color: var(--app-text-body);
   border: 1px solid var(--app-border);
   border-radius: 20px;
-  box-shadow: 0 4px 24px var(--app-shadow);
+  box-shadow: var(--app-shadow-resting);
   padding: 1.5rem;
   margin-bottom: 1.5rem;
   box-sizing: border-box;

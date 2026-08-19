@@ -44,7 +44,7 @@
   color: var(--app-text-body);
   border: 1px solid var(--app-border);
   border-radius: 20px;
-  box-shadow: 0 4px 24px var(--app-shadow);
+  box-shadow: var(--app-shadow-resting);
   /* Safety net: any unexpectedly long unbroken string (an email, a UUID, a long
      name) wraps instead of pushing the card wider than its column at narrow widths. */
   overflow-wrap: anywhere;

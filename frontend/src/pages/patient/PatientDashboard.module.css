@@ -54,7 +54,7 @@
   border: 1px solid var(--app-border);
   border-radius: 20px;
   padding: 1.5rem;
-  box-shadow: 0 4px 24px var(--app-shadow);
+  box-shadow: var(--app-shadow-resting);
   overflow-wrap: anywhere;
   box-sizing: border-box;
   /* Reported live: card scroll-reveal looked like it wasn't animating at
@@ -93,7 +93,7 @@
 .card:hover {
   transform: translateY(-3px);
   border-color: color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
-  box-shadow: 0 10px 32px var(--app-shadow);
+  box-shadow: var(--app-shadow-hover);
 }
 
 .card:hover::after {

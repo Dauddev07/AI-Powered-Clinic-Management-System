@@ -57,6 +57,12 @@ html[data-theme="dark"] {
   --app-info-text: #9bb0c2;
   --app-info-border: #34424e;
   --app-shadow: rgba(0, 0, 0, 0.32);
+  /* Elevation scale for interactive cards: a quiet resting shadow and a
+     stronger one for hover/focus, so lifting off the page is an actual state
+     change rather than the same shadow at every size (see .card rules in
+     PatientDashboard/AdminHome/Dashboard/AdminScreens/PatientScreens). */
+  --app-shadow-resting: 0 1px 3px rgba(0, 0, 0, 0.24);
+  --app-shadow-hover: 0 14px 32px rgba(0, 0, 0, 0.4);
   --app-overlay: rgba(0, 0, 0, 0.55);
 }
 
@@ -103,6 +109,8 @@ html[data-theme="light"] {
   --app-info-text: #205a79;
   --app-info-border: #b9d7ec;
   --app-shadow: rgba(24, 22, 16, 0.14);
+  --app-shadow-resting: 0 1px 3px rgba(24, 22, 16, 0.08);
+  --app-shadow-hover: 0 14px 32px rgba(24, 22, 16, 0.18);
   --app-overlay: rgba(18, 18, 16, 0.42);
 }
 
