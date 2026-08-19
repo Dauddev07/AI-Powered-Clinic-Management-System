@@ -3312,6 +3312,71 @@ def test_run_appointment_agent_declining_book_confirmation_leaves_slot_open(
     result = appointment_agent.run_appointment_agent(db, ctx, "no", "en", history)
 
     assert "not booked" in result
+
+
+# --- _is_short_negative_reply ---------------------------------------------------
+# Reported live: "no,book me with dr waqas on mon aug 24 at 3.30 instead" — a
+# decline plus a real new request in one message — matched the plain "no" prefix
+# check and got treated as a flat decline, silently discarding "book me ... 3.30
+# instead" entirely.
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "no",
+        "no thanks",
+        "nope, thanks",
+        "never mind",
+        "do not book that",
+        "don't book it",
+        "cancel that",
+    ],
+)
+def test_is_short_negative_reply_true_for_pure_declines(message):
+    assert appointment_agent._is_short_negative_reply(message) is True
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "no,book me with dr waqas on mon aug 24 at 3.30 instead",
+        "nope, I want dr waqas at 4pm instead",
+        "no not that one, book the friday slot instead",
+    ],
+)
+def test_is_short_negative_reply_false_when_a_new_request_follows(message):
+    assert appointment_agent._is_short_negative_reply(message) is False
+
+
+def test_run_appointment_agent_declining_book_confirmation_with_a_new_request_does_not_swallow_it(
+    monkeypatch, db, ctx, clinic, doctor
+):
+    slot = _future_slot(db, clinic, doctor)
+    db.commit()
+
+    candidate = {
+        "slot_id": str(slot.id),
+        "doctor_name": "Dr. Ahmed Khan",
+        "department_name": "Cardiology",
+        "when": "Mon, Aug 10 at 9:00 AM",
+    }
+    pending = appointment_agent.DOCTOR_DISAMBIGUATION_MARKER + json.dumps(
+        {"kind": "book_confirm", "question": "confirm?", "candidate": candidate}
+    )
+    history = [_row("assistant", pending)]
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "no, book me with dr ahmed khan on mon instead", "en", history
+    )
+
+    # The candidate must not be silently declined with the canned message — the
+    # trailing new request has to actually be looked at (falls through to normal
+    # handling, which resolves the named doctor rather than returning the flat
+    # "not booked" sentence for the original slot).
+    assert "was not booked" not in result
+    db.refresh(slot)
+    assert slot.status == "open"
     db.refresh(slot)
     assert slot.status == "open"
 

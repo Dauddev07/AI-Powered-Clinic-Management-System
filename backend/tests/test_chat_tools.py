@@ -809,3 +809,31 @@ def test_resolve_time_of_day_window_falls_back_to_time_of_day_phrase():
 
 def test_resolve_time_of_day_window_none_when_no_time_named():
     assert resolve_time_of_day_window("book a slot for cardiology") is None
+
+
+# Reported live: "book me with dr waqas on mon aug 24 at 3.30 instead" and its
+# follow-up "at 3.30" were both silently ignored — only "after"/"before" were
+# recognized, so a bare "at X" request fell through with no time bound at all.
+
+
+def test_resolve_time_of_day_window_accepts_at_time_with_explicit_meridiem():
+    assert resolve_time_of_day_window("at 3:30 pm") == (time(15, 30), None)
+
+
+def test_resolve_time_of_day_window_accepts_at_time_with_dot_separator():
+    assert resolve_time_of_day_window("book me with dr waqas on mon aug 24 at 3.30 instead") == (
+        time(15, 30),
+        None,
+    )
+
+
+def test_resolve_time_of_day_window_infers_pm_for_a_bare_afternoon_hour():
+    assert resolve_time_of_day_window("at 3.30") == (time(15, 30), None)
+
+
+def test_resolve_time_of_day_window_infers_am_for_a_bare_morning_hour():
+    assert resolve_time_of_day_window("at 9.15") == (time(9, 15), None)
+
+
+def test_resolve_time_of_day_window_prefers_after_before_over_at():
+    assert resolve_time_of_day_window("after 12 pm") == (time(12, 0), None)
