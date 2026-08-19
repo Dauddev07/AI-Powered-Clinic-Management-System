@@ -249,6 +249,12 @@
   flex: none;
   width: 20px;
   height: 20px;
+  /* flex's align-items: center on .emergencyBanner centers this against the
+     TEXT LINE BOX, not the glyphs' own optical/cap height — bold text's extra
+     leading below the cap height reads as the icon sitting slightly low
+     relative to the letters. Nudged up to line up with the text's optical
+     center instead. */
+  margin-top: -2px;
   border-radius: 50%;
   background: color-mix(in srgb, var(--app-info-text) 18%, transparent);
   color: var(--app-info-text);
