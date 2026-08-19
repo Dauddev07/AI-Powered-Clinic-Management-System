@@ -479,6 +479,8 @@ DEPARTMENT_TITLE_HINTS: tuple[tuple[str, str], ...] = (
     ("lung specialist", "pulmonolog"),
     ("general physician", "general medicine"),
     ("general practitioner", "general medicine"),
+    ("general doc", "general medicine"),
+    ("gp", "general medicine"),
     ("family doctor", "family medicine"),
 )
 

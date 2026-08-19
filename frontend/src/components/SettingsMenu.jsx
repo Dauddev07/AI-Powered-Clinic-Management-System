@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchMyAccount } from "../api/auth";
 import { useAuth } from "../auth/AuthContext";
+import ThemeToggle from "./ThemeToggle";
+import { useTheme } from "../theme/ThemeContext";
 import styles from "./SettingsMenu.module.css";
 
 const ICONS = {
@@ -18,6 +20,7 @@ const ICONS = {
   log: (
     <path d="M4 12h4l2 3h4l2-3h4M4 12l1.5-6.5A1 1 0 0 1 6.47 4.75h11.06a1 1 0 0 1 .97.75L20 12M4 12v6a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6" />
   ),
+  theme: <path d="M12 3a9 9 0 1 0 9 9c0-.46-.03-.92-.09-1.36A5.5 5.5 0 0 1 12 3Z" />,
 };
 
 // Nested sub-panels reached from a top-level menu item, keyed by the `view`
@@ -92,6 +95,7 @@ function MenuRow({ icon, children, chevron }) {
 // independent of any page's own stacking context.
 export default function SettingsMenu() {
   const { user, logout } = useAuth();
+  const { isDark } = useTheme();
   const [open, setOpen] = useState(false);
   // "account" is the default menu; any other value is a key into SUBVIEWS
   // above, reached via that item's button in the account menu — swapped in
@@ -293,6 +297,16 @@ export default function SettingsMenu() {
                 <p className={styles.subViewDescription}>{SUBVIEWS[view].description}</p>
               </div>
               <nav className={styles.subMenuList} aria-label={SUBVIEWS[view].heading}>
+                {view === "settings" && (
+                  <div className={styles.subMenuGroup}>
+                    <span className={styles.subMenuSectionLabel}>Appearance</span>
+                    <div className={styles.subMenuButton}>
+                      <ItemIcon name="theme" />
+                      <span className={styles.subMenuButtonLabel}>{isDark ? "Dark mode" : "Light mode"}</span>
+                      <ThemeToggle />
+                    </div>
+                  </div>
+                )}
                 {subviewItems.map((item) => (
                   <div key={item.to} className={styles.subMenuGroup}>
                     <span className={styles.subMenuSectionLabel}>{item.section}</span>

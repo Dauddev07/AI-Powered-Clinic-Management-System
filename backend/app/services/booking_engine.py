@@ -4,8 +4,8 @@ Extracted from app/api/appointments.py so the REST endpoints AND the chatbot's
 function-calling tools (app/services/chat_tools.py) call the exact same functions.
 Neither caller re-implements a single rule: slot locking, past-slot rejection,
 patient overlap, cancel/reschedule refusal within CANCEL_RESCHEDULE_CUTOFF of the
-appointment's start time, ownership, the daily per-department cap, and the
-transactional all-or-nothing reschedule all live here only. Callers pass
+appointment's start time, ownership, the daily per-department booking AND reschedule
+caps, and the transactional all-or-nothing reschedule all live here only. Callers pass
 clinic_id/patient_id that they themselves sourced from a verified JWT — this module
 trusts whatever is handed to it, same as any other service layer.
 
@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.appointment import Appointment
+from app.models.appointment_department_day_reschedule_use import AppointmentDepartmentDayRescheduleUse
 from app.models.appointment_department_day_use import AppointmentDepartmentDayUse
 from app.models.clinic import Clinic
 from app.models.department import Department
@@ -39,6 +40,12 @@ from app.services.email import (
 from app.services.notifications import create_notification, format_appointment_datetime
 
 DAILY_DEPARTMENT_BOOKING_CAP = 2
+
+# Separate, independent daily allowance for RESCHEDULING an appointment that
+# originally sat in a given department/day — not the same counter as the booking
+# cap above (a reschedule moves an appointment that already used up one of that
+# day's booking slots; capping how many TIMES it can then be moved is its own rule).
+DAILY_DEPARTMENT_RESCHEDULE_CAP = 2
 
 # How close to the appointment's own start time a patient can still cancel or
 # reschedule it — a flat cutoff by actual time remaining, not by calendar day, so an
@@ -97,6 +104,30 @@ def _department_day_use_count(db: Session, clinic_id, patient_id, department_id,
 def _record_department_day_use(db: Session, clinic_id, patient_id, department_id, appointment_id, local_date) -> None:
     db.add(
         AppointmentDepartmentDayUse(
+            clinic_id=clinic_id,
+            patient_id=patient_id,
+            department_id=department_id,
+            appointment_id=appointment_id,
+            local_date=local_date,
+        )
+    )
+
+
+def _department_day_reschedule_count(db: Session, clinic_id, patient_id, department_id, local_date) -> int:
+    stmt = select(AppointmentDepartmentDayRescheduleUse.id).where(
+        AppointmentDepartmentDayRescheduleUse.clinic_id == clinic_id,
+        AppointmentDepartmentDayRescheduleUse.patient_id == patient_id,
+        AppointmentDepartmentDayRescheduleUse.department_id == department_id,
+        AppointmentDepartmentDayRescheduleUse.local_date == local_date,
+    )
+    return len(db.execute(stmt).all())
+
+
+def _record_department_day_reschedule_use(
+    db: Session, clinic_id, patient_id, department_id, appointment_id, local_date
+) -> None:
+    db.add(
+        AppointmentDepartmentDayRescheduleUse(
             clinic_id=clinic_id,
             patient_id=patient_id,
             department_id=department_id,
@@ -375,12 +406,34 @@ def reschedule_appointment(
                 ),
             )
 
+        # Independent reschedule allowance, keyed by the OLD appointment's own
+        # department/day (the one being moved AWAY from) — how many times an
+        # appointment that was on THAT day/department has already been rescheduled,
+        # not how many new bookings exist on the target day.
+        old_department = db.get(Department, old_doctor.department_id) if old_doctor is not None else None
+        old_local_date = old_slot.start_utc.astimezone(tz).date()
+        if old_department is not None and (
+            _department_day_reschedule_count(db, clinic_id, patient_id, old_department.id, old_local_date)
+            >= DAILY_DEPARTMENT_RESCHEDULE_CAP
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"You've reached the limit of {DAILY_DEPARTMENT_RESCHEDULE_CAP} reschedules "
+                    f"for appointments in {old_department.name} on that day."
+                ),
+            )
+
         old_slot.status = "open"
         new_slot.status = "booked"
         appointment.slot_id = new_slot.id
         appointment.doctor_id = new_slot.doctor_id
         db.flush()
         _record_department_day_use(db, clinic_id, patient_id, new_department.id, appointment.id, new_local_date)
+        if old_department is not None:
+            _record_department_day_reschedule_use(
+                db, clinic_id, patient_id, old_department.id, appointment.id, old_local_date
+            )
         if old_doctor is not None and old_doctor.id != new_doctor.id:
             reschedule_message = (
                 f"Your appointment has been rescheduled from {old_doctor.full_name} at "

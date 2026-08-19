@@ -18,6 +18,52 @@ import styles from "./ChatPage.module.css";
 const SESSION_STORAGE_KEY = "chat_session_id";
 const SESSION_TITLE_MAX_LENGTH = 60;
 
+// usedCardIndices (below) only lives in React state, so a card that was already
+// acted on goes clickable again the moment the thread is refetched — on a plain
+// page reload, or just re-opening the same session from the sidebar. The backend
+// history payload has no "used"/"consumed" flag to derive this from, so it's
+// tracked here instead, keyed by each message's own CONTENT (not createdAt — a
+// locally-generated `new Date().toISOString()` at send time won't reliably match
+// whatever timestamp the backend itself later reports for that same row, but the
+// text content is byte-identical either way, the same string round-tripped) and
+// scoped per chat session so a used card from one thread never bleeds into another.
+const USED_CARDS_STORAGE_PREFIX = "chat_used_cards:";
+
+function _loadUsedCardContents(sessionId) {
+  if (!sessionId) return new Set();
+  try {
+    const raw = localStorage.getItem(USED_CARDS_STORAGE_PREFIX + sessionId);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function _persistUsedCardContent(sessionId, content) {
+  if (!sessionId || !content) return;
+  const contents = _loadUsedCardContents(sessionId);
+  contents.add(content);
+  try {
+    localStorage.setItem(USED_CARDS_STORAGE_PREFIX + sessionId, JSON.stringify([...contents]));
+  } catch {
+    // Best-effort — worst case this card goes clickable again on a future
+    // reload, same as before this persistence existed at all.
+  }
+}
+
+// Re-derives which message indices should start out disabled from the persisted
+// contents above — run once right after `messages` itself is (re)built, same
+// moment usedCardIndices used to just reset to an empty Set.
+function _deriveUsedCardIndices(messages, sessionId) {
+  const contents = _loadUsedCardContents(sessionId);
+  if (contents.size === 0) return new Set();
+  const indices = new Set();
+  messages.forEach((m, i) => {
+    if (m.content && contents.has(m.content)) indices.add(i);
+  });
+  return indices;
+}
+
 // The booking/reschedule tools (task 6.2.4) prefix a confirmed-booking reply with
 // this sentinel followed by a JSON payload — see app/services/chat_tools.py.
 const BOOKING_MARKER = "BOOKING_CONFIRMED::";
@@ -665,15 +711,14 @@ export default function ChatPage() {
         setSessions(sessionList);
         setActiveSessionId(history.session_id);
         if (history.session_id) localStorage.setItem(SESSION_STORAGE_KEY, history.session_id);
-        setMessages(
-          history.messages.map((m) => ({
-            role: m.role,
-            content: m.content,
-            createdAt: m.created_at,
-            redFlag: m.red_flag,
-          })),
-        );
-        setUsedCardIndices(new Set());
+        const builtMessages = history.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+          createdAt: m.created_at,
+          redFlag: m.red_flag,
+        }));
+        setMessages(builtMessages);
+        setUsedCardIndices(_deriveUsedCardIndices(builtMessages, history.session_id));
       })
       .catch((err) => {
         setHistoryError(err instanceof ApiError ? err.detail || err.message : "Could not load chat history.");
@@ -838,15 +883,14 @@ export default function ChatPage() {
       .then((data) => {
         setActiveSessionId(data.session_id);
         if (data.session_id) localStorage.setItem(SESSION_STORAGE_KEY, data.session_id);
-        setMessages(
-          data.messages.map((m) => ({
-            role: m.role,
-            content: m.content,
-            createdAt: m.created_at,
-            redFlag: m.red_flag,
-          })),
-        );
-        setUsedCardIndices(new Set());
+        const builtMessages = data.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+          createdAt: m.created_at,
+          redFlag: m.red_flag,
+        }));
+        setMessages(builtMessages);
+        setUsedCardIndices(_deriveUsedCardIndices(builtMessages, data.session_id));
       })
       .catch((err) => {
         setHistoryError(err instanceof ApiError ? err.detail || err.message : "Could not load that conversation.");
@@ -1227,12 +1271,16 @@ export default function ChatPage() {
               onSelectSlot={(doctorName, when, slotId) => {
                 // Marks THIS card (by its message index) used before the real
                 // selection even lands — see usedCardIndices' own comment on
-                // why a card must never be selectable a second time.
+                // why a card must never be selectable a second time. Also
+                // persisted by content (see _persistUsedCardContent) so it stays
+                // disabled after a reload, not just for this render.
                 setUsedCardIndices((prev) => new Set(prev).add(i));
+                _persistUsedCardContent(activeSessionId, message.content);
                 selectSlot(doctorName, when, slotId);
               }}
               onSelectCandidate={(doctorName, departmentName, when) => {
                 setUsedCardIndices((prev) => new Set(prev).add(i));
+                _persistUsedCardContent(activeSessionId, message.content);
                 selectCandidate(doctorName, departmentName, when);
               }}
               disabled={sending || usedCardIndices.has(i)}

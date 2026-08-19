@@ -609,6 +609,12 @@ def list_upcoming_appointments(db: Session, ctx: ClinicContext) -> list[dict]:
                 "doctor_name": out.doctor_name,
                 "department_name": out.department_name,
                 "when": _format_when(out.start_utc, tz),
+                # Raw ISO timestamp alongside the human-formatted "when" above —
+                # not shown to the patient, but lets appointment_agent's
+                # deterministic cancel/reschedule-cutoff pre-check (see
+                # _is_within_cancel_reschedule_cutoff) compare against "now"
+                # without re-parsing the formatted string.
+                "start_utc": out.start_utc.isoformat(),
             }
         )
     return results

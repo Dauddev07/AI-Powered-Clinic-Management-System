@@ -61,13 +61,13 @@ action gets a real guarantee, not just a prompt instruction it might not follow.
 import json
 import re
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from app.core.tenancy import ClinicContext
 from app.models.conversation_memory import ConversationMemory
-from app.services import llm
+from app.services import booking_engine, llm
 from app.services.chat_markers import DEPARTMENT_LIST_MARKER, DOCTOR_DISAMBIGUATION_MARKER, DOCTOR_OPTIONS_MARKER
 from app.services.chat_tools import (
     _clinic_timezone,
@@ -303,6 +303,34 @@ def _last_assistant_disambiguation_payload(history: list[ConversationMemory]) ->
         return json.loads(content[len(DOCTOR_DISAMBIGUATION_MARKER):])
     except (ValueError, TypeError):
         return None
+
+
+def _is_within_cancel_reschedule_cutoff(appointment: dict) -> bool:
+    """True once the appointment is too close to its own start time to cancel or
+    reschedule — checked deterministically here, BEFORE asking the patient to
+    confirm, using the same real CANCEL_RESCHEDULE_CUTOFF booking_engine itself
+    enforces server-side. Without this, the confirm question gets asked first and
+    only THEN fails once the patient says yes — asking a question whose answer is
+    already known to be a dead end. booking_engine's own check remains the real,
+    final guard either way (e.g. if enough time passes between this check and the
+    patient's confirmation reply)."""
+    raw_start_utc = appointment.get("start_utc")
+    if not raw_start_utc:
+        # No raw timestamp on hand (e.g. an older cached candidate) — fail open and
+        # let booking_engine's own server-side check be the real guard, same as
+        # before this pre-check existed, rather than blocking on a guess.
+        return False
+    start_utc = datetime.fromisoformat(raw_start_utc)
+    return start_utc - datetime.now(timezone.utc) <= booking_engine.CANCEL_RESCHEDULE_CUTOFF
+
+
+def _cancel_reschedule_cutoff_reply(appointment: dict, action: str) -> str:
+    verb = "cancelled" if action == "cancel" else "rescheduled"
+    return (
+        f"Your appointment with {appointment['doctor_name']} in {appointment['department_name']} "
+        f"on {appointment['when']} is coming up in less than 2 hours, so it can no longer be "
+        f"{verb} online. Please contact the clinic directly for last-minute changes."
+    )
 
 
 def _cancel_confirmation_reply(appointment: dict, phrased_as_capability_question: bool = False) -> str:
@@ -1071,6 +1099,8 @@ def run_appointment_agent(
     # layer at all; it always asks first, deterministically, and only actually
     # cancels once _pending_cancel_confirmation above sees an explicit "yes".
     if resolved_appointment is not None and resolved_appointment_action == "cancel":
+        if _is_within_cancel_reschedule_cutoff(resolved_appointment):
+            return _cancel_reschedule_cutoff_reply(resolved_appointment, "cancel")
         return _cancel_confirmation_reply(resolved_appointment, _message_is_a_capability_question(message))
 
     # Reported live: "reschedule my appointment with Dr. X" correctly resolved
@@ -1087,6 +1117,8 @@ def run_appointment_agent(
         and resolved_appointment_action == "reschedule"
         and not _message_has_explicit_slot_id(message)
     ):
+        if _is_within_cancel_reschedule_cutoff(resolved_appointment):
+            return _cancel_reschedule_cutoff_reply(resolved_appointment, "reschedule")
         forced_window = resolve_bare_weekday_window(message)
         earliest_date = date.fromisoformat(forced_window[0]) if forced_window else None
         latest_date = date.fromisoformat(forced_window[1]) if forced_window else None
@@ -1152,6 +1184,23 @@ def run_appointment_agent(
                     and not _already_warned_about_department_mismatch(history, named)
                 ):
                     return _department_mismatch_reply(named, hinted)
+            # Fallback beyond the keyword table above: reported live, "severe pain
+            # in my leg" led an EARLIER turn to recommend and show Orthopedics (a
+            # real DOCTOR_OPTIONS card, via the symptom-triage agent's own
+            # reasoning) — but symptom_hints' keyword table judges bare "leg" +
+            # "pain" with no explicit injury verb as General Medicine territory,
+            # not Orthopedics, so `hinted` above agreed with a same-turn "general
+            # doc" request and the mismatch above never fired, even though it
+            # contradicted what was actually shown. Comparing against the real
+            # most-recently-shown card's department (ground truth, not a
+            # re-guessed keyword hint) catches this gap the keyword table alone
+            # cannot.
+            last_shown = _most_recent_availability_marker(history)
+            last_department = last_shown.get("department_name") if last_shown else None
+            if last_department in department_names:
+                for named in named_departments:
+                    if named != last_department and not _already_warned_about_department_mismatch(history, named):
+                        return _department_mismatch_reply(named, {last_department: "symptoms"})
             # Reported live: "how many cardiologist are there in this clinic??"
             # names a real department directly (via the title-hint "cardiologist"
             # -> "Cardiology") and has no symptom-mismatch issue, but nothing

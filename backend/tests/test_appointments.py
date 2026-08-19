@@ -131,4 +131,88 @@ def test_confirm_visit_rejects_appointment_not_in_confirmed_status(db, clinic):
             db, clinic_id=clinic.id, patient_id=appointment.patient_id, appointment_id=appointment.id, completed=True
         )
 
+
+def test_reschedule_enforces_daily_department_reschedule_cap(db, clinic):
+    """DAILY_DEPARTMENT_RESCHEDULE_CAP (2) is keyed by the OLD appointment's own
+    department/day (the one being moved AWAY from) and is independent of the
+    booking cap. Three separate appointments all originally in the same
+    department on the same day — rescheduling the first two of them (each to a
+    DIFFERENT department, so the booking cap on the target day/department never
+    itself becomes the blocker) is allowed; rescheduling the third, from that
+    same original department/day, is refused once the cap is already used up."""
+    dept1 = Department(clinic_id=clinic.id, name="Cardiology")
+    dept2 = Department(clinic_id=clinic.id, name="General Medicine")
+    dept3 = Department(clinic_id=clinic.id, name="Dermatology")
+    db.add_all([dept1, dept2, dept3])
+    db.flush()
+
+    doctor1 = Doctor(
+        clinic_id=clinic.id, department_id=dept1.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:6]}",
+        full_name="Dr. Cardio One", is_active=True,
+    )
+    doctor2 = Doctor(
+        clinic_id=clinic.id, department_id=dept2.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:6]}",
+        full_name="Dr. General One", is_active=True,
+    )
+    doctor3 = Doctor(
+        clinic_id=clinic.id, department_id=dept3.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:6]}",
+        full_name="Dr. Derma One", is_active=True,
+    )
+    db.add_all([doctor1, doctor2, doctor3])
+    db.flush()
+
+    patient = User(
+        clinic_id=clinic.id, role="patient", email=f"{uuid.uuid4().hex}@example.com",
+        hashed_password="x", full_name="Pat Ient",
+    )
+    db.add(patient)
+    db.flush()
+
+    def _slot(doctor, hour):
+        s = Slot(
+            clinic_id=clinic.id, doctor_id=doctor.id,
+            start_utc=datetime(2030, 6, 10, hour, 0, tzinfo=timezone.utc),
+            end_utc=datetime(2030, 6, 10, hour, 30, tzinfo=timezone.utc),
+        )
+        db.add(s)
+        db.flush()
+        return s
+
+    def _booked_appointment(slot):
+        appt = Appointment(clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=slot.doctor_id, status="confirmed")
+        db.add(appt)
+        db.flush()
+        return appt
+
+    # Three appointments, all originally in dept1 on 2030-06-10 (inserted directly,
+    # bypassing book_appointment's own daily cap — simulating three appointments
+    # that already exist, isolating the reschedule cap under test from the
+    # separate booking cap).
+    appt_a = _booked_appointment(_slot(doctor1, 8))
+    appt_b = _booked_appointment(_slot(doctor1, 10))
+    appt_c = _booked_appointment(_slot(doctor1, 12))
+
+    # Reschedule #1 out of (Cardiology, 2030-06-10), into General Medicine: allowed.
+    booking_engine.reschedule_appointment(
+        db, clinic_id=clinic.id, patient_id=patient.id, appointment_id=appt_a.id, new_slot_id=_slot(doctor2, 14).id
+    )
+    # Reschedule #2 out of (Cardiology, 2030-06-10), into Dermatology this time —
+    # a DIFFERENT target department, so the target-side booking cap (also 2, but
+    # per target department/day) never itself becomes the blocker here: allowed.
+    booking_engine.reschedule_appointment(
+        db, clinic_id=clinic.id, patient_id=patient.id, appointment_id=appt_b.id, new_slot_id=_slot(doctor3, 16).id
+    )
+    # Reschedule #3 out of that same (Cardiology, 2030-06-10), into yet another
+    # fresh target (General Medicine again, but only its SECOND use — still well
+    # under ITS cap): the cap (2) on the ORIGIN (Cardiology, 2030-06-10) is what
+    # blocks this one.
+    target_slot = _slot(doctor2, 18)
+    with pytest.raises(HTTPException) as exc_info:
+        booking_engine.reschedule_appointment(
+            db, clinic_id=clinic.id, patient_id=patient.id, appointment_id=appt_c.id, new_slot_id=target_slot.id
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "reschedules" in exc_info.value.detail
+
     assert exc_info.value.status_code == 409

@@ -1,4 +1,5 @@
 from app.models.appointment import Appointment
+from app.models.appointment_department_day_reschedule_use import AppointmentDepartmentDayRescheduleUse
 from app.models.appointment_department_day_use import AppointmentDepartmentDayUse
 from app.models.appointment_feedback import AppointmentFeedback
 from app.models.audit_log import AuditLog
@@ -20,6 +21,7 @@ from app.models.user import User
 
 __all__ = [
     "Appointment",
+    "AppointmentDepartmentDayRescheduleUse",
     "AppointmentDepartmentDayUse",
     "AppointmentFeedback",
     "AuditLog",

@@ -130,7 +130,9 @@ export default function AppHeader() {
 
         {isAuthenticated && (
           <div className={styles.headerEnd}>
-            <ThemeToggle />
+            {/* Theme toggle now lives inside SettingsMenu's own Settings ->
+                Appearance row instead of a standalone header icon — see
+                SettingsMenu.jsx. */}
             {/* Reported live: on the chat page under 720px, BOTH PrimaryNavDesktop
                 (hidden below 720px) and PrimaryNavMobile (deliberately hidden on
                 the chat page itself, see its own comment — it's a full-bleed

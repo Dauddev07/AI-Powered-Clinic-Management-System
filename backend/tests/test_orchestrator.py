@@ -3700,6 +3700,72 @@ def test_run_appointment_agent_warns_when_named_department_contradicts_session_s
     assert result != DOCTOR_OPTIONS_MARKER + card
 
 
+def test_run_appointment_agent_warns_when_general_doc_names_a_mismatched_department(
+    monkeypatch, db, ctx, clinic, patient
+):
+    # Reported live: after describing severe leg pain (an Orthopedics-hinting
+    # symptom), "can u refer me to general doc" went straight to a General
+    # Medicine availability card with zero mention of the earlier symptoms —
+    # "general doc" wasn't in _DEPARTMENT_TITLE_HINTS at all (only "general
+    # physician"/"general practitioner" were), so _departments_named_directly_in_
+    # message found nothing to warn about and the mismatch check never ran. See
+    # the "general doc"/"gp" additions to DEPARTMENT_TITLE_HINTS in
+    # message_classifier.py.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    ortho = Department(clinic_id=clinic.id, name="Orthopedics")
+    db.add(ortho)
+    general = Department(clinic_id=clinic.id, name="General Medicine")
+    db.add(general)
+    db.flush()
+    general_doctor = Doctor(
+        clinic_id=clinic.id, department_id=general.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Ali Raza", is_active=True,
+    )
+    db.add(general_doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=general_doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called when the named department contradicts symptoms")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    # The card the symptom-triage agent's own reasoning actually showed for the
+    # leg pain — real ground truth the fallback check compares against, since
+    # the keyword-hint table alone (bare "leg"+"pain", no explicit injury verb)
+    # would otherwise guess General Medicine here too and see no contradiction.
+    ortho_card = json.dumps(
+        {
+            "note": "This sounds like something Orthopedics should look at.",
+            "department_name": "Orthopedics",
+            "doctors": [{"doctor_id": "d1", "doctor_name": "Dr. Junaid Mirza", "specialization": None, "slots": []}],
+        }
+    )
+    history = [
+        _row("user", "i have severe pain in my leg"),
+        _row("assistant", "Is the pain severe, moderate, or mild, and how long have you had it?"),
+        _row("user", "severe"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + ortho_card),
+    ]
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "can u refer me to general doc", "en", history
+    )
+
+    assert "Orthopedics" in result
+    assert "General Medicine" in result
+
+
 def test_run_appointment_agent_warns_when_a_professional_title_names_a_mismatched_department(
     monkeypatch, db, ctx, clinic, patient
 ):
