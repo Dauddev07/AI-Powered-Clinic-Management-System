@@ -104,6 +104,11 @@
   color: var(--app-text-body);
 }
 
+.toneTab:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+}
+
 .toneTabActive {
   background: var(--app-accent);
   border-color: var(--app-accent);
