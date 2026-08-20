@@ -744,6 +744,33 @@ def _detect_action_intent(message: str) -> str | None:
 
 _ACTION_INTENT_LOOKBACK_TURNS = 6
 
+# Reported live: "reschedule it" -> slots shown -> a slot pick started a reschedule
+# confirmation -> "i want to book a new slot" (an explicit retraction — the patient
+# now wants to KEEP the existing appointment and book a separate, new one instead)
+# -> a later slot pick still got silently treated as completing the ORIGINAL
+# reschedule from several turns earlier, producing a reschedule-confirmation prompt
+# for what the patient clearly asked to be a fresh booking. Root cause:
+# _most_recent_action_intent's plain backward scan only skips a turn that has NO
+# reschedule/cancel keyword at all — which is exactly what "book a new slot" looks
+# like to it, so it silently scanned straight past the retraction and resurrected
+# the stale "reschedule" from further back. Requires a booking word AND one of the
+# words below in the SAME message — deliberately narrow, same "no safety asymmetry
+# pushing this broader" reasoning as _detect_action_intent itself: a plain "book
+# <time>" (the ordinary way a patient continues an ALREADY-in-progress reschedule,
+# e.g. step 3 of the reported scenario) must NOT count, or every live reschedule
+# would be wrongly dropped the moment the patient names a new time for it.
+_NEW_BOOKING_SUPERSEDE_WORDS = frozenset({"new", "another", "separate", "different", "additional", "second"})
+_BOOKING_VERB_WORDS = frozenset({"book", "booking"})
+
+
+def _detect_new_booking_supersede_intent(message: str) -> bool:
+    """True when the message explicitly asks to book a NEW/separate appointment —
+    e.g. "book a new slot", "I want to book another appointment" — which supersedes
+    (rather than merely fails to restate) any earlier reschedule/cancel intent found
+    further back in _most_recent_action_intent's lookback scan."""
+    words = set(re.findall(r"[a-z0-9']+", message.lower()))
+    return bool(words & _BOOKING_VERB_WORDS) and bool(words & _NEW_BOOKING_SUPERSEDE_WORDS)
+
 
 def _most_recent_action_intent(history: list[ConversationMemory]) -> str | None:
     """Recovers a cancel/reschedule action stated a turn or two ago, for when the
@@ -751,8 +778,28 @@ def _most_recent_action_intent(history: list[ConversationMemory]) -> str | None:
     action verb (e.g. "I mean Dr. X" sent again after the assistant already acted
     on their first request, expecting that same context to still apply). Bounded
     lookback over user turns only, so this can't reach back into an unrelated,
-    much older part of the conversation."""
-    return _scan_recent_user_messages(history, _detect_action_intent, limit=_ACTION_INTENT_LOOKBACK_TURNS)
+    much older part of the conversation.
+
+    A later turn that explicitly asks to book a new/separate appointment (see
+    _detect_new_booking_supersede_intent above) stops the scan outright and reports
+    no active action at all, rather than being skipped over like an ordinary
+    non-matching turn — see this function's own module comment above for the live
+    report this closes. Deliberately NOT built on the shared
+    _scan_recent_user_messages helper (unlike _most_recently_named_doctor above):
+    that helper only supports "skip and keep scanning" or "stop and return a
+    result," with no way to express "stop and return NOTHING," which is exactly
+    what a superseding turn needs to do here.
+    """
+    user_messages = [
+        getattr(row, "content", "") or "" for row in history if getattr(row, "role", None) == "user"
+    ][-_ACTION_INTENT_LOOKBACK_TURNS:]
+    for content in reversed(user_messages):
+        if _detect_new_booking_supersede_intent(content):
+            return None
+        action = _detect_action_intent(content)
+        if action is not None:
+            return action
+    return None
 
 
 # Reported live: patient described fever + body aches (correctly routed to General

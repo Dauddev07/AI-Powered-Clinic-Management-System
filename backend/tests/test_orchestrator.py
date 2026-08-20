@@ -3943,6 +3943,102 @@ def test_detect_action_intent_respects_local_negation(message, expected):
     assert appointment_agent._detect_action_intent(message) == expected
 
 
+# --- new-booking intent supersedes a stale reschedule/cancel (_most_recent_action_intent) --
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("i want to book a new slot", True),
+        ("book me another appointment", True),
+        ("I'd like to book a separate appointment", True),
+        ("can you book a different appointment for me", True),
+        # A plain "book <time>" — the ordinary way a patient continues an
+        # already-in-progress reschedule — must NOT count, or a live reschedule
+        # would be wrongly dropped the moment the patient names a time for it.
+        ("book on aug 21 at 8.30 am", False),
+        ("book with dr farhan malik at 11am", False),
+        # "new"/"another" alone, with no booking verb, isn't a booking statement at all.
+        ("what's new with my appointment", False),
+    ],
+)
+def test_detect_new_booking_supersede_intent(message, expected):
+    assert appointment_agent._detect_new_booking_supersede_intent(message) == expected
+
+
+def test_most_recent_action_intent_stops_at_a_superseding_new_booking_turn():
+    # Reported live (see the full scenario replicated in
+    # test_run_appointment_agent_new_booking_request_supersedes_a_stale_reschedule
+    # below): "i wanna reschedule it" (turn 1) ... "i want to book a new slot"
+    # (turn 2, a retraction with no reschedule/cancel keyword of its own) — the old
+    # plain backward scan skipped straight past turn 2 (nothing to match) and
+    # resurrected turn 1's stale "reschedule". The scan must stop at turn 2 instead.
+    history = [
+        _row("user", "i wanna reschedule it"),
+        _row("assistant", "Here are the available slots..."),
+        _row("user", "i want to book a new slot"),
+        _row("assistant", "Here's what's available..."),
+    ]
+    assert appointment_agent._most_recent_action_intent(history) is None
+
+
+def test_most_recent_action_intent_still_recovers_a_stale_action_with_no_intervening_supersede():
+    # Unchanged behavior: a doctor-name-only reply a turn or two after a real
+    # reschedule/cancel request must still recover that action when nothing in
+    # between retracted it.
+    history = [
+        _row("user", "i wanna reschedule it"),
+        _row("assistant", "Which doctor?"),
+    ]
+    assert appointment_agent._most_recent_action_intent(history) == "reschedule"
+
+
+def test_run_appointment_agent_new_booking_request_supersedes_a_stale_reschedule(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    # Full reported scenario: patient has a confirmed appointment with `doctor`,
+    # asks to reschedule it (slots shown), then changes their mind mid-flow and
+    # says they want to book a NEW, separate slot instead (keeping the original),
+    # then names the doctor again with a specific time. This must be treated as a
+    # fresh booking request — never silently folded back into the original
+    # reschedule (previously produced a "Just to confirm — reschedule..." reply
+    # for what the patient explicitly asked to be a new booking).
+    _future_appointment(db, clinic, patient, doctor, days_from_now=1)
+
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["system_prompt"] = system_prompt
+        return "Here are the available slots for a new booking."
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+
+    history = [
+        _row("user", "i wanna reschedule it"),
+        _row("assistant", "Here are the available slots..."),
+        _row("user", "book on aug 21 at 8.30 am"),
+        _row("assistant", "Would you like to change it to the 8:30 AM slot? Reply yes or no."),
+        _row("user", "i want to book a new slot"),
+        _row("assistant", "Here's what's available..."),
+    ]
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, f"I'd like to book the appointment with {doctor.full_name} at 8:30 AM.", "en", history
+    )
+
+    assert "reschedule" not in result.lower()
+    # The system prompt built for the LLM must not carry _build_system_prompt's
+    # RESOLVED APPOINTMENT / "This is a RESCHEDULE:" block — that's what forces
+    # book_appointment calls to be silently redirected into reschedule_appointment
+    # (see build_tools' reschedule_redirect_appointment_id in chat_tools.py). Checked
+    # via these exact marker strings (not a blanket "reschedule" substring check) —
+    # the prompt's general tool-usage rules mention reschedule_appointment by name
+    # unconditionally, so only the RESOLVED-appointment block's own distinctive
+    # wording actually proves the stale action didn't get resolved.
+    system_prompt = captured.get("system_prompt", "")
+    assert "RESOLVED APPOINTMENT" not in system_prompt
+    assert "This is a RESCHEDULE:" not in system_prompt
+
+
 def test_run_appointment_agent_does_not_treat_a_retracted_reschedule_as_a_live_action(
     monkeypatch, db, ctx, doctor
 ):
