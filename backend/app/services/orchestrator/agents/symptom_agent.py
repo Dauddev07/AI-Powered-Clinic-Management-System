@@ -53,6 +53,7 @@ from app.services.message_classifier import (
 )
 from app.services.orchestrator.symptom_hints import (
     departments_hinted_by_patient_symptom_words,
+    symptom_words_with_no_matching_department,
     unsupported_symptom_labels,
 )
 
@@ -418,17 +419,44 @@ def run_symptom_agent(
     # complaint that also names something this clinic DOES treat (e.g. "urinary
     # pain and chest pain") still gets that real department normally; the
     # unsupported part simply isn't separately called out in that case.
+    #
+    # Instructed live (general case): the hardcoded _ORPHAN_SYMPTOM_CATEGORIES
+    # list above only ever covers categories someone happened to add — any OTHER
+    # symptom this clinic can't treat used to be left to the LLM to freehand a
+    # guess (the same class of bug as the old brain-tumor->Neurology mistake).
+    # symptom_words_with_no_matching_department checks the WHOLE symptom-hint
+    # table generically, so any symptom category it already knows about gets
+    # this same honest treatment — and, unlike the hardcoded list, it also names
+    # the specialty the patient should look for elsewhere (e.g. "Oncology"),
+    # since knowing that only matters once you already know it isn't here.
+    hinted = departments_hinted_by_patient_symptom_words(message, history, department_names, set())
     unsupported = unsupported_symptom_labels(message, history, department_names)
-    if unsupported and not departments_hinted_by_patient_symptom_words(message, history, department_names, set()):
-        labels_text = " or ".join(unsupported)
+    unmatched = symptom_words_with_no_matching_department(message, history, department_names)
+    if (unsupported or unmatched) and not hinted:
+        seen_labels: set[str] = set()
+        clauses_en: list[str] = []
+        clauses_ur: list[str] = []
+        for label in unsupported:
+            if label in seen_labels:
+                continue
+            seen_labels.add(label)
+            clauses_en.append(f"a specialist department for {label}")
+            clauses_ur.append(f"{label} کے لیے کوئی مخصوص شعبہ")
+        for label, canonical_name in unmatched:
+            if label in seen_labels:
+                continue
+            seen_labels.add(label)
+            clauses_en.append(f"a {canonical_name} department for {label}")
+            clauses_ur.append(f"{label} کے لیے {canonical_name} کا شعبہ")
+        clauses_text_en = " or ".join(clauses_en)
+        clauses_text_ur = " یا ".join(clauses_ur)
         return (
-            f"I'm sorry, this clinic doesn't have a specialist department for {labels_text}. "
-            "I'd recommend reaching out to a specialist clinic for this. Is there anything else "
-            "I can help you with?"
+            f"I'm sorry, this clinic doesn't have {clauses_text_en}. I'd recommend visiting another "
+            "hospital or clinic for this. Is there anything else I can help you with?"
             if language != "ur"
             else (
-                f"معذرت، اس کلینک میں {labels_text} کے لیے کوئی مخصوص شعبہ دستیاب نہیں ہے۔ "
-                "براہ کرم اس کے لیے کسی متعلقہ ماہر سے رجوع کریں۔ کیا میں کسی اور معاملے میں "
+                f"معذرت، اس کلینک میں {clauses_text_ur} دستیاب نہیں ہے۔ "
+                "براہ کرم اس کے لیے کسی دوسرے ہسپتال یا کلینک سے رجوع کریں۔ کیا میں کسی اور معاملے میں "
                 "آپ کی مدد کر سکتا ہوں؟"
             )
         )

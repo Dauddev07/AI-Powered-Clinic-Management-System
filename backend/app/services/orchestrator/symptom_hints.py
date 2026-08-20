@@ -385,16 +385,7 @@ _LIGHTHEADED_ENT_SIGNAL_WORDS = frozenset({
 })
 
 
-def departments_hinted_by_patient_symptom_words(
-    message: str, history: list[ConversationMemory], department_names: list[str], already_covered: set[str]
-) -> dict[str, str]:
-    """Returns {department_name: symptom_label} for every real, active,
-    not-yet-covered department a symptom category the PATIENT mentioned (this
-    message and/or their own earlier turns, never the assistant's) points to.
-    Pass message="" to scan only prior history (e.g. when checking what the
-    patient has described SO FAR in the session, independent of a current
-    message that isn't itself symptom-shaped, like a booking request or a
-    "what do you recommend" question)."""
+def _symptom_words_from(message: str, history: list[ConversationMemory]) -> set[str]:
     patient_texts = [message] + [
         getattr(row, "content", "") or "" for row in history if getattr(row, "role", None) == "user"
     ]
@@ -405,15 +396,23 @@ def departments_hinted_by_patient_symptom_words(
     # Normalizing the space/hyphen variants to the single-token spelling before
     # tokenizing catches all three ways a patient might type it.
     joined = re.sub(r"light[\s-]+headed(ness)?", r"lightheaded\1", joined)
-    words = set(re.findall(r"[a-z0-9]+", joined))
-    hinted_substrings: dict[str, str] = {}
+    return set(re.findall(r"[a-z0-9]+", joined))
+
+
+# Extracted out of departments_hinted_by_patient_symptom_words below so
+# symptom_words_with_no_matching_department can share the exact same matched
+# groups (hints alternatives + label) without duplicating every conditional
+# branch's logic a second time and risking the two drifting apart.
+def _matched_hint_groups(
+    words: set[str], already_covered: set[str]
+) -> list[tuple[tuple[str, ...], str]]:
+    groups: list[tuple[tuple[str, ...], str]] = []
     for keywords, hints, label in SYMPTOM_DEPARTMENT_HINTS:
         if words & keywords:
-            for hint in hints:
-                hinted_substrings.setdefault(hint, label)
+            groups.append((hints, label))
     if words & _LIMB_JOINT_WORDS:
         if words & _LIMB_JOINT_INJURY_SIGNAL_WORDS:
-            hinted_substrings.setdefault("ortho", "limb/joint injury symptoms")
+            groups.append((("ortho",), "limb/joint injury symptoms"))
         else:
             # Reported live: a patient described hand swelling + chest pain; the
             # LLM's OWN tool call had already (correctly) shown Orthopedics for the
@@ -433,21 +432,36 @@ def departments_hinted_by_patient_symptom_words(
                 re.search(r"\bortho", name.lower()) for name in already_covered
             )
             if not already_covered_by_ortho:
-                for hint in ("general medicine", "internal medicine", "family medicine"):
-                    hinted_substrings.setdefault(hint, "limb/joint pain")
+                groups.append((("general medicine", "internal medicine", "family medicine"), "limb/joint pain"))
     if words & _LOW_MOOD_PASSING_WORDS and words & _LOW_MOOD_PERSISTENCE_WORDS:
-        hinted_substrings.setdefault("psych", "low mood")
+        groups.append((("psych",), "low mood"))
     if "head" in words and words & _GENERIC_PAIN_WORDS:
-        for hint in ("general medicine", "internal medicine", "family medicine"):
-            hinted_substrings.setdefault(hint, "head pain")
+        groups.append((("general medicine", "internal medicine", "family medicine"), "head pain"))
     if words & {"neck", "necks"} and not (words & _NECK_NEUROLOGICAL_SIGNAL_WORDS):
-        hinted_substrings.setdefault("ortho", "neck/joint pain")
+        groups.append((("ortho",), "neck/joint pain"))
     if words & {"lightheaded", "lightheadedness"}:
         if words & _LIGHTHEADED_ENT_SIGNAL_WORDS:
-            hinted_substrings.setdefault("ent", "lightheadedness with vertigo/ear symptoms")
+            groups.append((("ent", "otolaryn"), "lightheadedness with vertigo/ear symptoms"))
         else:
-            for hint in ("general medicine", "internal medicine", "family medicine"):
-                hinted_substrings.setdefault(hint, "lightheadedness")
+            groups.append((("general medicine", "internal medicine", "family medicine"), "lightheadedness"))
+    return groups
+
+
+def departments_hinted_by_patient_symptom_words(
+    message: str, history: list[ConversationMemory], department_names: list[str], already_covered: set[str]
+) -> dict[str, str]:
+    """Returns {department_name: symptom_label} for every real, active,
+    not-yet-covered department a symptom category the PATIENT mentioned (this
+    message and/or their own earlier turns, never the assistant's) points to.
+    Pass message="" to scan only prior history (e.g. when checking what the
+    patient has described SO FAR in the session, independent of a current
+    message that isn't itself symptom-shaped, like a booking request or a
+    "what do you recommend" question)."""
+    words = _symptom_words_from(message, history)
+    hinted_substrings: dict[str, str] = {}
+    for hints, label in _matched_hint_groups(words, already_covered):
+        for hint in hints:
+            hinted_substrings.setdefault(hint, label)
     if not hinted_substrings:
         return {}
     # Anchored to the START of a word only (not "anywhere inside one") — e.g. the
@@ -463,6 +477,74 @@ def departments_hinted_by_patient_symptom_words(
                 missing[name] = label
                 break
     return missing
+
+
+# Human-readable specialty name for every hint substring used anywhere above —
+# used only to tell a patient what KIND of specialist to look for elsewhere when
+# this clinic has no matching department at all (see
+# symptom_words_with_no_matching_department below). Keyed by the same substrings
+# SYMPTOM_DEPARTMENT_HINTS/the conditional branches already use, so this can never
+# reference a hint that doesn't actually exist in the table.
+_HINT_CANONICAL_DEPARTMENT_NAMES: dict[str, str] = {
+    "derma": "Dermatology",
+    "ent": "ENT",
+    "otolaryn": "ENT",
+    "ear": "ENT",
+    "ophthal": "Ophthalmology",
+    "eye": "Ophthalmology",
+    "dent": "Dentistry",
+    "ortho": "Orthopedics",
+    "general medicine": "General Medicine",
+    "internal medicine": "Internal Medicine",
+    "family medicine": "Family Medicine",
+    "cardio": "Cardiology",
+    "gastro": "Gastroenterology",
+    "urolog": "Urology",
+    "psych": "Psychiatry",
+    "pulmon": "Pulmonology",
+    "respiratory": "Pulmonology",
+    "endocrin": "Endocrinology",
+    "oncol": "Oncology",
+    "neuro": "Neurology",
+    "gynec": "Gynecology",
+}
+
+
+def symptom_words_with_no_matching_department(
+    message: str, history: list[ConversationMemory], department_names: list[str]
+) -> list[tuple[str, str]]:
+    """Returns [(symptom_label, canonical_department_name), ...] for every real
+    symptom category the PATIENT described (this message and/or their own
+    earlier turns) that NONE of this clinic's real, active departments can
+    treat — i.e. every hint alternative for that category failed to match any
+    real department name. General counterpart to _ORPHAN_SYMPTOM_CATEGORIES
+    (which only covers a short hardcoded list): this instead checks the WHOLE
+    symptom-hint table, so any symptom category this table already knows about
+    gets the same honest treatment, not just the categories someone happened to
+    hardcode. `canonical_department_name` is the specialty the patient should
+    look for at another clinic (e.g. "Oncology"), taken from the category's
+    most specific hint substring — shown to the patient so they know what to
+    search for, since this clinic genuinely doesn't have it."""
+    words = _symptom_words_from(message, history)
+    groups = _matched_hint_groups(words, set())
+    if not groups:
+        return []
+    lowered_department_names = [name.lower() for name in department_names]
+
+    def hint_matches_a_real_department(hint: str) -> bool:
+        return any(re.search(rf"\b{re.escape(hint)}", name) for name in lowered_department_names)
+
+    unmatched: list[tuple[str, str]] = []
+    seen_labels: set[str] = set()
+    for hints, label in groups:
+        if label in seen_labels:
+            continue
+        if any(hint_matches_a_real_department(hint) for hint in hints):
+            continue
+        seen_labels.add(label)
+        canonical_name = _HINT_CANONICAL_DEPARTMENT_NAMES.get(hints[0], hints[0].title())
+        unmatched.append((label, canonical_name))
+    return unmatched
 
 
 # Symptom categories with NO reliable specific-specialty department at a typical

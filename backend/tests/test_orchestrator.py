@@ -1224,7 +1224,7 @@ def test_run_symptom_agent_recommendation_request_falls_through_when_nothing_hin
 
 
 def test_run_symptom_agent_first_message_combining_symptoms_and_recommendation_still_gets_normal_triage(
-    monkeypatch, db, ctx
+    monkeypatch, db, ctx, clinic
 ):
     # Reported live: "I am having a bit of fever and body aches, what do you
     # recommend?" — symptom description AND the recommendation phrase in the SAME,
@@ -1233,6 +1233,12 @@ def test_run_symptom_agent_first_message_combining_symptoms_and_recommendation_s
     # first for a symptom nobody has triaged yet. Since this is the FIRST mention of
     # the symptom (nothing in prior history), this must still go through the normal
     # LLM triage flow, not the deterministic recommendation short-circuit.
+    # A real General Medicine department is required so "fever and body aches"
+    # resolves to something real — otherwise the general "no matching
+    # department" apology (symptom_words_with_no_matching_department) would
+    # short-circuit before any of this test's logic is even reached.
+    _make_dept_with_slot(db, clinic, "General Medicine")
+
     monkeypatch.setattr(
         symptom_agent.llm,
         "run_tool_calling_agent",
@@ -1247,7 +1253,9 @@ def test_run_symptom_agent_first_message_combining_symptoms_and_recommendation_s
 
 
 @pytest.mark.parametrize("message", ["I am having pain in my jaw", "I am haiving nausea.."])
-def test_run_symptom_agent_deterministically_asks_before_a_brand_new_first_message_symptom(monkeypatch, db, ctx, message):
+def test_run_symptom_agent_deterministically_asks_before_a_brand_new_first_message_symptom(
+    monkeypatch, db, ctx, clinic, message
+):
     # Reported live TWICE despite an explicit prompt instruction telling the model
     # not to do this ("MOST COMMON WAY THIS RULE GETS BROKEN" in llm.py's PATH 3):
     # a bare, mild-sounding symptom as the very first message of a brand new
@@ -1255,6 +1263,12 @@ def test_run_symptom_agent_deterministically_asks_before_a_brand_new_first_messa
     # questions. The prompt instruction alone wasn't a reliable enough guarantee,
     # so this is now a deterministic backstop — the LLM must not even be called
     # for this shape of message.
+    # A real Dentistry department is required so "pain in my jaw" resolves to
+    # something real — otherwise the general "no matching department" apology
+    # would short-circuit before this backstop is even reached. Irrelevant to
+    # the "nausea" case (that message hints nothing either way).
+    _make_dept_with_slot(db, clinic, "Dentistry")
+
     def _fail_if_called(*args, **kwargs):
         raise AssertionError("run_tool_calling_agent must not be called for a brand-new first-message symptom")
 
@@ -1266,11 +1280,16 @@ def test_run_symptom_agent_deterministically_asks_before_a_brand_new_first_messa
     assert "how long" in result.lower()
 
 
-def test_run_symptom_agent_first_message_backstop_skips_when_duration_and_severity_already_given(monkeypatch, db, ctx):
+def test_run_symptom_agent_first_message_backstop_skips_when_duration_and_severity_already_given(
+    monkeypatch, db, ctx, clinic
+):
     # PATH 3's own stated exception: duration + severity already given together
     # means genuine clarification already happened, so the normal LLM triage flow
     # runs as usual instead of the deterministic backstop re-asking for the same
-    # info the patient already provided.
+    # info the patient already provided. A real Dentistry department is required
+    # so "jaw pain" resolves to something real — see the sibling test above.
+    _make_dept_with_slot(db, clinic, "Dentistry")
+
     monkeypatch.setattr(
         symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Let me check availability for you."
     )
@@ -1281,7 +1300,7 @@ def test_run_symptom_agent_first_message_backstop_skips_when_duration_and_severi
 
 
 @pytest.mark.parametrize("message", ["i have diabetes", "i think i have diabetes"])
-def test_run_symptom_agent_first_message_backstop_skips_self_diagnosis_claims(monkeypatch, db, ctx, message):
+def test_run_symptom_agent_first_message_backstop_skips_self_diagnosis_claims(monkeypatch, db, ctx, clinic, message):
     # Self-diagnosis claims are deliberately excluded from the backstop — asking
     # "is that mild, moderate, or severe?" in response to "I have diabetes"
     # reads as dismissive for something a patient is already alarmed about; the
@@ -1291,7 +1310,11 @@ def test_run_symptom_agent_first_message_backstop_skips_self_diagnosis_claims(mo
     # orphan words that short-circuit to the honest apology before the LLM is
     # even called (see test_run_symptom_agent_apologizes_for_a_bare_cancer_or_
     # tumor_self_diagnosis_claim below), so they no longer exercise this
-    # specific backstop-skip path.
+    # specific backstop-skip path. A real General Medicine department is
+    # required so "diabetes" resolves to something real — otherwise the
+    # general "no matching department" apology would short-circuit first.
+    _make_dept_with_slot(db, clinic, "General Medicine")
+
     monkeypatch.setattr(
         symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Let me check availability for you."
     )
@@ -1301,11 +1324,17 @@ def test_run_symptom_agent_first_message_backstop_skips_self_diagnosis_claims(mo
     assert result == "Let me check availability for you."
 
 
-def test_run_symptom_agent_first_message_backstop_does_not_apply_once_history_exists(monkeypatch, db, ctx):
+def test_run_symptom_agent_first_message_backstop_does_not_apply_once_history_exists(monkeypatch, db, ctx, clinic):
     # The backstop is deliberately scoped to no REAL symptom having been described
     # yet — once a prior turn already described one (a headache here), the normal
     # LLM triage flow (which already has real conversation context to reason from)
-    # applies, regardless of whether `history` is literally empty.
+    # applies, regardless of whether `history` is literally empty. A real General
+    # Medicine department is required so "headache" resolves to something real —
+    # otherwise the general "no matching department" apology would short-circuit
+    # first (the "jaw" in the current message wouldn't resolve on its own, but
+    # the headache from history resolving is enough to clear that gate).
+    _make_dept_with_slot(db, clinic, "General Medicine")
+
     monkeypatch.setattr(
         symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Let me check availability for you."
     )
@@ -1689,7 +1718,11 @@ def test_run_symptom_agent_keeps_a_valid_path1_emergency_reply_intact(monkeypatc
     # produced this exact reply, but the patient received a Cardiology booking
     # card instead, because the advice-dump recovery discarded it and rebuilt a
     # department card from symptom keywords. This confirms the reply now survives
-    # untouched instead.
+    # untouched instead. A real Cardiology department is required so "chest pain"
+    # resolves to something real — otherwise the general "no matching
+    # department" apology would short-circuit before the LLM is even called.
+    _make_dept_with_slot(db, clinic, "Cardiology")
+
     emergency_reply = (
         "This sounds like an emergency—please call 1122 or go to the nearest ER right away.\n"
         "1) Sit down, stay calm, and loosen any tight clothing.\n"
@@ -1983,7 +2016,16 @@ def test_run_symptom_agent_recovers_when_the_model_names_a_real_department_in_pl
     assert "Orthopedics department" not in result
 
 
-def test_run_symptom_agent_does_not_hint_a_department_with_no_matching_symptom_words(monkeypatch, db, ctx):
+def test_run_symptom_agent_does_not_hint_a_department_with_no_matching_symptom_words(monkeypatch, db, ctx, clinic):
+    # A real Cardiology department is created here matching what the model's own
+    # card already claims — the general "no matching department" apology (see
+    # symptom_words_with_no_matching_department) would otherwise short-circuit
+    # "chest pain" before the LLM is even called, at a clinic with no Cardiology
+    # at all; this test is specifically about the DOWNSTREAM correction-net
+    # logic (hinted_for_primary), which needs a real matching department to
+    # reach at all.
+    _make_dept_with_slot(db, clinic, "Cardiology")
+
     card = json.dumps(
         {
             "note": "Based on your description, this sounds like something Cardiology should look at.",
@@ -2275,8 +2317,13 @@ def test_run_symptom_agent_leaves_a_diagnostic_reply_alone_when_no_department_ca
 
 
 def test_run_symptom_agent_does_not_refetch_when_note_only_names_the_already_covered_department(
-    monkeypatch, db, ctx
+    monkeypatch, db, ctx, clinic
 ):
+    # A real Cardiology department is created here so the general "no matching
+    # department" apology doesn't short-circuit "chest pain" before the LLM is
+    # even called — see the sibling test above for why.
+    _make_dept_with_slot(db, clinic, "Cardiology")
+
     card = json.dumps(
         {
             "note": "Based on your description, this sounds like something Cardiology should look at.",

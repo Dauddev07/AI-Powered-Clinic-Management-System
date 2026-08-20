@@ -2,6 +2,7 @@ import pytest
 
 from app.services.orchestrator.symptom_hints import (
     departments_hinted_by_patient_symptom_words,
+    symptom_words_with_no_matching_department,
     unsupported_symptom_labels,
 )
 
@@ -98,6 +99,51 @@ def test_orphan_symptom_category_hints_real_department_when_clinic_has_one():
     )
     assert hinted == {"Urology": "groin/testicular symptoms"}
     assert unsupported_symptom_labels("I have testicular pain", [], departments_with_urology) == []
+
+
+# Instructed live: the hardcoded _ORPHAN_SYMPTOM_CATEGORIES list only ever
+# covers a symptom category someone happened to add — any OTHER symptom this
+# clinic can't treat used to be left to the LLM to freehand a guess (the same
+# class of bug as the old brain-tumor->Neurology mistake). This general
+# function checks the WHOLE symptom-hint table, not just the hardcoded list,
+# and names the specialty the patient should look for elsewhere.
+@pytest.mark.parametrize(
+    "message, expected_label, expected_department",
+    [
+        ("I have testicular pain", "groin/testicular symptoms", "Urology"),  # already in the orphan list too
+        ("I have kidney pain and blood in my urine", "urinary symptoms", "Urology"),
+        ("I think I have cancer", "cancer/tumor-related symptoms", "Oncology"),
+    ],
+)
+def test_symptom_words_with_no_matching_department_names_the_missing_specialty(
+    message, expected_label, expected_department
+):
+    # These three symptom categories have NO General Medicine (or any other)
+    # fallback in the hint table — only a genuine Urology/Oncology match would
+    # resolve them, and DEPARTMENTS above has neither, so all three are
+    # genuinely unmatched with a specific specialty name to suggest.
+    assert departments_hinted_by_patient_symptom_words(message, [], DEPARTMENTS, set()) == {}
+    result = symptom_words_with_no_matching_department(message, [], DEPARTMENTS)
+    assert (expected_label, expected_department) in result
+
+
+def test_symptom_words_with_no_matching_department_does_not_flag_a_category_with_a_real_fallback():
+    # "my stomach hurts" hints Gastroenterology first but falls back to General
+    # Medicine — DEPARTMENTS has General Medicine, so this must NOT be reported
+    # as unmatched, unlike the no-fallback categories above.
+    assert symptom_words_with_no_matching_department("my stomach hurts", [], DEPARTMENTS) == []
+
+
+def test_symptom_words_with_no_matching_department_returns_nothing_when_a_real_department_covers_it():
+    # "chest pain" resolves via the real Cardiology department already in
+    # DEPARTMENTS — must not also be reported as unmatched.
+    result = symptom_words_with_no_matching_department("I have chest pain", [], DEPARTMENTS)
+    assert result == []
+
+
+def test_symptom_words_with_no_matching_department_returns_nothing_for_non_symptom_text():
+    result = symptom_words_with_no_matching_department("hi, how are you?", [], DEPARTMENTS)
+    assert result == []
 
 
 def test_orphan_symptom_category_does_not_fire_when_something_real_is_also_hinted():
