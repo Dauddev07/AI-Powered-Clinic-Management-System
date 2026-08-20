@@ -168,6 +168,22 @@ def _is_short_affirmative_reply(message: str) -> bool:
 # a booking action, never a bare availability check, regardless of what else it names.
 _EXPLICIT_SLOT_ID_RE = re.compile(r"slot_id:\s*[0-9a-f-]{8,}", re.IGNORECASE)
 
+# Same "re-showed the same card instead of ever reaching book_appointment" failure
+# shape as _EXPLICIT_SLOT_ID_RE above, one level earlier: a message with an explicit
+# BOOKING VERB plus a concrete TIME ("book with dr X on sat aug 22 at 8 am") never
+# carries a raw slot_id at all — that only exists after the patient clicks a button
+# — so it needs its own signal to keep the doctor-narrowing short-circuit below from
+# intercepting it. Deliberately requires BOTH the verb AND a real clock time (not
+# "book" alone): "book with Dr. Ahmed Khan" names no specific slot yet — that's
+# still a genuine narrowing request ("show me his slots so I can pick one"), and
+# must keep hitting the short-circuit below exactly as before, or a doctor already
+# narrowed to would incorrectly fall through to the LLM with nothing to book.
+_EXPLICIT_BOOK_INTENT_RE = re.compile(r"\bbook(?:ing)?\b", re.IGNORECASE)
+
+
+def _message_expresses_a_specific_slot_pick_intent(message: str) -> bool:
+    return bool(_EXPLICIT_BOOK_INTENT_RE.search(message)) and resolve_time_of_day_window(message) is not None
+
 # Reported live: "dr ahmed rana in pulmonology dept" (no such doctor at this clinic)
 # silently showed the WHOLE Pulmonology department's real doctors (Dr. Babar Ali —
 # a completely different person) instead of telling the patient plainly that
@@ -1664,11 +1680,27 @@ def run_appointment_agent(
     # question exists is to check availability for THAT one doctor — the "yes"
     # confirming it is never a request to broaden back out to the department, so
     # confirmed_via_affirmative is now treated the same way.
+    #
+    # Reported live (4th report): a doctor+department already shown, then "book
+    # with dr shahid sheikh on sat aug 22 at 8 am" — a real, explicit slot pick
+    # (doctor, date, AND time all named, plus the word "book") — matched
+    # direct_name_match_this_turn and fired this short-circuit anyway, which
+    # re-fetched and re-displayed the SAME availability card instead of ever
+    # booking anything: this deterministic path has no way to resolve a
+    # specific slot_id from natural language at all, only to filter/re-show
+    # availability, so a message asking to actually BOOK a specific slot needs
+    # the LLM/tool-calling path below instead — that's the one place
+    # PREVIOUSLY SHOWN OPTIONS gets matched against the patient's wording to
+    # find the real slot_id and call book_appointment (see this module's own
+    # top-of-file docstring, step 2). Recognizing "book" here and stepping
+    # aside is a narrow, additive exception — every other narrowing trigger
+    # above is unaffected for a plain "show me his slots"/"yes" style message.
     if (
         resolved_match is not None
         and doctor_already_shown
         and resolved_appointment is None
         and not _message_has_explicit_slot_id(message)
+        and not _message_expresses_a_specific_slot_pick_intent(message)
         and (
             _message_or_pending_name_disambiguation_asks_to_narrow(message, history)
             or _message_references_a_doctor_by_pronoun(message)

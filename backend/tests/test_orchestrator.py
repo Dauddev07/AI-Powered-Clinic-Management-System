@@ -3712,6 +3712,104 @@ def test_run_appointment_agent_narrows_shown_card_to_one_named_doctor_on_request
     assert [d["doctor_name"] for d in payload["doctors"]] == ["Dr. Farhan Rehman"]
 
 
+def test_run_appointment_agent_book_with_specific_slot_falls_through_to_llm_instead_of_renarrowing(
+    monkeypatch, db, ctx, clinic, department
+):
+    # Reported live: after a card showed Dr. Shahid Sheikh's Dermatology slots,
+    # "book with dr shahid sheikh on sat aug 22 at 8 am" — an explicit booking
+    # instruction naming the doctor, date, AND time — matched
+    # direct_name_match_this_turn and fired the doctor-narrowing short-circuit,
+    # which has no way to resolve a specific slot_id from natural language at
+    # all: it just re-fetched and re-displayed the SAME availability card
+    # instead of ever booking anything. The word "book" now steers this to the
+    # LLM/tool-calling path instead — the one place PREVIOUSLY SHOWN OPTIONS
+    # actually gets matched against the patient's wording to find the real
+    # slot_id and call book_appointment.
+    from app.models.doctor import Doctor
+
+    sheikh = Doctor(
+        clinic_id=clinic.id, department_id=department.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Shahid Sheikh", is_active=True,
+    )
+    db.add(sheikh)
+    db.flush()
+
+    calls = []
+
+    def _record_call(system_prompt, message, history, tools):
+        calls.append(message)
+        return "booked"
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _record_call)
+
+    card = json.dumps(
+        {
+            "department_name": "Cardiology",
+            "doctors": [{"doctor_name": "Dr. Shahid Sheikh", "specialization": None, "slots": []}],
+        }
+    )
+    history = [_row("assistant", DOCTOR_OPTIONS_MARKER + card)]
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "book with dr shahid sheikh on sat aug 22 at 8 am", "en", history
+    )
+
+    assert result == "booked"
+    assert len(calls) == 1
+
+
+def test_run_appointment_agent_narrowing_without_book_word_still_short_circuits(
+    monkeypatch, db, ctx, clinic, department
+):
+    # Companion to the "book" fix above: a plain re-narrowing request with NO
+    # booking verb (just re-asking for the same doctor's slots at a specific
+    # time) must still hit the deterministic short-circuit as before — the fix
+    # is scoped narrowly to messages that actually say "book", not a blanket
+    # bypass of the whole narrowing mechanism.
+    from datetime import date, datetime, time, timedelta, timezone
+
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    sheikh = Doctor(
+        clinic_id=clinic.id, department_id=department.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Shahid Sheikh", is_active=True,
+    )
+    db.add(sheikh)
+    db.flush()
+
+    forced_window = appointment_agent.resolve_bare_weekday_window("at 8 am on monday")
+    monday = date.fromisoformat(forced_window[0]) if forced_window else (
+        datetime.now(timezone.utc).date() + timedelta(days=1)
+    )
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=sheikh.id,
+        start_utc=datetime.combine(monday, time(8, 0), tzinfo=timezone.utc),
+        end_utc=datetime.combine(monday, time(8, 30), tzinfo=timezone.utc),
+        status="open",
+    ))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("must not reach the LLM for a plain re-narrowing request with no booking verb")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    card = json.dumps(
+        {
+            "department_name": "Cardiology",
+            "doctors": [{"doctor_name": "Dr. Shahid Sheikh", "specialization": None, "slots": []}],
+        }
+    )
+    history = [_row("assistant", DOCTOR_OPTIONS_MARKER + card)]
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "show me available slots of dr shahid sheikh at 8 am", "en", history
+    )
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+
+
 def test_run_appointment_agent_narrowing_phrase_without_prior_card_falls_through_normally(
     monkeypatch, db, ctx, doctor
 ):
