@@ -662,6 +662,19 @@ def _get_my_appointments_impl(db: Session, ctx: ClinicContext, status_filter: st
         stmt = stmt.where(Appointment.status == "cancelled").order_by(
             Appointment.cancelled_at.desc().nullslast(), Slot.start_utc.desc()
         )
+    elif normalized == "missed":
+        # Instructed live: "missed" appointments (booking_engine.confirm_visit's
+        # completed=False path, mapped to the pre-existing 'no_show' status —
+        # see that function's own docstring) had no filter value at all, so
+        # "what appointments have I missed" fell through to the `else` branch
+        # below and returned EVERY status mixed together instead of answering
+        # the actual question. Same "sort by when the action happened, not the
+        # original slot time" fix as "past"/"cancelled" above — no_show is set
+        # via that same status assignment, so `updated_at` is the real
+        # "most recent" signal here too.
+        stmt = stmt.where(Appointment.status == "no_show").order_by(
+            Appointment.updated_at.desc(), Slot.start_utc.desc()
+        )
     else:
         stmt = stmt.order_by(Slot.start_utc.desc())
 
@@ -759,7 +772,12 @@ class _CancelArgs(BaseModel):
 class _GetMyAppointmentsArgs(BaseModel):
     status: str = Field(
         default="all",
-        description="One of: upcoming, past, cancelled, all. Infer from the patient's phrasing (e.g. 'next appointment' -> upcoming, 'last visit' -> past, 'my history' -> all).",
+        description=(
+            "One of: upcoming, past, cancelled, missed, all. Infer from the patient's phrasing "
+            "(e.g. 'next appointment' -> upcoming, 'last visit' -> past, 'appointments I missed'/"
+            "'didn't show up to' -> missed, 'my history' -> all). 'missed' is a DIFFERENT status "
+            "from 'past' — 'past' only means a completed visit, never a missed one."
+        ),
     )
     limit: int = Field(default=10, description="Max number of appointments to return.")
 

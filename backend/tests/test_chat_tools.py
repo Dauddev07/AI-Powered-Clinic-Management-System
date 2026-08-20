@@ -518,6 +518,40 @@ def test_get_my_appointments_past_filter_orders_by_when_it_was_completed_not_slo
     ]
 
 
+def test_get_my_appointments_missed_filter_returns_only_no_show_ordered_by_recency(
+    db, clinic, doctor, patient, ctx
+):
+    # Instructed live: "what appointments have I missed" had no dedicated
+    # filter value at all — 'no_show' (booking_engine.confirm_visit's
+    # completed=False path) fell through to the `else` branch, which returns
+    # every status mixed together, never isolating just the missed ones.
+    # A "past"/completed appointment must never appear in "missed" results,
+    # and vice versa (see the sibling "past" test above).
+    completed_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) - timedelta(days=1))
+    _appointment(db, clinic, patient, doctor, completed_slot, status="completed")
+
+    sooner_missed_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) - timedelta(days=5))
+    later_missed_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) - timedelta(days=20))
+    sooner_missed = _appointment(db, clinic, patient, doctor, sooner_missed_slot, status="no_show")
+    later_missed = _appointment(db, clinic, patient, doctor, later_missed_slot, status="no_show")
+    db.flush()
+
+    # later_missed's slot was further in the past, but was marked no_show MOST
+    # RECENTLY (right now) — sooner_missed was marked no_show earlier.
+    sooner_missed.updated_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    later_missed.updated_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    db.flush()
+
+    result = _get_my_appointments_impl(db, ctx, "missed", 10)
+
+    parsed = json.loads(result)
+    assert [a["appointment_id"] for a in parsed["appointments"]] == [
+        str(later_missed.id),
+        str(sooner_missed.id),
+    ]
+    assert all(a["status"] == "no_show" for a in parsed["appointments"])
+
+
 # --- get_department_availability: minimum slot guarantee + never a raw slot_id -----
 
 
