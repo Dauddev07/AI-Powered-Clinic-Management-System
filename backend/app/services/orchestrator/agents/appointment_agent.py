@@ -82,6 +82,7 @@ from app.services.chat_tools import (
     _clinic_timezone,
     _doctor_options_payload,
     _format_when,
+    _get_my_appointments_impl,
     _no_slots_message,
     book_appointment_now,
     build_tools,
@@ -899,6 +900,65 @@ _HOW_TO_BOOK_REPLY = (
 )
 
 
+# Reported live: "what's my most recent cancelled appointment" got a reply naming
+# a doctor, department, AND date that matched NOTHING in the patient's real
+# appointment history — get_my_appointments is deliberately not a "terminal tool"
+# (its result is meant to be phrased conversationally by the model, see
+# app.services.llm's own comment on why), which left nothing enforcing that the
+# model's final sentence actually reflected the tool's real JSON rather than
+# free-texting a plausible-sounding but fabricated answer. A "most recent
+# cancelled/completed/missed" question is answered ENTIRELY from the real DB
+# instead — same never-let-the-model-freehand-grounded-data principle as every
+# other deterministic reply in this module, and reuses _get_my_appointments_impl's
+# own already-correct "sort by when the status change actually happened, not the
+# slot's original time" ordering (see that function's own comments) rather than
+# re-querying separately.
+_RECENCY_WORD_RE = re.compile(r"\b(most recent(?:ly)?|latest|last)\b", re.IGNORECASE)
+_CANCELLED_STATUS_WORD_RE = re.compile(r"\bcancel+(?:l?ed|lation)?\b", re.IGNORECASE)
+_COMPLETED_STATUS_WORD_RE = re.compile(r"\bcomplet+ed\b|\b(?:past|previous) (?:visit|appointment)\b", re.IGNORECASE)
+_MISSED_STATUS_WORD_RE = re.compile(
+    r"\bmiss(?:ed|ing)?\b|\bno[\s-]?show\b|\bdid ?n[o']?t (?:show|attend|go)\b", re.IGNORECASE
+)
+_STATUS_FILTER_TO_LABEL = {"cancelled": "cancelled", "past": "completed", "missed": "missed"}
+
+
+def _message_asks_for_most_recent_appointment_by_status(message: str) -> str | None:
+    """Returns the get_my_appointments status_filter value ("cancelled", "past",
+    or "missed") if the message is asking for the single most recent appointment
+    of that status, else None. Requires an explicit recency word ("most recent",
+    "latest", "last") — a plain "show my cancelled appointments" (a real LIST
+    request, not a single most-recent one) is deliberately left to the normal
+    LLM/tool-calling flow below, which already handles that fine."""
+    if not _RECENCY_WORD_RE.search(message):
+        return None
+    if _CANCELLED_STATUS_WORD_RE.search(message):
+        return "cancelled"
+    if _COMPLETED_STATUS_WORD_RE.search(message):
+        return "past"
+    if _MISSED_STATUS_WORD_RE.search(message):
+        return "missed"
+    return None
+
+
+def _most_recent_appointment_by_status_reply(db: Session, ctx: ClinicContext, status_filter: str) -> str:
+    label = _STATUS_FILTER_TO_LABEL[status_filter]
+    parsed = json.loads(_get_my_appointments_impl(db, ctx, status_filter, 1))
+    appointments = parsed.get("appointments") or []
+    if not appointments:
+        return f"You don't have any {label} appointments."
+    appt = appointments[0]
+    sentence = (
+        f"Your most recent {label} appointment was with {appt['doctor_name']} in "
+        f"{appt['department_name']}, scheduled for {appt['when']}."
+    )
+    if appt.get("cancelled_when"):
+        sentence += f" It was cancelled on {appt['cancelled_when']}."
+    elif appt.get("status_changed_when"):
+        marked_word = "confirmed completed" if status_filter == "past" else "marked as missed"
+        sentence += f" It was {marked_word} on {appt['status_changed_when']}."
+    return sentence
+
+
 def _doctor_count_note(department_name: str, count: int) -> str:
     """A real, code-computed answer to a "how many doctors" question — never
     left to the model's own note-writing, which live testing showed doesn't
@@ -1254,6 +1314,13 @@ def run_appointment_agent(
     # yet, and the message falls through to the normal LLM/tool-calling flow.
     if _message_asks_how_to_book(message) and _most_recent_availability_marker(history) is not None:
         return _HOW_TO_BOOK_REPLY
+
+    # "What's my most recent cancelled/completed/missed appointment" is answered
+    # entirely from the real DB — see _most_recent_appointment_by_status_reply's
+    # own comment for the reported hallucination this replaces.
+    most_recent_status_filter = _message_asks_for_most_recent_appointment_by_status(message)
+    if most_recent_status_filter is not None:
+        return _most_recent_appointment_by_status_reply(db, ctx, most_recent_status_filter)
 
     pending = _pending_appointment_disambiguation(history)
     if pending is not None:

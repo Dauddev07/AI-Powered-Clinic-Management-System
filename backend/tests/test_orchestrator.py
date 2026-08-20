@@ -2523,6 +2523,162 @@ def test_run_appointment_agent_how_to_book_falls_through_normally_with_no_slots_
     assert result == "some normal reply"
 
 
+def test_run_appointment_agent_answers_most_recent_cancelled_appointment_from_real_db(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    # Reported live: "what's my most recent cancelled appointment" got a reply
+    # naming a doctor, department, AND date that matched NOTHING in the
+    # patient's real appointment history — the LLM fabricated plausible-
+    # sounding but entirely fake details instead of using the tool's real
+    # result. Answered entirely from the real DB now, never reaching the LLM.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.appointment import Appointment
+    from app.models.slot import Slot
+
+    sooner_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="booked",
+    )
+    later_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=10),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=10, minutes=30),
+        status="booked",
+    )
+    db.add_all([sooner_slot, later_slot])
+    db.flush()
+    sooner_appt = Appointment(
+        clinic_id=clinic.id, slot_id=sooner_slot.id, patient_id=patient.id, doctor_id=doctor.id, status="cancelled",
+    )
+    later_appt = Appointment(
+        clinic_id=clinic.id, slot_id=later_slot.id, patient_id=patient.id, doctor_id=doctor.id, status="cancelled",
+    )
+    db.add_all([sooner_appt, later_appt])
+    db.flush()
+    # later_appt's slot is further in the future, but it was cancelled LAST
+    # (most recently) — proves the reply follows cancellation recency, not
+    # slot recency.
+    sooner_appt.cancelled_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    later_appt.cancelled_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for a deterministic recency reply")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "what's my most recent cancelled appointment", "en", []
+    )
+
+    assert doctor.full_name in result
+    assert "cancelled" in result.lower()
+    # The later-scheduled appointment (later_appt) is the one actually cancelled
+    # most recently — its slot is 10 days out, not sooner_appt's 1 day out.
+    from app.services.chat_tools import _format_when
+
+    tz = appointment_agent._clinic_timezone(db, ctx.clinic_id)
+    assert _format_when(later_slot.start_utc, tz) in result
+    assert _format_when(sooner_slot.start_utc, tz) not in result
+
+
+def test_run_appointment_agent_most_recent_cancelled_reply_handles_no_cancelled_appointments(
+    monkeypatch, db, ctx
+):
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM")),
+    )
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "what was my last cancelled appointment", "en", []
+    )
+
+    assert "don't have any cancelled appointments" in result.lower()
+
+
+def test_run_appointment_agent_answers_most_recent_completed_appointment_from_real_db(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.appointment import Appointment
+    from app.models.slot import Slot
+
+    slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) - timedelta(days=3),
+        end_utc=datetime.now(timezone.utc) - timedelta(days=3) + timedelta(minutes=30),
+        status="booked",
+    )
+    db.add(slot)
+    db.flush()
+    appt = Appointment(
+        clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id, status="completed",
+    )
+    db.add(appt)
+    db.flush()
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM")),
+    )
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "what was my most recent completed appointment", "en", []
+    )
+
+    assert doctor.full_name in result
+    assert "completed" in result.lower()
+
+
+def test_run_appointment_agent_answers_most_recent_missed_appointment_from_real_db(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.appointment import Appointment
+    from app.models.slot import Slot
+
+    slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) - timedelta(days=3),
+        end_utc=datetime.now(timezone.utc) - timedelta(days=3) + timedelta(minutes=30),
+        status="booked",
+    )
+    db.add(slot)
+    db.flush()
+    appt = Appointment(
+        clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id, status="no_show",
+    )
+    db.add(appt)
+    db.flush()
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM")),
+    )
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "what appointment did i miss most recently", "en", [])
+
+    assert doctor.full_name in result
+    assert "missed" in result.lower()
+
+
+def test_run_appointment_agent_plain_cancelled_list_request_falls_through_to_llm(monkeypatch, db, ctx):
+    # No recency word ("most recent"/"latest"/"last") — a plain list request is
+    # deliberately left to the normal LLM/tool-calling flow, which already
+    # handles a full list fine.
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", lambda *a, **k: "some normal reply")
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "show my cancelled appointments", "en", [])
+
+    assert result == "some normal reply"
+
+
 def test_run_appointment_agent_recovers_a_doctor_named_only_in_assistant_prose(monkeypatch, db, ctx, doctor):
     """Reported live: "i am having blury vision" got answered by general_info_agent
     with plain KB prose naming a real doctor (never a structured DOCTOR_OPTIONS

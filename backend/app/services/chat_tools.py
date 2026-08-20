@@ -685,15 +685,28 @@ def _get_my_appointments_impl(db: Session, ctx: ClinicContext, status_filter: st
     results = []
     for appointment in appointments:
         out = booking_engine.serialize_appointment(db, appointment)
-        results.append(
-            {
-                "appointment_id": str(out.id),
-                "doctor_name": out.doctor_name,
-                "department_name": out.department_name,
-                "when": _format_when(out.start_utc, tz),
-                "status": out.status,
-            }
-        )
+        entry = {
+            "appointment_id": str(out.id),
+            "doctor_name": out.doctor_name,
+            "department_name": out.department_name,
+            "when": _format_when(out.start_utc, tz),
+            "status": out.status,
+        }
+        # Reported live: a "most recent cancelled/completed appointment" question
+        # was answered with fabricated doctor/department/date details instead of
+        # the real data — nothing in this tool's own JSON distinguished "when
+        # this was scheduled for" from "when this status change actually
+        # happened," so there was no grounded signal for the model to anchor a
+        # recency answer on beyond the (already-correctly-ordered, see the sort
+        # comments above) row order. Surfacing the real action timestamp
+        # explicitly gives both the model and any deterministic caller
+        # (app.services.orchestrator.agents.appointment_agent's own "most
+        # recent by status" short-circuit) something concrete to cite.
+        if out.status == "cancelled" and out.cancelled_at is not None:
+            entry["cancelled_when"] = _format_when(out.cancelled_at, tz)
+        elif out.status in ("completed", "no_show"):
+            entry["status_changed_when"] = _format_when(out.updated_at, tz)
+        results.append(entry)
 
     return json.dumps({"appointments": results}, default=str)
 
