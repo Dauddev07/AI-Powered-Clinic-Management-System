@@ -100,6 +100,37 @@ def _is_self_diagnosis_claim(message: str) -> bool:
     return bool(words & _SELF_DIAGNOSIS_WORDS)
 
 
+# Reported live: "i think i have a brain tumour" correctly got a routine
+# department card (per this module's own established design above — a
+# self-diagnosis claim should get a concise redirect, never treated as an
+# automatic emergency), but "i have a brain tumour" — the exact same claim,
+# just without the "i think" hedge — got a full PATH 1 emergency reply
+# instead. Nothing in the prompt actually distinguishes stated-as-fact from
+# hedged self-diagnosis language the way it explicitly does for major-bone
+# fractures (see EXCEPTION — A MAJOR/WEIGHT-BEARING BONE... in llm.py); the
+# model's own "obviously severe description" judgment was simply inconsistent
+# between the two phrasings for the same underlying claim. Scoped narrowly to
+# a BARE claim — nothing else describing severity or a real red-flag sign
+# alongside it — so a self-diagnosis claim genuinely accompanied by severe
+# pain, bleeding, a seizure, etc. still gets to go through PATH 1 normally;
+# only the claim-alone shape gets forced to the same deterministic outcome
+# regardless of which way the hedge word happens to tip the model.
+_OTHER_EMERGENCY_SIGNAL_WORDS = frozenset({
+    "severe", "unbearable", "extreme", "worst", "bleeding", "seizure", "seizures",
+    "unconscious", "confusion", "confused", "vomiting", "collapse", "collapsed",
+    "faint", "fainted", "fainting", "numb", "numbness", "paralysis", "paralyzed",
+})
+
+
+def _bare_self_diagnosis_claim(message: str) -> bool:
+    if not _is_self_diagnosis_claim(message):
+        return False
+    if _SEVERITY_HINT_RE.search(message):
+        return False
+    words = set(re.findall(r"[a-z0-9]+", message.lower()))
+    return not (words & _OTHER_EMERGENCY_SIGNAL_WORDS)
+
+
 def _no_symptom_described_yet(history: list[ConversationMemory]) -> bool:
     """True when nothing in `history` is itself a symptom-shaped message — i.e. the
     CURRENT message is effectively the first real symptom description of the
@@ -238,6 +269,46 @@ _SPECIALIST_TITLE_RE = re.compile(r"\b(?:" + "|".join(_SPECIALIST_TITLE_WORDS) +
 
 def _recommends_a_specialist_in_free_text(reply: str) -> bool:
     return bool(_SPECIALIST_TITLE_RE.search(reply))
+
+
+# Reported live: "i am having pain in my leg" -> screened (severe, 5 days) -> a
+# PATH 1 emergency reply -> patient declined ER -> "i want to book an
+# appointment here" -> the model asked "which department...(e.g. Orthopedics
+# or a general physician)" in free text instead of calling the tool with the
+# department the hint table already supports from the patient's own words
+# (severity+duration were already established). This is the product-level
+# behavior this clinic wants: once real symptom info exists, always SHOW the
+# actual department card, never ask the patient to pick or free-text a
+# guess — the chatbot's whole job is to compute this, not defer it back to the
+# patient. Only a genuinely blank hint table (nothing usable yet) should ever
+# produce a real clarifying question, and that path is handled separately by
+# the screening backstops above, before the LLM is even called.
+_DEPARTMENT_QUESTION_RE = re.compile(
+    r"which (?:department|dept|doctor|specialist)|let (?:you\s+)?(?:me\s+)?know which",
+    re.IGNORECASE,
+)
+
+
+def _asks_the_patient_to_pick_a_department(reply: str) -> bool:
+    return bool(_DEPARTMENT_QUESTION_RE.search(reply))
+
+
+# Reported live (same conversation, next turn): "i dont know what dept can be
+# best fir for it" got "the Orthopedics department is usually the most
+# appropriate" — free-text naming a REAL department by its exact name, not a
+# specialist title (so _recommends_a_specialist_in_free_text above doesn't
+# catch it), without ever calling get_department_availability. This directly
+# contradicted the hint table's own answer for bare "leg pain, no injury
+# signal" (General Medicine, see symptom_hints.py's limb/joint if/else) — the
+# LATER symptom-vs-department mismatch check in appointment_agent.py then
+# fired against the bot's OWN prior recommendation, reading as the bot
+# confusing itself. Since a real clarifying question in this system never
+# names a specific department (same principle as the specialist-title
+# detector above), a non-marker reply that does is a reliable signal the
+# model free-texted a recommendation instead of calling the tool.
+def _names_a_real_department_in_free_text(reply: str, department_names: list[str]) -> bool:
+    lowered = reply.lower()
+    return any(re.search(rf"\b{re.escape(name.lower())}\b", lowered) for name in department_names)
 
 
 # Reported live: a genuine PATH 1 emergency reply ("chest pain is mild and
@@ -452,6 +523,24 @@ def run_symptom_agent(
 
     reply = llm.run_tool_calling_agent(system_prompt, message, history, tools)
 
+    # Reported live: "i have a brain tumour" got a full PATH 1 emergency reply
+    # while "i think i have a brain tumour" (the identical claim, just hedged)
+    # got the routine department redirect this module's design calls for — see
+    # _bare_self_diagnosis_claim's own docstring. Applied even to an
+    # otherwise-valid-looking PATH 1 reply (the one exception the recovery net
+    # below deliberately never touches), so both phrasings land on the same
+    # deterministic outcome.
+    if _looks_like_a_valid_emergency_reply(reply) and _bare_self_diagnosis_claim(message):
+        hinted = departments_hinted_by_patient_symptom_words(message, history, department_names, set())
+        if hinted:
+            results = [
+                _get_department_availability_impl(
+                    db, ctx, name, note=f"Based on the {label} described, this should be evaluated by a doctor."
+                )
+                for name, label in hinted.items()
+            ]
+            reply = results[0] if len(results) == 1 else combine_department_availability_results(results)
+
     # Reported live: "fasting blood sugar 200+" then "excessive thirst and frequent
     # urination" (the textbook diabetes triad) got a free-text reply naming the
     # condition outright instead of calling get_department_availability — a real
@@ -478,6 +567,8 @@ def run_symptom_agent(
             or _looks_like_a_faked_tool_payload(reply)
             or _looks_like_an_advice_dump_instead_of_routing(reply)
             or _recommends_a_specialist_in_free_text(reply)
+            or _names_a_real_department_in_free_text(reply, department_names)
+            or _asks_the_patient_to_pick_a_department(reply)
         )
     ):
         hinted = departments_hinted_by_patient_symptom_words(message, history, department_names, set())

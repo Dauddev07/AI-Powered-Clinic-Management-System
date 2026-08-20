@@ -1709,6 +1709,77 @@ def test_run_symptom_agent_keeps_a_valid_path1_emergency_reply_intact(monkeypatc
     assert not result.startswith(DOCTOR_OPTIONS_MARKER)
 
 
+def test_run_symptom_agent_overrides_path1_for_a_bare_self_diagnosis_claim(monkeypatch, db, ctx, clinic):
+    # Reported live: "i have a brain tumour" got a full PATH 1 emergency reply
+    # while "i think i have a brain tumour" — the identical claim, just hedged —
+    # correctly got a routine department redirect. A bare self-diagnosis claim
+    # (nothing else describing severity/a real red-flag) must get the same
+    # deterministic outcome regardless of the "i think" hedge, so this confirms
+    # the override converts an otherwise-valid PATH 1 reply into a real
+    # Neurology card for the unhedged phrasing.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    neurology = Department(clinic_id=clinic.id, name="Neurology")
+    db.add(neurology)
+    db.flush()
+    doctor = Doctor(
+        clinic_id=clinic.id, department_id=neurology.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Sana Qureshi", is_active=True,
+    )
+    db.add(doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    emergency_reply = (
+        "This sounds like an emergency; please call 1122 or go to the nearest emergency department right away.\n"
+        "1) Stay calm and sit or lie down in a safe position.\n"
+        "2) Keep your airway clear and avoid any strenuous activity.\n"
+        "3) If you feel faint or lose consciousness, have someone support your head and call emergency "
+        "services immediately."
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: emergency_reply)
+
+    result = symptom_agent.run_symptom_agent(db, ctx, "i have a brain tumour", "en", [])
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "Neurology"
+    assert "1122" not in result
+
+
+def test_run_symptom_agent_keeps_path1_for_a_self_diagnosis_claim_with_a_real_red_flag(
+    monkeypatch, db, ctx
+):
+    # A self-diagnosis claim genuinely accompanied by a real emergency signal
+    # (here: seizure) must still be allowed to go through PATH 1 normally — the
+    # override above is scoped to a BARE claim only, never a claim with real
+    # red-flag content alongside it.
+    emergency_reply = (
+        "This sounds like an emergency; please call 1122 or go to the nearest emergency department right away.\n"
+        "1) Keep the person safe from injury and do not restrain them.\n"
+        "2) Time the seizure and note what you observe.\n"
+        "3) Call emergency services if it lasts more than a few minutes."
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: emergency_reply)
+
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "i have a brain tumour and just had a seizure", "en", []
+    )
+
+    assert result == emergency_reply
+    assert not result.startswith(DOCTOR_OPTIONS_MARKER)
+
+
 def test_run_symptom_agent_recovers_when_the_model_recommends_a_specialist_in_plain_prose(
     monkeypatch, db, ctx, clinic
 ):
@@ -1779,6 +1850,119 @@ def test_router_rule0_5_find_me_a_suitable_dept_routes_to_symptom_general():
         _row("assistant", "I recommend scheduling an appointment with a dentist."),
     ]
     assert _heuristic_classify("find me a suitable dept", history) == "symptom_general"
+
+
+def test_run_symptom_agent_recovers_when_the_model_asks_which_department_in_plain_prose(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: "i am having pain in my leg" -> screened (severe, 5 days) ->
+    # emergency reply -> "no i dont need ER" -> "i want to book an appointment
+    # here" got "Sure...Could you let me know which department..." in free text
+    # instead of calling the tool, even though severity+duration were already
+    # established and the hint table already supports General Medicine for bare
+    # leg pain with no injury signal. The chatbot should compute this itself, not
+    # defer the decision back to the patient.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    general_medicine = Department(clinic_id=clinic.id, name="General Medicine")
+    db.add(general_medicine)
+    db.flush()
+    doctor = Doctor(
+        clinic_id=clinic.id, department_id=general_medicine.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Bilal Hashmi", is_active=True,
+    )
+    db.add(doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    department_question_reply = (
+        "Sure, I can help you schedule an appointment. Could you let me know which department or "
+        "specialist you'd like to see for your leg pain (for example, Orthopedics or a general "
+        "physician)?"
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: department_question_reply)
+
+    history = [
+        _row("user", "i am having pain in my leg and its severe"),
+        _row("assistant", "Could you tell me how severe this is and how long you've had it?"),
+        _row("user", "severe since 5 days"),
+        _row("assistant", "This sounds like an emergency. Call 1122 or go to the nearest ER right away."),
+        _row("user", "no i dont need ER"),
+        _row("assistant", "I understand you don't want to go to the ER, but this is still an emergency."),
+    ]
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "its not that bad i want to book an appointment here", "en", history
+    )
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "General Medicine"
+    assert "which department" not in result
+
+
+def test_run_symptom_agent_recovers_when_the_model_names_a_real_department_in_plain_prose(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live: same conversation, next turn — "i dont know what dept can be
+    # best fir for it" got "the Orthopedics department is usually the most
+    # appropriate" as free text, naming a REAL department (not a specialist
+    # title, so the existing specialist-word detector missed it) without ever
+    # calling get_department_availability. This contradicted the hint table's
+    # own answer (General Medicine for bare leg pain), which later caused the
+    # symptom-vs-department mismatch check in appointment_agent.py to fire
+    # against the bot's own prior recommendation.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    general_medicine = Department(clinic_id=clinic.id, name="General Medicine")
+    db.add(general_medicine)
+    db.flush()
+    doctor = Doctor(
+        clinic_id=clinic.id, department_id=general_medicine.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Bilal Hashmi", is_active=True,
+    )
+    db.add(doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    orthopedics_prose_reply = (
+        "For leg pain, especially when it's severe and has lasted several days, the Orthopedics "
+        "department is usually the most appropriate. Let me know which option you'd like."
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: orthopedics_prose_reply)
+
+    history = [
+        _row("user", "i am having pain in my leg and its severe"),
+        _row("user", "severe since 5 days"),
+        _row("user", "its not that bad i want to book an appointment here"),
+    ]
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "i dont know what dept can be best fir for it", "en", history
+    )
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "General Medicine"
+    assert "Orthopedics department" not in result
 
 
 def test_run_symptom_agent_does_not_hint_a_department_with_no_matching_symptom_words(monkeypatch, db, ctx):
