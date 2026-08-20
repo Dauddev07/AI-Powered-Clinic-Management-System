@@ -1,3 +1,84 @@
+/* ---- Recurring themes (AI digest) ---------------------------------------
+   Same "featured card" identity as AdminHome.module.css's .digestCard (accent
+   spine + soft corner glow, on a slightly warmer gradient) rather than the
+   plain .card recipe every stat tile/table below uses — this is a synthesized
+   take on the feedback below it, not one more data tile alongside them. Own
+   copy here (not shared) since AdminHome.module.css is scoped to that page's
+   CSS module. */
+.digestCard {
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.25rem;
+  border: 1px solid var(--app-border);
+  border-radius: 20px;
+  background: linear-gradient(155deg, color-mix(in srgb, var(--app-text-title) 3%, var(--app-bg-card)), var(--app-bg-card) 60%);
+  box-shadow: 0 10px 28px var(--app-shadow);
+}
+
+.digestCard::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 35%, transparent));
+}
+
+.digestCard::after {
+  content: "";
+  position: absolute;
+  top: -70%;
+  right: -12%;
+  width: 16rem;
+  height: 16rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 16%, transparent), transparent 72%);
+  pointer-events: none;
+}
+
+.digestTitleRow,
+.digestText,
+.digestUpdated {
+  position: relative;
+  z-index: 1;
+}
+
+.digestTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.6rem;
+}
+
+.digestTitleIcon {
+  display: inline-flex;
+  color: var(--app-accent);
+}
+
+.digestTitle {
+  font-size: var(--font-size-label);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--app-text-subtitle);
+  margin: 0;
+}
+
+.digestText {
+  font-size: var(--font-size-body);
+  color: var(--app-text-body);
+  line-height: 1.55;
+  margin: 0 0 0.6rem;
+}
+
+.digestUpdated {
+  font-size: 11px;
+  color: var(--app-text-subtitle);
+}
+
 .stars {
   display: inline-flex;
   gap: 1px;

@@ -5,3 +5,7 @@ export function fetchFeedback({ limit = 20, offset = 0, tone } = {}) {
   if (tone) params.set("tone", tone);
   return apiFetch(`/admin/feedback?${params.toString()}`, { auth: true });
 }
+
+export function fetchFeedbackInsights() {
+  return apiFetch("/admin/feedback/insights", { auth: true });
+}

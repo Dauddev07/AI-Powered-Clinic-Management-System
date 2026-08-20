@@ -52,3 +52,12 @@ class FeedbackListOut(BaseModel):
     # currently shown.
     average_rating: float | None
     tone_counts: FeedbackToneCounts
+
+
+class FeedbackInsightOut(BaseModel):
+    # None when there's no low-rating feedback with a reason to synthesize yet, or
+    # when nothing has ever been successfully generated (no LLM key configured, or
+    # every attempt so far has failed) — the frontend hides the card in either case
+    # rather than showing an error.
+    digest: str | None
+    generated_at: datetime | None
