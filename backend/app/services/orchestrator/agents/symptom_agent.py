@@ -429,10 +429,27 @@ def run_symptom_agent(
     # this same honest treatment — and, unlike the hardcoded list, it also names
     # the specialty the patient should look for elsewhere (e.g. "Oncology"),
     # since knowing that only matters once you already know it isn't here.
+    #
+    # Reported live: after this apology fired for "I think I have cancer," a
+    # completely unrelated follow-up ("what's 2+2") got the EXACT SAME apology
+    # again instead of the normal off-topic redirect. Root cause: both
+    # unsupported_symptom_labels and symptom_words_with_no_matching_department
+    # scan message+history TOGETHER — a symptom word from three turns ago never
+    # leaves that combined word-set, so the check kept firing on every later
+    # turn regardless of what the CURRENT message actually said. This gate
+    # requires the CURRENT message itself to still be symptom-shaped or an
+    # explicit "based on my symptoms" recommendation request — a message with
+    # neither (small talk, math, an unrelated factual question) skips this
+    # apology entirely and falls through to the normal LLM flow below, which
+    # has its own off-topic guardrail (_OFF_TOPIC_AND_INTEGRITY_RULES) to
+    # handle it instead of repeating stale department-availability context.
+    current_message_still_about_a_symptom = (
+        is_symptom_message(message) or is_department_recommendation_request(message)
+    )
     hinted = departments_hinted_by_patient_symptom_words(message, history, department_names, set())
     unsupported = unsupported_symptom_labels(message, history, department_names)
     unmatched = symptom_words_with_no_matching_department(message, history, department_names)
-    if (unsupported or unmatched) and not hinted:
+    if current_message_still_about_a_symptom and (unsupported or unmatched) and not hinted:
         seen_labels: set[str] = set()
         clauses_en: list[str] = []
         clauses_ur: list[str] = []

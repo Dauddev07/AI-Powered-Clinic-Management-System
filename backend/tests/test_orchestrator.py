@@ -2214,6 +2214,35 @@ def test_run_symptom_agent_apologizes_for_a_bare_cancer_or_tumor_self_diagnosis_
     assert "sorry" in result.lower()
 
 
+def test_run_symptom_agent_apology_does_not_repeat_for_an_unrelated_later_message(monkeypatch, db, ctx, clinic):
+    # Reported live: after the apology above fired for "I think I have cancer,"
+    # a completely unrelated follow-up ("what's 2+2") got the EXACT SAME
+    # apology again instead of the normal off-topic redirect. Root cause: the
+    # apology check scans message+history TOGETHER, so "cancer" from an
+    # earlier turn never left the combined word-set even though the CURRENT
+    # message has nothing to do with it. The gate now requires the CURRENT
+    # message itself to still be symptom-shaped (or an explicit "based on my
+    # symptoms" recommendation request) — an unrelated message like this must
+    # fall through to the normal LLM flow (and its off-topic guardrail)
+    # instead of repeating stale apology text.
+    off_topic_reply = "I don't have that information here — for anything outside the clinic, please ask elsewhere."
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: off_topic_reply)
+
+    history = [
+        _row("user", "i think i have cancer"),
+        _row(
+            "assistant",
+            "I'm sorry, this clinic doesn't have a specialist department for cancer/tumor-related "
+            "symptoms. I'd recommend visiting another hospital or clinic for this. Is there anything "
+            "else I can help you with?",
+        ),
+    ]
+    result = symptom_agent.run_symptom_agent(db, ctx, "whats 2+2", "en", history)
+
+    assert result == off_topic_reply
+    assert "sorry" not in result.lower()
+
+
 def test_run_symptom_agent_routes_a_brain_tumor_claim_to_neurology_even_without_oncology(
     monkeypatch, db, ctx, clinic
 ):
