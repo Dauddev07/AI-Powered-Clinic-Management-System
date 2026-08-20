@@ -637,9 +637,31 @@ def _get_my_appointments_impl(db: Session, ctx: ClinicContext, status_filter: st
     if normalized == "upcoming":
         stmt = stmt.where(Appointment.status == "confirmed", Slot.start_utc >= now).order_by(Slot.start_utc.asc())
     elif normalized == "past":
-        stmt = stmt.where(Appointment.status == "completed").order_by(Slot.start_utc.desc())
+        # Reported live (same class of bug as "cancelled" below): "most recent
+        # completed appointment" must reflect when the visit was actually
+        # marked completed (booking_engine.confirm_visit), not the slot's
+        # original scheduled time — a patient confirming an older visit AFTER
+        # already confirming a more-recently-scheduled one would otherwise get
+        # the wrong one shown first. There's no dedicated `completed_at`
+        # column (unlike `cancelled_at` for cancellation), but `updated_at`
+        # (onupdate=func.now()) is bumped by that exact status change, so it's
+        # the real "most recent" signal here; falling back to slot time only
+        # to break a tie between two rows updated in the same instant.
+        stmt = stmt.where(Appointment.status == "completed").order_by(
+            Appointment.updated_at.desc(), Slot.start_utc.desc()
+        )
     elif normalized == "cancelled":
-        stmt = stmt.where(Appointment.status == "cancelled").order_by(Slot.start_utc.desc())
+        # Reported live: "what's my most recent cancelled appointment" was
+        # ordered by the appointment's original SLOT time, not by when it was
+        # actually cancelled — a patient who cancelled an appointment scheduled
+        # further out AFTER already cancelling one scheduled sooner would get
+        # the wrong one shown first. `cancelled_at` (set in
+        # booking_engine.cancel_appointment) is the real "most recent" signal
+        # for this filter; falling back to slot time only for the vanishingly
+        # rare legacy row with no cancelled_at recorded.
+        stmt = stmt.where(Appointment.status == "cancelled").order_by(
+            Appointment.cancelled_at.desc().nullslast(), Slot.start_utc.desc()
+        )
     else:
         stmt = stmt.order_by(Slot.start_utc.desc())
 

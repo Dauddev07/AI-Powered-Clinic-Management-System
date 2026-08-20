@@ -459,6 +459,65 @@ def test_get_my_appointments_includes_appointment_id_for_reschedule_cancel(db, c
     assert parsed["appointments"][0]["appointment_id"] == str(appointment.id)
 
 
+def test_get_my_appointments_cancelled_filter_orders_by_when_it_was_cancelled_not_slot_time(
+    db, clinic, doctor, patient, ctx
+):
+    # Reported live: "what's my most recent cancelled appointment" was ordered
+    # by the appointment's original SLOT time, not by when it was actually
+    # cancelled — a patient who cancels an appointment scheduled FURTHER OUT
+    # after already having cancelled one scheduled SOONER would get the wrong
+    # one shown first. Two appointments are cancelled here in the OPPOSITE
+    # order of their slot times, to prove the result reflects cancellation
+    # recency, not slot recency.
+    sooner_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=1))
+    later_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=10))
+    sooner_appt = _appointment(db, clinic, patient, doctor, sooner_slot, status="cancelled")
+    later_appt = _appointment(db, clinic, patient, doctor, later_slot, status="cancelled")
+
+    # sooner_appt (day+1) cancelled FIRST, later_appt (day+10) cancelled SECOND
+    # (most recently) — despite later_appt's slot being further in the future.
+    sooner_appt.cancelled_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    later_appt.cancelled_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    db.flush()
+
+    result = _get_my_appointments_impl(db, ctx, "cancelled", 10)
+
+    parsed = json.loads(result)
+    assert [a["appointment_id"] for a in parsed["appointments"]] == [
+        str(later_appt.id),
+        str(sooner_appt.id),
+    ]
+
+
+def test_get_my_appointments_past_filter_orders_by_when_it_was_completed_not_slot_time(
+    db, clinic, doctor, patient, ctx
+):
+    # Same class of bug as the cancelled-filter test above, for "past"/
+    # completed appointments: order must reflect when the visit was actually
+    # marked completed (booking_engine.confirm_visit bumps updated_at), not
+    # the slot's original scheduled time.
+    sooner_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) - timedelta(days=1))
+    later_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) - timedelta(days=10))
+    sooner_appt = _appointment(db, clinic, patient, doctor, sooner_slot, status="completed")
+    later_appt = _appointment(db, clinic, patient, doctor, later_slot, status="completed")
+    db.flush()
+
+    # later_appt's slot was further in the past, but it was confirmed as
+    # completed by the patient MOST RECENTLY (right now) — sooner_appt was
+    # confirmed completed earlier.
+    sooner_appt.updated_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    later_appt.updated_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    db.flush()
+
+    result = _get_my_appointments_impl(db, ctx, "past", 10)
+
+    parsed = json.loads(result)
+    assert [a["appointment_id"] for a in parsed["appointments"]] == [
+        str(later_appt.id),
+        str(sooner_appt.id),
+    ]
+
+
 # --- get_department_availability: minimum slot guarantee + never a raw slot_id -----
 
 
