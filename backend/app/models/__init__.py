@@ -1,3 +1,4 @@
+from app.models.admin_insight_digest import AdminInsightDigest
 from app.models.appointment import Appointment
 from app.models.appointment_department_day_reschedule_use import AppointmentDepartmentDayRescheduleUse
 from app.models.appointment_department_day_use import AppointmentDepartmentDayUse
@@ -20,6 +21,7 @@ from app.models.slot import Slot
 from app.models.user import User
 
 __all__ = [
+    "AdminInsightDigest",
     "Appointment",
     "AppointmentDepartmentDayRescheduleUse",
     "AppointmentDepartmentDayUse",

@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { fetchMyAccount } from "../api/auth";
-import { fetchAdminDashboardStats, fetchAppointmentsTrend, fetchTopRatedDoctors } from "../api/adminDashboard";
+import {
+  fetchAdminDashboardStats,
+  fetchAppointmentsTrend,
+  fetchTopRatedDoctors,
+  fetchWeeklyDigest,
+} from "../api/adminDashboard";
 import { ApiError } from "../api/client";
 import EmptyState from "../components/EmptyState";
 import Skeleton from "../components/Skeleton";
@@ -10,6 +15,7 @@ import WelcomeBanner from "../components/WelcomeBanner";
 import { useCountUp } from "../hooks/useCountUp";
 import { useReveal, revealDelayClass } from "../hooks/useReveal";
 import { useTheme } from "../theme/ThemeContext";
+import { formatDateOnly } from "../utils/formatDateTime";
 import styles from "./AdminHome.module.css";
 
 // Rank-badge tone per position — gold/silver/bronze is the universal "top 3"
@@ -180,6 +186,8 @@ export default function AdminHome() {
   const [trendError, setTrendError] = useState(null);
   const [topRatedDoctors, setTopRatedDoctors] = useState(null);
   const [topRatedError, setTopRatedError] = useState(null);
+  const [weeklyDigest, setWeeklyDigest] = useState(null);
+  const [weeklyDigestError, setWeeklyDigestError] = useState(null);
   const revealRef = useReveal();
   const chartColors = useChartColors();
   const isNarrowScreen = useIsNarrowScreen("(max-width: 480px)");
@@ -211,6 +219,18 @@ export default function AdminHome() {
       .then(setTopRatedDoctors)
       .catch((err) =>
         setTopRatedError(err instanceof ApiError ? err.detail || err.message : "Could not load top rated doctors."),
+      );
+  }, []);
+
+  // digest is null on a successful response whenever nothing has been generated for
+  // this clinic yet (no LLM key configured, or every attempt so far has failed) —
+  // that's not an error, so the card below just doesn't render rather than showing
+  // a misleading "failed to load" message for something that was never available.
+  useEffect(() => {
+    fetchWeeklyDigest()
+      .then(setWeeklyDigest)
+      .catch((err) =>
+        setWeeklyDigestError(err instanceof ApiError ? err.detail || err.message : "Could not load the weekly digest."),
       );
   }, []);
 
@@ -342,6 +362,25 @@ export default function AdminHome() {
       </div>
 
       <div className={styles.sectionLabel}>Insights</div>
+
+      {weeklyDigestError && <p className={styles.errorText}>{weeklyDigestError}</p>}
+      {weeklyDigest?.digest && (
+        <div className={`${styles.card} reveal`} ref={revealRef}>
+          <div className={styles.cardTitleRow}>
+            <span className={`${styles.titleIcon} ${styles.titleIcon_info}`} aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+                <circle cx="12" cy="12" r="5" />
+              </svg>
+            </span>
+            <h2 className={styles.cardTitle}>Weekly summary</h2>
+          </div>
+          <p className={styles.digestText}>{weeklyDigest.digest}</p>
+          {weeklyDigest.generated_at && (
+            <div className={styles.doctorStatLabel}>Updated {formatDateOnly(weeklyDigest.generated_at)}</div>
+          )}
+        </div>
+      )}
 
       <div className={`${styles.card} reveal ${revealDelayClass(2)}`} ref={revealRef}>
         <div className={styles.cardTitleRow}>

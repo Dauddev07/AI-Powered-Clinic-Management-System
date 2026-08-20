@@ -16,6 +16,7 @@ from app.models.slot import Slot
 from app.models.user import User
 from app.schemas.admin_dashboard import (
     AdminDashboardStatsOut,
+    AdminWeeklyDigestOut,
     DailyAppointmentCountOut,
     DoctorAppointmentCountOut,
     SlotUtilizationOut,
@@ -221,3 +222,26 @@ def get_top_rated_doctors(
         )
         for doctor_id, doctor_name, department_name, avg_rating, rating_count, visit_count in rows
     ]
+
+
+@router.get("/weekly-digest", response_model=AdminWeeklyDigestOut)
+def get_weekly_digest(
+    current_user: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+) -> AdminWeeklyDigestOut:
+    """A short, LLM-generated plain-English summary of this clinic's own dashboard
+    numbers (see app.services.admin_insights) — cached and refreshed at most once a
+    week, so this is cheap to call on every dashboard visit. `digest` is None only
+    when no digest has ever been successfully generated for this clinic (no LLM key
+    configured, or every attempt so far has failed); the frontend hides the card
+    entirely in that case rather than showing an error.
+
+    Imported locally (not at module level) because app.services.admin_insights
+    itself imports the three functions above from this module — a module-level
+    import here would be circular.
+    """
+    from app.services.admin_insights import get_weekly_digest as compute_weekly_digest
+
+    digest, generated_at = compute_weekly_digest(db, current_user.clinic_id, current_user)
+    db.commit()
+    return AdminWeeklyDigestOut(digest=digest, generated_at=generated_at)

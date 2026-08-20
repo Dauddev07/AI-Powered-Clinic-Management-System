@@ -11,3 +11,7 @@ export function fetchAppointmentsTrend() {
 export function fetchTopRatedDoctors() {
   return apiFetch("/admin/dashboard/top-rated-doctors", { auth: true });
 }
+
+export function fetchWeeklyDigest() {
+  return apiFetch("/admin/dashboard/weekly-digest", { auth: true });
+}

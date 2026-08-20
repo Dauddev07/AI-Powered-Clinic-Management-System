@@ -19,8 +19,7 @@ class Notification(Base):
     __table_args__ = (
         CheckConstraint(
             "type IN ('appointment_booked', 'appointment_rescheduled', 'appointment_cancelled', "
-            "'appointment_auto_completed', 'appointment_reminder_60m', 'appointment_reminder_30m', "
-            "'appointment_reminder_5m', 'appointment_starting')",
+            "'appointment_auto_completed', 'appointment_reminder_60m')",
             name="ck_notifications_type",
         ),
     )

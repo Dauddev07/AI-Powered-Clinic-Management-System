@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel
 
@@ -44,3 +44,11 @@ class TopRatedDoctorOut(BaseModel):
     # All-time count of this doctor's 'completed' appointments — a real visit
     # that actually happened, not merely booked.
     visit_count: int
+
+
+class AdminWeeklyDigestOut(BaseModel):
+    # None only when nothing has ever been generated for this clinic (no LLM key
+    # configured, or every generation attempt so far has failed) — the frontend
+    # hides the digest card entirely in that case rather than showing an error.
+    digest: str | None
+    generated_at: datetime | None

@@ -223,6 +223,15 @@
   font-size: var(--font-size-label);
 }
 
+/* ---- Weekly summary ----------------------------------------------------- */
+
+.digestText {
+  font-size: var(--font-size-body);
+  color: var(--app-text-body);
+  line-height: 1.55;
+  margin: 0 0 0.6rem;
+}
+
 /* ---- Top rated doctors ------------------------------------------------- */
 
 .doctorGrid {
