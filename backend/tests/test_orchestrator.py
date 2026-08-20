@@ -277,6 +277,163 @@ def test_router_rule0_6_department_scope_question_overrides_screening_continuity
     assert _heuristic_classify("so what symptoms does dermatologist treats?", history) == GENERAL_INFO
 
 
+def test_router_rule0_7_clinic_logistics_question_overrides_screening_continuity():
+    # Reported live: "i have headache" -> "how severe, how long?" -> "mild" ->
+    # "are you experiencing nausea, visual changes, fever?" -> "where is this
+    # clinic located" still got routed to SYMPTOM_GENERAL and refused as off-topic
+    # ("I don't have that information... contact the clinic directly"). Unlike the
+    # earlier rule 4 fix (which only helps when a booking-context turn intervenes),
+    # this transcript has NO booking activity at all — rule 2's screening
+    # continuity fires purely because the preceding turn looks like a question
+    # (true for ANY screening question) and nothing booking-related outranks the
+    # symptom mention (trivially true with zero booking turns). A logistics
+    # question must always win regardless of what clarifying question came right
+    # before it.
+    history = [
+        _row("user", "i have headache"),
+        _row(
+            "assistant",
+            "Could you tell me how severe this is (mild, moderate, or severe) and how long "
+            "you've had it?",
+        ),
+        _row("user", "mild"),
+        _row(
+            "assistant",
+            "Are you experiencing any nausea, visual changes, or fever along with the headache?",
+        ),
+    ]
+    assert _heuristic_classify("where is this clinic located", history) == GENERAL_INFO
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "what are your clinic hours",
+        "when does the clinic open",
+        "what is the address of this clinic",
+        "do you accept insurance",
+        "what is your cancellation policy",
+        "how can i contact the clinic",
+    ],
+)
+def test_router_rule0_7_covers_other_clinic_logistics_topics_not_just_hours(message):
+    # The fix generalizes to any clinic-logistics topic, not just hours/location —
+    # same mid-screening history as the reported transcript, different question.
+    history = [
+        _row("user", "i have headache"),
+        _row("assistant", "Could you tell me how severe this is and how long you've had it?"),
+        _row("user", "mild"),
+        _row("assistant", "Are you experiencing any nausea, visual changes, or fever?"),
+    ]
+    assert _heuristic_classify(message, history) == GENERAL_INFO
+
+
+def test_router_rule0_7_does_not_override_a_genuine_symptom_message():
+    # Guard against the new rule being too broad: a message that plainly states a
+    # NEW symptom must still route to SYMPTOM_GENERAL even if it happens to also
+    # mention a logistics word.
+    assert _heuristic_classify("my chest hurts and I want to know your clinic hours too") == SYMPTOM_GENERAL
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "cancel my appointment",
+        "i want to reschedule my appointment",
+        "cancel my upcoming appointment",
+        "can you reschedule it for me",
+    ],
+)
+def test_router_rule0_8_cancel_reschedule_action_overrides_screening_continuity(message):
+    # Reported live: "i have headache" -> "how severe, how long?" -> "mild" ->
+    # "are you experiencing nausea, visual changes, fever?" -> "cancel my
+    # appointment" (or a reschedule equivalent) still got routed to
+    # SYMPTOM_GENERAL instead of appointment_agent — same class of bug as rule 0.7
+    # (screening continuity has no way to notice the CURRENT message is an
+    # explicit booking action), one category over. Rule 3 already exists to catch
+    # this via needs_booking_action_tools, but sits AFTER rule 2 and can't simply
+    # be moved ahead of it (see rule 0.8's own docstring for why).
+    history = [
+        _row("user", "i have headache"),
+        _row(
+            "assistant",
+            "Could you tell me how severe this is (mild, moderate, or severe) and how long "
+            "you've had it?",
+        ),
+        _row("user", "mild"),
+        _row(
+            "assistant",
+            "Are you experiencing any nausea, visual changes, or fever along with the headache?",
+        ),
+    ]
+    assert _heuristic_classify(message, history) == APPOINTMENT
+
+
+def test_router_rule0_8_does_not_swallow_a_plain_screening_answer():
+    # Guard against the new rule being too broad: a plain reply to a clarifying
+    # screening question (no cancel/reschedule keyword at all) must still
+    # continue triage with symptom_agent, not jump to appointment_agent. This is
+    # exactly the failure mode rule 0.8 avoids by NOT reusing
+    # needs_booking_action_tools' own "preceding turn is a question" fallback.
+    history = [
+        _row("user", "i have headache"),
+        _row(
+            "assistant",
+            "Could you tell me how severe this is (mild, moderate, or severe) and how long "
+            "you've had it?",
+        ),
+    ]
+    assert _heuristic_classify("mild", history) == SYMPTOM_GENERAL
+    assert _heuristic_classify("severe", history) == SYMPTOM_GENERAL
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "when was my last cancelled appointment",
+        "what was my last completed appointment",
+        "when was my most recent missed appointment",
+        "what is my last past appointment",
+    ],
+)
+def test_router_rule0_9_appointment_status_history_query_overrides_screening_continuity(message):
+    # Follow-up report: "when was my last cancelled appointment" happened to
+    # already work after rule 0.8 shipped, purely because "cancelled" is also a
+    # literal cancel-action word — but "what was my last completed appointment" /
+    # "when was my most recent missed appointment" (same category of question, no
+    # cancel/reschedule keyword at all) still fell through to rule 2 and got
+    # routed to SYMPTOM_GENERAL instead of appointment_agent's real, DB-grounded
+    # status-history answer.
+    history = [
+        _row("user", "i have headache"),
+        _row(
+            "assistant",
+            "Could you tell me how severe this is (mild, moderate, or severe) and how long "
+            "you've had it?",
+        ),
+        _row("user", "mild"),
+        _row(
+            "assistant",
+            "Are you experiencing any nausea, visual changes, or fever along with the headache?",
+        ),
+    ]
+    assert _heuristic_classify(message, history) == APPOINTMENT
+
+
+def test_router_rule0_9_does_not_swallow_a_plain_screening_answer():
+    # Guard against the new rule being too broad: a plain reply to a clarifying
+    # screening question must still continue triage.
+    history = [
+        _row("user", "i have headache"),
+        _row(
+            "assistant",
+            "Could you tell me how severe this is (mild, moderate, or severe) and how long "
+            "you've had it?",
+        ),
+    ]
+    assert _heuristic_classify("mild", history) == SYMPTOM_GENERAL
+
+
 def test_router_rule1_8_a_new_symptom_statement_overrides_stale_booking_continuity():
     # Reported live: General Medicine was resolved for dizziness/fainting, then
     # small talk ("okay thank you" / "one more question"), then the assistant's

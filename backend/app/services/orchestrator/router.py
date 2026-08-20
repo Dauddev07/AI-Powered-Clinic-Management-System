@@ -35,6 +35,8 @@ from app.services.message_classifier import (
     _heuristic_classify as _classic_heuristic_classify,
 )
 from app.services.message_classifier import (
+    _CANCEL_ACTION_WORDS,
+    _RESCHEDULE_ACTION_WORDS,
     _preceding_assistant_turn_looks_like_a_question,
     is_department_list_request,
     is_department_recommendation_request,
@@ -42,6 +44,9 @@ from app.services.message_classifier import (
     is_doctor_count_or_listing_request,
     is_symptom_message,
     needs_booking_action_tools,
+)
+from app.services.orchestrator.agents.appointment_agent import (
+    _message_asks_for_most_recent_appointment_by_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -160,6 +165,115 @@ def _rule_0_6_department_scope_question(message, history, last_role, last_conten
     general_info_agent, same as any other clinic-info question."""
     if is_department_scope_question(message):
         return GENERAL_INFO
+    return None
+
+
+# Deliberately narrower than message_classifier._LOGISTICS_KEYWORDS, which also
+# includes "doctor"/"appointment"/"book"/"schedule"/"slot"/"clinic"/"department" —
+# words that overlap with genuine booking/symptom vocabulary and would misfire this
+# rule on a real mid-screening booking message. Scoped to words that are ONLY ever
+# about clinic logistics (hours, location, fees, policies, contact info) and have no
+# plausible symptom/booking-action meaning at all.
+_CLINIC_LOGISTICS_WORDS = frozenset({
+    "hour", "hours", "timing", "timings", "open", "opens", "opening", "opened",
+    "close", "closes", "closing", "closed",
+    "location", "located", "address", "direction", "directions", "parking",
+    "fee", "fees", "price", "prices", "cost", "costs", "charge", "charges", "insurance",
+    "policy", "policies", "contact", "phone", "email", "holiday", "holidays", "weekend", "weekends",
+})
+
+
+def _message_is_clinic_logistics_question(message: str) -> bool:
+    words = set(re.findall(r"[a-z0-9']+", message.lower()))
+    return bool(words & _CLINIC_LOGISTICS_WORDS)
+
+
+def _rule_0_7_clinic_logistics_question(message, history, last_role, last_content):
+    """A plain clinic-logistics question (hours, location, fees, policies, contact
+    info...), checked before rule 1's marker continuity and rule 2's screening
+    continuity — same positioning/reasoning as rule 0.6 just above, for the same
+    class of problem, one category over.
+
+    Reported live: "i have headache" -> "how severe, how long?" -> "mild" ->
+    "are you experiencing nausea, visual changes, fever?" -> "where is this clinic
+    located" still got routed to SYMPTOM_GENERAL and refused as off-topic ("I don't
+    have that information... contact the clinic directly"). Root cause: rule 2's
+    screening-continuity check only asks "did the preceding assistant turn look
+    like a question" (true for ANY question-shaped reply, including its own
+    screening question) and "is the symptom context still more recent than booking
+    context" (trivially true here — nothing booking-related happened at all) — it
+    has no way to recognize the CURRENT message is an unrelated, self-contained
+    clinic question rather than an answer to the screening question at all. A
+    logistics question must always win here, regardless of what clarifying
+    question came right before it, same principle rule 0.6 already applies for
+    department-scope questions."""
+    if _message_is_clinic_logistics_question(message) and not is_symptom_message(message):
+        return GENERAL_INFO
+    return None
+
+
+def _message_states_a_cancel_or_reschedule_action(message: str) -> bool:
+    """Deliberately just the raw keyword check (_CANCEL_ACTION_WORDS/
+    _RESCHEDULE_ACTION_WORDS, the same shared vocabulary appointment_agent's own
+    _detect_action_intent scans) — NOT needs_booking_action_tools(), which also has
+    its own "preceding assistant turn looks like a question" fallback trigger. That
+    fallback is exactly why rule 3 (which reuses needs_booking_action_tools) sits
+    AFTER rule 2 in the first place (see rule 3's own docstring) — reusing it here,
+    before rule 2, would make a plain screening-answer like "mild" (a reply to a
+    question) misfire this rule too. Only the CURRENT message's own explicit
+    cancel/reschedule wording should be able to jump the queue this early."""
+    words = set(re.findall(r"[a-z0-9']+", message.lower()))
+    return bool(words & (_CANCEL_ACTION_WORDS | _RESCHEDULE_ACTION_WORDS))
+
+
+def _rule_0_8_cancel_reschedule_action_overrides_screening_continuity(message, history, last_role, last_content):
+    """An explicit cancel/reschedule request, checked before rule 2's screening
+    continuity — same positioning/reasoning as rules 0.6/0.7 just above, one more
+    category over.
+
+    Reported live: "i have headache" -> "how severe, how long?" -> "mild" ->
+    "are you experiencing nausea, visual changes, fever?" -> "cancel my
+    appointment" / "i want to reschedule my appointment" all still got routed to
+    SYMPTOM_GENERAL instead of appointment_agent. Root cause: rule 2 fires purely
+    because the preceding assistant turn looks like a question and nothing
+    booking-related has happened yet (trivially true with zero prior booking
+    turns) — it never checks whether the CURRENT message itself is an explicit
+    booking action. Rule 3 already exists to catch exactly this (via
+    needs_booking_action_tools), but sits AFTER rule 2 in the cascade — and can't
+    simply be reordered ahead of it, since needs_booking_action_tools' own
+    "preceding turn looks like a question" fallback would then misfire on a plain
+    screening-answer reply like "mild" and send it to appointment_agent instead of
+    continuing triage. This narrower rule uses only the CURRENT message's own
+    explicit keyword instead, so it's safe to check this early."""
+    if _message_states_a_cancel_or_reschedule_action(message):
+        return APPOINTMENT
+    return None
+
+
+def _rule_0_9_appointment_status_history_query_overrides_screening_continuity(
+    message, history, last_role, last_content
+):
+    """A "when was my most recent cancelled/missed/completed appointment"-style
+    query, checked before rule 2's screening continuity — same category as rule
+    0.8 just above (an appointment_agent-only capability getting swallowed by
+    screening continuity), but a genuinely different underlying signal: a status
+    HISTORY question, not an action word, so it needs its own detector rather than
+    extending rule 0.8's keyword check.
+
+    Reported live (follow-up to the rule 0.8 report): "when was my last cancelled
+    appointment" happened to already work after rule 0.8 shipped, purely by
+    coincidence — "cancelled" is also a literal member of _CANCEL_ACTION_WORDS, so
+    it tripped rule 0.8 despite that rule being about action words, not status
+    queries. "what was my last completed appointment" / "when was my most recent
+    missed appointment" — same category of question, no cancel/reschedule keyword
+    at all — still fell through to rule 2 and got routed to SYMPTOM_GENERAL.
+    Reuses appointment_agent's own _message_asks_for_most_recent_appointment_by_status
+    (the exact function that answers this deterministically from real DB rows once
+    it reaches appointment_agent) rather than re-implementing the recency+status
+    detection here — same "one place to define what this question shape means"
+    principle every other reused-signal rule in this cascade already follows."""
+    if _message_asks_for_most_recent_appointment_by_status(message) is not None:
+        return APPOINTMENT
     return None
 
 
@@ -328,6 +442,9 @@ def _rule_6_signal_free_short_statement(message, history, last_role, last_conten
 _RULE_CASCADE = (
     ("0.5", _rule_0_5_department_recommendation),
     ("0.6", _rule_0_6_department_scope_question),
+    ("0.7", _rule_0_7_clinic_logistics_question),
+    ("0.8", _rule_0_8_cancel_reschedule_action_overrides_screening_continuity),
+    ("0.9", _rule_0_9_appointment_status_history_query_overrides_screening_continuity),
     ("1.5", _rule_1_5_department_list_request),
     ("1", _rule_1_marker_continuity),
     ("1.6", _rule_1_6_doctor_count_or_listing_request),
