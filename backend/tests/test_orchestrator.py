@@ -4039,6 +4039,68 @@ def test_run_appointment_agent_new_booking_request_supersedes_a_stale_reschedule
     assert "This is a RESCHEDULE:" not in system_prompt
 
 
+def test_run_appointment_agent_new_booking_request_supersedes_a_stale_cancel_disambiguation(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    # Reported live: "cancel both of my appointments" (2 active, same doctor) asked
+    # "which one would you like to cancel: 9:00 AM, 9:30 AM?" — then "i want to book
+    # a new appointment" just repeated the exact same cancel question verbatim,
+    # since _match_candidate found no match (the reply names neither time) and the
+    # old code always re-asked on a non-match with no way to recognize the topic
+    # had changed. Must fall through to a fresh (non-cancel) request instead.
+    _future_appointment(db, clinic, patient, doctor, days_from_now=1)
+    _future_appointment(db, clinic, patient, doctor, days_from_now=2)
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: "Here are the available slots for a new booking.",
+    )
+
+    disambiguation = appointment_agent.run_appointment_agent(db, ctx, "cancel both of my appointments", "en", [])
+    assert disambiguation.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(disambiguation[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "appointment"
+    assert payload["action"] == "cancel"
+
+    history = [
+        _row("user", "cancel both of my appointments"),
+        _row("assistant", disambiguation),
+    ]
+    result = appointment_agent.run_appointment_agent(db, ctx, "i want to book a new appointment", "en", history)
+
+    assert "which one would you like to cancel" not in result.lower()
+    assert not (result.startswith(DOCTOR_DISAMBIGUATION_MARKER) and '"action": "cancel"' in result)
+
+
+def test_run_appointment_agent_different_action_supersedes_a_stale_cancel_disambiguation(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    # Same live report, second reply tried: "reschedule my upcoming appointments"
+    # (a genuinely different action, not just a non-answer) also just repeated the
+    # stale CANCEL question. A reply naming a different action than the one being
+    # disambiguated must re-disambiguate for THAT action, not parrot the old one.
+    _future_appointment(db, clinic, patient, doctor, days_from_now=1)
+    _future_appointment(db, clinic, patient, doctor, days_from_now=2)
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM")),
+    )
+
+    disambiguation = appointment_agent.run_appointment_agent(db, ctx, "cancel both of my appointments", "en", [])
+    history = [
+        _row("user", "cancel both of my appointments"),
+        _row("assistant", disambiguation),
+    ]
+    result = appointment_agent.run_appointment_agent(db, ctx, "reschedule my upcoming appointments", "en", history)
+
+    assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "appointment"
+    assert payload["action"] == "reschedule"
+    assert "which one would you like to reschedule" in payload["question"].lower()
+
+
 def test_run_appointment_agent_does_not_treat_a_retracted_reschedule_as_a_live_action(
     monkeypatch, db, ctx, doctor
 ):

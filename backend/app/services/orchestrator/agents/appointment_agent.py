@@ -1385,14 +1385,38 @@ def run_appointment_agent(
     if most_recent_status_filter is not None:
         return _most_recent_appointment_by_status_reply(db, ctx, most_recent_status_filter)
 
+    # Reported live: "cancel both of my appointments" (2 active, same doctor) asked
+    # "which one would you like to cancel: 9:00 AM, 9:30 AM?" — then "i want to book
+    # a new appointment", and separately "reschedule my upcoming appointments",
+    # BOTH just repeated the exact same cancel-disambiguation question verbatim
+    # instead of registering the topic change. Root cause: _match_candidate found no
+    # match in either reply (neither names a specific time), and the old code
+    # treated "no candidate matched" as ALWAYS meaning "re-ask the same question" —
+    # with no way to tell "the patient answered badly" apart from "the patient is no
+    # longer answering this question at all." A reply that explicitly asks for a
+    # new/separate booking, or names a DIFFERENT action than the one being
+    # disambiguated (reschedule while a cancel is pending, or vice versa),
+    # supersedes the stale disambiguation instead of being folded back into it —
+    # falls through to fresh detection below exactly like an intervening
+    # new-booking message already does against _most_recent_action_intent's own
+    # lookback (see that function's own comment for the closely related fix).
     pending = _pending_appointment_disambiguation(history)
+    disambiguation_handled = False
     if pending is not None:
         candidate = _match_candidate(message, pending["candidates"])
-        if candidate is None:
-            return _appointment_disambiguation_reply(pending["action"], pending["candidates"])
-        resolved_appointment = candidate
-        resolved_appointment_action = pending["action"]
-    else:
+        if candidate is not None:
+            resolved_appointment = candidate
+            resolved_appointment_action = pending["action"]
+            disambiguation_handled = True
+        else:
+            fresh_action = _detect_action_intent(message)
+            superseded = _detect_new_booking_supersede_intent(message) or (
+                fresh_action is not None and fresh_action != pending["action"]
+            )
+            if not superseded:
+                return _appointment_disambiguation_reply(pending["action"], pending["candidates"])
+
+    if not disambiguation_handled:
         action = _detect_action_intent(message)
         name_matches = find_doctors_by_name(db, ctx.clinic_id, message)
         if action is None and len(name_matches) == 1:
