@@ -2275,6 +2275,67 @@ def test_run_appointment_agent_reschedule_cap_reached_is_told_before_showing_new
     assert "already been rescheduled" in result.lower()
 
 
+def test_run_appointment_agent_booking_cap_reached_is_told_before_confirmation(
+    monkeypatch, db, ctx, clinic, department, doctor, patient
+):
+    """Reported live: a patient picked a slot in a department already at its
+    daily booking cap, got asked "Just to confirm — book...?", said "yes", and
+    ONLY THEN was told the limit was already reached — a whole confirmation
+    round-trip wasted on a booking that could never succeed. The cap must be
+    checked at the moment the slot is picked, before the confirming question is
+    ever asked. See appointment_agent._booking_cap_reached."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.appointment import Appointment
+    from app.models.appointment_department_day_use import AppointmentDepartmentDayUse
+    from app.models.slot import Slot
+
+    other_appt_start = datetime.now(timezone.utc) + timedelta(days=1)
+    other_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id, start_utc=other_appt_start, end_utc=other_appt_start + timedelta(minutes=30)
+    )
+    db.add(other_slot)
+    db.flush()
+    other_appointment = Appointment(
+        clinic_id=clinic.id, slot_id=other_slot.id, patient_id=patient.id, doctor_id=doctor.id, status="confirmed"
+    )
+    db.add(other_appointment)
+    db.flush()
+
+    # The slot being picked THIS turn, same department and same local day as
+    # the two uses already recorded below.
+    picked_start = other_appt_start.replace(hour=14, minute=0, second=0, microsecond=0)
+    picked_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id, start_utc=picked_start, end_utc=picked_start + timedelta(minutes=30)
+    )
+    db.add(picked_slot)
+    db.flush()
+
+    local_date = other_appt_start.date()
+    db.add(AppointmentDepartmentDayUse(
+        clinic_id=clinic.id, patient_id=patient.id, department_id=department.id,
+        appointment_id=other_appointment.id, local_date=local_date,
+    ))
+    db.add(AppointmentDepartmentDayUse(
+        clinic_id=clinic.id, patient_id=patient.id, department_id=department.id,
+        appointment_id=other_appointment.id, local_date=local_date,
+    ))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called once the booking cap is already reached")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, f"I'd like to book the appointment. slot_id: {picked_slot.id}", "en", []
+    )
+
+    assert "Cardiology" in result
+    assert "reached the limit" in result.lower()
+    assert "just to confirm" not in result.lower()
+
+
 def test_run_appointment_agent_refuses_a_reschedule_request_naming_a_different_day(
     monkeypatch, db, ctx, clinic, department, doctor, patient
 ):
@@ -4140,6 +4201,64 @@ def test_run_appointment_agent_warns_when_a_professional_title_names_a_mismatche
 
     assert "Cardiology" in result
     assert "ENT" in result
+
+
+def test_run_appointment_agent_warns_when_british_spelled_title_names_a_mismatched_department(
+    monkeypatch, db, ctx, clinic, patient
+):
+    # Reported live: after describing burning chest pain (Cardiology hint),
+    # "I want to see gynaecologist instead of cardiologist" (British spelling)
+    # went straight to a Gynecology card with no mismatch warning at all. Root
+    # cause: DEPARTMENT_TITLE_HINTS' "gynaecologist" entry used to map to hint
+    # substring "gynaecolog", which never matches this clinic's real department
+    # name "Gynecology" (American spelling, no "a") — so the deterministic
+    # matcher didn't recognize the message as naming Gynecology at all, and the
+    # mismatch check never got the chance to fire. Now reuses the same "gynec"
+    # hint as the American "gynecologist" entry, which matches either spelling
+    # of the real department name.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    cardiology = Department(clinic_id=clinic.id, name="Cardiology")
+    db.add(cardiology)
+    gynecology = Department(clinic_id=clinic.id, name="Gynecology")
+    db.add(gynecology)
+    db.flush()
+    gynecology_doctor = Doctor(
+        clinic_id=clinic.id, department_id=gynecology.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Rukhsana Hashmi", is_active=True,
+    )
+    db.add(gynecology_doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=gynecology_doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    ))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called when the named department contradicts symptoms")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row("user", "I am having pain in chest"),
+        _row("assistant", "Is the chest pain severe, moderate, or mild?"),
+        _row("user", "Mild and since 3 days with no other symptoms"),
+        _row("assistant", "Can you describe the type of pain?"),
+        _row("user", "Burning type"),
+    ]
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "I want to see gynaecologist instead of cardiologist", "en", history
+    )
+
+    assert "Gynecology" in result
+    assert "Cardiology" in result
 
 
 def test_run_appointment_agent_does_not_warn_when_a_typo_still_matches_a_real_symptom(

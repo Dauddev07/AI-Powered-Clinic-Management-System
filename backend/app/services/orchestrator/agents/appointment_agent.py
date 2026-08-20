@@ -69,6 +69,7 @@ from sqlalchemy.orm import Session
 from app.core.tenancy import ClinicContext
 from app.models.conversation_memory import ConversationMemory
 from app.models.doctor import Doctor
+from app.models.slot import Slot
 from app.services import booking_engine, llm
 from app.services.chat_markers import (
     BOOKING_MARKER,
@@ -368,6 +369,43 @@ def _reschedule_cap_reply(appointment: dict) -> str:
         f"Your appointment with {appointment['doctor_name']} in {appointment['department_name']} has "
         f"already been rescheduled {booking_engine.DAILY_DEPARTMENT_RESCHEDULE_CAP} times today for that "
         f"department — please contact the clinic directly for any further changes to it today."
+    )
+
+
+def _booking_cap_reached(db: Session, ctx: ClinicContext, picked_slot: dict) -> bool:
+    """Same "check before asking" principle as _reschedule_cap_reached above, for
+    a FRESH booking — checked against the picked slot's own department/day,
+    before ever asking the patient to confirm a booking that
+    booking_engine.book_appointment would just reject anyway (see its own
+    DAILY_DEPARTMENT_BOOKING_CAP check). Reported live: the patient was asked
+    "Just to confirm — book...?", said "yes", and only THEN got told the limit
+    was already reached — a whole confirmation round-trip wasted on a booking
+    that could never have succeeded."""
+    slot_id = picked_slot.get("slot_id")
+    if not slot_id:
+        return False
+    try:
+        parsed_slot_id = uuid.UUID(slot_id)
+    except (ValueError, TypeError, AttributeError):
+        return False
+    slot = db.get(Slot, parsed_slot_id)
+    if slot is None:
+        return False
+    doctor = db.get(Doctor, slot.doctor_id)
+    if doctor is None:
+        return False
+    tz = ZoneInfo(_clinic_timezone(db, ctx.clinic_id))
+    local_date = slot.start_utc.astimezone(tz).date()
+    return (
+        booking_engine._department_day_use_count(db, ctx.clinic_id, ctx.user_id, doctor.department_id, local_date)
+        >= booking_engine.DAILY_DEPARTMENT_BOOKING_CAP
+    )
+
+
+def _booking_cap_reply(department_name: str) -> str:
+    return (
+        f"You've reached the limit of {booking_engine.DAILY_DEPARTMENT_BOOKING_CAP} appointments "
+        f"in {department_name} for this day."
     )
 
 
@@ -1622,6 +1660,8 @@ def run_appointment_agent(
         picked_slot_id = _extract_slot_id(message)
         picked_slot = get_slot_summary(db, ctx.clinic_id, picked_slot_id) if picked_slot_id else None
         if picked_slot is not None:
+            if _booking_cap_reached(db, ctx, picked_slot):
+                return _booking_cap_reply(picked_slot["department_name"])
             return _book_confirmation_reply(picked_slot)
 
     # Handoff step 2: recover the most recent card (if any) and render it into the

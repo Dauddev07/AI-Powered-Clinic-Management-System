@@ -143,6 +143,10 @@ _SYMPTOM_KEYWORDS = frozenset({
     # triage flow, and the follow-up booking request reached appointment_agent
     # (no symptom awareness at all) with no recorded symptom to work from.
     "breathless", "breething", "wheeze", "wheezing", "palpitations", "chills", "sweating",
+    # Requested directly: "i sweat alot" matched no keyword at all — only
+    # "sweating" (a different token) was covered, not the bare "sweat" a
+    # patient just as often types.
+    "sweat", "sweats", "sweaty",
     # Digestive
     "diarrhea", "diarrhoea", "constipation", "cramp", "cramps", "bloating",
     # Skin/infection — NOTE: "sting"/"stung"/"bite"/"bitten"/"burn"/"burned"/
@@ -559,9 +563,20 @@ DEPARTMENT_TITLE_HINTS: tuple[tuple[str, str], ...] = (
     ("orthopedist", "orthop"),
     ("orthopedic surgeon", "orthop"),
     ("pediatrician", "pediatr"),
-    ("paediatrician", "paediatr"),
+    # Reported live: "gynaecologist" (British spelling) never resolved to this
+    # clinic's real "Gynecology" department (American spelling, no "a") because
+    # its own hint substring "gynaecolog" can't match a name spelled without the
+    # "a" — the patient's message named no department at all as far as the
+    # deterministic matcher was concerned, so the symptom/department mismatch
+    # check never even considered it (see appointment_agent.py's mismatch-check
+    # block). Same latent bug existed for "paediatrician" against the real
+    # "Pediatrics" department. Both British-spelling entries now reuse their
+    # American counterpart's hint substring ("pediatr"/"gynec"), which matches
+    # a department name spelled either way, rather than assuming which spelling
+    # a given clinic's seed data happens to use.
+    ("paediatrician", "pediatr"),
     ("gynecologist", "gynec"),
-    ("gynaecologist", "gynaecolog"),
+    ("gynaecologist", "gynec"),
     ("ophthalmologist", "ophthalmolog"),
     ("eye doctor", "ophthalmolog"),
     ("eye specialist", "ophthalmolog"),
@@ -606,6 +621,13 @@ def is_doctor_count_or_listing_request(message: str) -> bool:
 # department doesn't masquerade as describing a symptom.
 _DEPARTMENT_PHRASES_CONTAINING_SYMPTOM_WORDS = ("general medicine", "family medicine")
 
+# "sweat"/"sweats" (added directly above, unambiguous elsewhere) has two common
+# idiomatic uses with nothing to do with a symptom — "no sweat" (no problem) and
+# "don't/dont sweat it" (don't worry) — stripped out before scanning for the same
+# reason department names are above, so a casual reply doesn't masquerade as a
+# symptom report.
+_IDIOM_PHRASES_CONTAINING_SYMPTOM_WORDS = ("no sweat", "don't sweat it", "dont sweat it")
+
 
 def is_symptom_message(message: str) -> bool:
     """True when the message mentions a symptom/complaint — used by chat.py to route
@@ -616,7 +638,7 @@ def is_symptom_message(message: str) -> bool:
     chunks, which the triage agent needs anyway; a false negative just falls through to
     ordinary hospital_info retrieval, so neither failure mode is unsafe."""
     lowered = message.lower()
-    for phrase in _DEPARTMENT_PHRASES_CONTAINING_SYMPTOM_WORDS:
+    for phrase in _DEPARTMENT_PHRASES_CONTAINING_SYMPTOM_WORDS + _IDIOM_PHRASES_CONTAINING_SYMPTOM_WORDS:
         lowered = lowered.replace(phrase, "")
     words = set(re.findall(r"[a-z0-9]+", lowered))
     if words & _SYMPTOM_KEYWORDS:

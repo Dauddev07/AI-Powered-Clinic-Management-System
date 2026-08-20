@@ -641,12 +641,6 @@ export default function Landing() {
                   </span>
                   Books, reschedules, and cancels appointments through chat
                 </li>
-                <li>
-                  <span className={styles.curaFeatureIcon} aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
-                  </span>
-                  Answers clinic questions straight from our own knowledge base
-                </li>
               </ul>
               <p className={styles.curaDisclaimer}>
                 Cura gives general information only and isn't a substitute for

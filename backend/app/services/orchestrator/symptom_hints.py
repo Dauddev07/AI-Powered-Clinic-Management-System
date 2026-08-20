@@ -235,7 +235,10 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
         "gynecological symptoms",
     ),
     (
-        frozenset({"fever", "chills", "sweating", "ache", "aches", "aching", "body ache", "malaise", "fatigue"}),
+        frozenset({
+            "fever", "chills", "sweating", "sweat", "sweats", "sweaty",
+            "ache", "aches", "aching", "body ache", "malaise", "fatigue",
+        }),
         ("general medicine", "internal medicine", "family medicine"),
         "fever/body aches",
     ),
