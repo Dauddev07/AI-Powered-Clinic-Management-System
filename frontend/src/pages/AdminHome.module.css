@@ -223,7 +223,55 @@
   font-size: var(--font-size-label);
 }
 
-/* ---- Weekly summary ----------------------------------------------------- */
+/* ---- Weekly summary ------------------------------------------------------
+   Deliberately NOT the plain .card recipe every stat/chart card below uses —
+   reported live that dropping it in among those read as just another data
+   tile instead of a synthesized, AI-generated take on them. Borrows
+   WelcomeBanner's "featured card" identity (accent spine down the left edge
+   + a soft corner glow, on a slightly warmer gradient background) at a
+   smaller scale, and sits above the Overview grid rather than inside
+   Insights — it's a briefing on everything below, not one more metric
+   alongside them. */
+.digestCard {
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.75rem;
+  border: 1px solid var(--app-border);
+  border-radius: 20px;
+  background: linear-gradient(155deg, color-mix(in srgb, var(--app-text-title) 3%, var(--app-bg-card)), var(--app-bg-card) 60%);
+  box-shadow: 0 10px 28px var(--app-shadow);
+}
+
+.digestCard::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 35%, transparent));
+}
+
+.digestCard::after {
+  content: "";
+  position: absolute;
+  top: -70%;
+  right: -12%;
+  width: 16rem;
+  height: 16rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 16%, transparent), transparent 72%);
+  pointer-events: none;
+}
+
+.digestCard .cardTitleRow,
+.digestCard .digestText,
+.digestCard .doctorStatLabel {
+  position: relative;
+  z-index: 1;
+}
 
 .digestText {
   font-size: var(--font-size-body);

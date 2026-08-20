@@ -268,6 +268,25 @@ export default function AdminHome() {
 
       {error && <p className={styles.errorText}>{error}</p>}
 
+      {weeklyDigestError && <p className={styles.errorText}>{weeklyDigestError}</p>}
+      {weeklyDigest?.digest && (
+        <div className={styles.digestCard}>
+          <div className={styles.cardTitleRow}>
+            <span className={`${styles.titleIcon} ${styles.titleIcon_info}`} aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+                <circle cx="12" cy="12" r="5" />
+              </svg>
+            </span>
+            <h2 className={styles.cardTitle}>Weekly summary</h2>
+          </div>
+          <p className={styles.digestText}>{weeklyDigest.digest}</p>
+          {weeklyDigest.generated_at && (
+            <div className={styles.doctorStatLabel}>Updated {formatDateOnly(weeklyDigest.generated_at)}</div>
+          )}
+        </div>
+      )}
+
       <div className={styles.sectionLabel}>Overview</div>
       <div className={styles.statsGrid}>
         <div className={`${styles.card} reveal`} ref={revealRef}>
@@ -362,25 +381,6 @@ export default function AdminHome() {
       </div>
 
       <div className={styles.sectionLabel}>Insights</div>
-
-      {weeklyDigestError && <p className={styles.errorText}>{weeklyDigestError}</p>}
-      {weeklyDigest?.digest && (
-        <div className={`${styles.card} reveal`} ref={revealRef}>
-          <div className={styles.cardTitleRow}>
-            <span className={`${styles.titleIcon} ${styles.titleIcon_info}`} aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-                <circle cx="12" cy="12" r="5" />
-              </svg>
-            </span>
-            <h2 className={styles.cardTitle}>Weekly summary</h2>
-          </div>
-          <p className={styles.digestText}>{weeklyDigest.digest}</p>
-          {weeklyDigest.generated_at && (
-            <div className={styles.doctorStatLabel}>Updated {formatDateOnly(weeklyDigest.generated_at)}</div>
-          )}
-        </div>
-      )}
 
       <div className={`${styles.card} reveal ${revealDelayClass(2)}`} ref={revealRef}>
         <div className={styles.cardTitleRow}>

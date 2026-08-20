@@ -39,12 +39,14 @@ dashboard, based ONLY on the numbers given to you below.
 Rules:
 - Use ONLY the facts provided. Never invent a number, doctor name, date, or trend \
 that isn't explicitly present in them.
+- This is a WEEKLY summary — describe the week as a whole (the 7-day total/trend), \
+never a single day's figures. The facts below deliberately exclude anything scoped to \
+"today" for exactly this reason.
 - Write 2-4 plain sentences of continuous prose. No headings, no markdown, no bullet \
 points, no greeting or sign-off.
 - Point out whatever is actually notable in the numbers (a doctor standing out, a busy \
-or quiet day, a highly or poorly rated doctor, utilization running high or low) rather \
-than just restating every figure in order. If nothing stands out, a brief, plain \
-factual summary is fine.
+or quiet week, a highly or poorly rated doctor) rather than just restating every figure \
+in order. If nothing stands out, a brief, plain factual summary is fine.
 - Never give medical advice or comment on any patient's health — this is operational \
 clinic data only.
 
@@ -52,21 +54,25 @@ Output ONLY the summary text itself — no preamble, no labels, no quotes."""
 
 
 def _facts_text(db: Session, current_user: User) -> str:
-    """Builds the digest prompt from the exact same three queries that power the
+    """Builds the digest prompt from the exact same queries that power the
     dashboard's own cards — calling the FastAPI route functions directly (their
     `Depends(...)` defaults are only used when FastAPI itself invokes them; a plain
     call with real args bypasses that entirely) so this can never drift from what an
     admin actually sees on screen.
+
+    Deliberately excludes anything scoped to "today" (slot_utilization_today,
+    busiest_doctors_today) — this is a WEEKLY digest, and feeding the model a
+    same-day figure alongside "weekly" framing in the prompt produced summaries that
+    led with today's single-day numbers instead of the week. Only genuinely
+    week-or-wider facts go in: the 7-day trend (and its own total), active doctor
+    headcount, and all-time top ratings.
     """
     stats = get_admin_dashboard_stats(current_user=current_user, db=db)
     trend = get_appointments_trend(current_user=current_user, db=db)
     top_rated = get_top_rated_doctors(current_user=current_user, db=db)
 
     trend_line = ", ".join(f"{day.date} booked={day.count}" for day in trend)
-    busiest_line = (
-        ", ".join(f"{d.doctor_name} ({d.count} appointments)" for d in stats.busiest_doctors_today)
-        or "no appointments yet today"
-    )
+    week_total = sum(day.count for day in trend)
     top_rated_line = (
         ", ".join(f"{d.doctor_name} ({d.average_rating}/5 from {d.rating_count} ratings)" for d in top_rated)
         or "no doctor ratings yet"
@@ -74,11 +80,8 @@ def _facts_text(db: Session, current_user: User) -> str:
 
     return (
         f"Active doctors: {stats.active_doctors_count} of {stats.total_doctors_count} total.\n"
-        f"Today's slot utilization: {stats.slot_utilization_today.booked} of "
-        f"{stats.slot_utilization_today.total} slots booked "
-        f"({stats.slot_utilization_today.percentage}%).\n"
-        f"Busiest doctors today: {busiest_line}.\n"
-        f"Appointments booked per day, last 7 days, oldest to newest: {trend_line}.\n"
+        f"Appointments booked per day, last 7 days, oldest to newest: {trend_line} "
+        f"(week total: {week_total}).\n"
         f"Top rated doctors (clinic-wide, all time): {top_rated_line}."
     )
 
