@@ -476,6 +476,66 @@ def test_router_rule6_has_a_word_count_ceiling_not_unlimited():
     assert _heuristic_classify(long_message, []) is None
 
 
+def test_router_rule4_symptom_signal_does_not_outrank_more_recent_booking_context():
+    # Reported live, full transcript: "i am having pain in chest" (symptom
+    # screening starts) -> "cancel my upcoming appointment" / "reschedule my
+    # upcoming appointment" (clearly booking-related, correctly handled by
+    # appointment_agent) -> "whats the clinic hours?" — a plain, self-contained,
+    # keyword-clean informational question with nothing to do with symptoms or
+    # booking. Old rule 4 had no recency bound on its history scan at all: once
+    # ANY symptom mention was on record, every later turn not otherwise claimed by
+    # an earlier rule fell to SYMPTOM_GENERAL forever — even after the
+    # conversation had since clearly moved through several unrelated booking
+    # turns — producing symptom_agent's off-topic refusal ("I don't have that
+    # information... contact the clinic directly") for a plain clinic-hours
+    # question. Must now respect the same recency-vs-booking-context comparison
+    # rule 2 already uses for its own (screening-continuity) case.
+    history = [
+        _row("user", "i am having pain in chest"),
+        _row(
+            "assistant",
+            "Is the chest pain severe, moderate, or mild? Also, does it come on suddenly...",
+        ),
+        _row("user", "i want to cancel my appointment"),
+        _row("assistant", "Could you please provide the appointment ID or the date and time?"),
+        _row("user", "cancel my upcoming appointment"),
+        _row("assistant", "You don't have an upcoming appointment to cancel."),
+        _row("user", "reschedule my upcoming appointment"),
+        _row("assistant", "You don't have an upcoming appointment to reschedule."),
+    ]
+    assert classify_agent_intent("whats the clinic hours?", history) != SYMPTOM_GENERAL
+
+
+def test_router_rule4_still_recovers_a_stale_symptom_turn_with_no_intervening_booking():
+    # Unchanged behavior: with nothing booking-related in between, a symptom
+    # mentioned a turn or two ago must still be recoverable by this rule. Tests
+    # _rule_4_symptom_signal_anywhere directly (not the full cascade) so this
+    # isolates rule 4's own fallback rather than incidentally passing via rule 2's
+    # separate screening-continuity check.
+    from app.services.orchestrator.router import _rule_4_symptom_signal_anywhere
+
+    history = [
+        _row("user", "my chest hurts a lot right now"),
+        _row("assistant", "That sounds concerning — let's find you the right doctor."),
+    ]
+    assert _rule_4_symptom_signal_anywhere("ok, whatever you think is best for this", history, "assistant", history[-1].content) == SYMPTOM_GENERAL
+
+
+def test_router_rule4_symptom_fallback_requires_recency_over_booking_context_directly():
+    # Direct unit check on the rule itself (not the full cascade), isolating
+    # exactly the condition that was missing: a symptom turn index that exists but
+    # is NOT more recent than a booking-context turn must not fire this rule.
+    from app.services.orchestrator.router import _rule_4_symptom_signal_anywhere
+
+    history = [
+        _row("user", "my chest hurts a lot right now"),
+        _row("assistant", "Is it severe?"),
+        _row("user", "cancel my upcoming appointment"),
+        _row("assistant", "You don't have an upcoming appointment to cancel."),
+    ]
+    assert _rule_4_symptom_signal_anywhere("whats the clinic hours?", history, "assistant", history[-1].content) is None
+
+
 # =====================================================================================
 # symptom_agent
 # =====================================================================================

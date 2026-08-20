@@ -274,8 +274,30 @@ def _rule_3_booking_action_signal(message, history, last_role, last_content):
 
 
 def _rule_4_symptom_signal_anywhere(message, history, last_role, last_content):
-    """Symptom signal, this message or earlier in the conversation."""
-    if is_symptom_message(message) or _most_recent_symptom_turn_index(history) >= 0:
+    """Symptom signal: the CURRENT message, or — only when that symptom mention is
+    still more recent than any booking-context turn since (see
+    _symptom_context_more_recent_than_booking_context, the exact same
+    recency-comparison infra Rule 2 already uses, see the module's own "RECENCY
+    FIX" docstring) — a turn earlier in the conversation.
+
+    Reported live: "i am having pain in chest" (turn 1) -> symptom screening ->
+    "cancel my upcoming appointment" / "reschedule my upcoming appointment" (turns
+    2-4, clearly booking-related, correctly handled by appointment_agent) ->
+    "whats the clinic hours?" (turn 5) — a plain, self-contained, keyword-clean
+    informational question with nothing to do with symptoms or booking — still got
+    routed to SYMPTOM_GENERAL and refused as off-topic ("I don't have that
+    information... contact the clinic directly"), because this rule's history scan
+    had NO recency bound at all: once any symptom mention was on record, every
+    later turn that rules 0.5-3 didn't otherwise claim fell to symptom_agent
+    forever, even after the conversation had since moved through several unrelated
+    booking turns. Rule 2 solved exactly this class of problem for its own
+    (screening-continuity) case years ago; this rule just never got the same
+    treatment. Only guards against booking context specifically (not e.g. several
+    turns of unrelated small talk with no booking signal at all) — narrowly scoped
+    to the reported failure mode rather than a broader rewrite."""
+    if is_symptom_message(message):
+        return SYMPTOM_GENERAL
+    if _most_recent_symptom_turn_index(history) >= 0 and _symptom_context_more_recent_than_booking_context(history):
         return SYMPTOM_GENERAL
     return None
 
