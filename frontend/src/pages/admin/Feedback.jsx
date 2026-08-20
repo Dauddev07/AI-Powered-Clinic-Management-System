@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { fetchFeedback, fetchFeedbackInsights } from "../../api/adminFeedback";
+import { fetchFeedback } from "../../api/adminFeedback";
 import { ApiError } from "../../api/client";
 import EmptyState from "../../components/EmptyState";
 import Pagination from "../../components/Pagination";
 import Skeleton from "../../components/Skeleton";
 import StarIcon from "../../components/StarIcon";
 import { useReveal } from "../../hooks/useReveal";
-import { formatDateOnly, formatDateTimeLocal as formatDate } from "../../utils/formatDateTime";
+import { formatDateTimeLocal as formatDate } from "../../utils/formatDateTime";
 import styles from "./AdminScreens.module.css";
 import feedbackStyles from "./Feedback.module.css";
 
@@ -58,8 +58,6 @@ export default function Feedback() {
   const [page, setPage] = useState(1);
   const [tone, setTone] = useState(null);
   const [error, setError] = useState(null);
-  const [insight, setInsight] = useState(null);
-  const [insightError, setInsightError] = useState(null);
 
   useEffect(() => {
     fetchFeedback({ limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE, tone })
@@ -72,17 +70,6 @@ export default function Feedback() {
       .catch((err) => setError(err instanceof ApiError ? err.detail || err.message : "Failed to load feedback."));
   }, [page, tone]);
 
-  // digest is null both when there's no low-rating feedback with a reason to
-  // synthesize yet and when nothing has ever been generated (no LLM key, or every
-  // attempt failed) — neither is an error, so the card just doesn't render.
-  useEffect(() => {
-    fetchFeedbackInsights()
-      .then(setInsight)
-      .catch((err) =>
-        setInsightError(err instanceof ApiError ? err.detail || err.message : "Could not load feedback insights."),
-      );
-  }, []);
-
   const totalFeedback = toneCounts.good + toneCounts.neutral + toneCounts.bad;
   const badPct = totalFeedback > 0 ? Math.round((toneCounts.bad / totalFeedback) * 100) : 0;
 
@@ -90,25 +77,6 @@ export default function Feedback() {
     <div>
       <h1 className={styles.title}>Patient feedback</h1>
       <p className={styles.subtitle}>Post-appointment ratings patients have submitted via Cura, newest first.</p>
-
-      {insightError && <p className={styles.errorText}>{insightError}</p>}
-      {insight?.digest && (
-        <div className={feedbackStyles.digestCard}>
-          <div className={feedbackStyles.digestTitleRow}>
-            <span className={feedbackStyles.digestTitleIcon} aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-                <circle cx="12" cy="12" r="5" />
-              </svg>
-            </span>
-            <h2 className={feedbackStyles.digestTitle}>Recurring themes</h2>
-          </div>
-          <p className={feedbackStyles.digestText}>{insight.digest}</p>
-          {insight.generated_at && (
-            <div className={feedbackStyles.digestUpdated}>Updated {formatDateOnly(insight.generated_at)}</div>
-          )}
-        </div>
-      )}
 
       {totalFeedback > 0 && (
         <div className={feedbackStyles.statGrid}>

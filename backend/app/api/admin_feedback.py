@@ -7,8 +7,7 @@ from app.core.db import get_db
 from app.models.appointment_feedback import AppointmentFeedback
 from app.models.doctor import Doctor
 from app.models.user import User
-from app.schemas.appointment_feedback import FeedbackInsightOut, FeedbackListOut, FeedbackOut, FeedbackToneCounts
-from app.services.feedback_insights import get_feedback_digest
+from app.schemas.appointment_feedback import FeedbackListOut, FeedbackOut, FeedbackToneCounts
 
 router = APIRouter(prefix="/admin/feedback", tags=["admin-feedback"])
 
@@ -82,20 +81,3 @@ def list_feedback(
         average_rating=round(float(average_rating), 2) if average_rating is not None else None,
         tone_counts=FeedbackToneCounts(**tone_counts),
     )
-
-
-@router.get("/insights", response_model=FeedbackInsightOut)
-def get_feedback_insights(
-    current_user: User = Depends(require_role("admin")),
-    db: Session = Depends(get_db),
-) -> FeedbackInsightOut:
-    """A short, LLM-generated synthesis of recurring themes in this clinic's
-    low-rating feedback (see app.services.feedback_insights) — cached and refreshed
-    at most once a week, so this is cheap to call on every feedback-page visit.
-    `digest` is None both when there's no low-rating feedback with a reason yet and
-    when no digest has ever been successfully generated; the frontend hides the card
-    entirely in either case rather than showing an error.
-    """
-    digest, generated_at = get_feedback_digest(db, current_user.clinic_id)
-    db.commit()
-    return FeedbackInsightOut(digest=digest, generated_at=generated_at)
