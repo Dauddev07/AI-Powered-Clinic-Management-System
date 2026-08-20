@@ -744,6 +744,22 @@ def _detect_action_intent(message: str) -> str | None:
 
 _ACTION_INTENT_LOOKBACK_TURNS = 6
 
+# _detect_action_intent's CANCEL_KEYWORDS/RESCHEDULE_KEYWORDS fuzzy-match the past-
+# tense/adjective forms of these words too ("cancelled" is a literal member;
+# "rescheduled" lands within _fuzzy_word_in's edit-distance-2 tolerance of
+# "reschedule") — exactly right for a genuine command ("cancel my appointment"), but
+# it also fires on a plain STATUS query like "show my cancelled appointments", which
+# names no action at all. Scoped narrowly to the zero-active/no-doctor-named
+# short-circuit in run_appointment_agent below (the one place this ambiguity is
+# unsafe — see that branch's own comment), not to _detect_action_intent itself,
+# which many other call sites rely on staying broad.
+_LIST_REQUEST_LEAD_WORDS = frozenset({"show", "list", "see", "view", "check", "display"})
+
+
+def _message_looks_like_appointment_list_request(message: str) -> bool:
+    words = set(re.findall(r"[a-z0-9']+", message.lower()))
+    return bool(words & _LIST_REQUEST_LEAD_WORDS)
+
 # Reported live: "reschedule it" -> slots shown -> a slot pick started a reschedule
 # confirmation -> "i want to book a new slot" (an explicit retraction — the patient
 # now wants to KEEP the existing appointment and book a separate, new one instead)
@@ -1448,6 +1464,34 @@ def run_appointment_agent(
             elif len(active) == 1:
                 resolved_appointment = active[0]
                 resolved_appointment_action = action
+            else:
+                # Reported live: a patient was shown Cardiology availability by
+                # symptom_agent (never booked anything — just an availability card
+                # from triage) and then said "i want to reschedule my appointment."
+                # No doctor named (name_matches == 0) and zero real active
+                # appointments (active == 0) fell through EVERY branch above with
+                # no deterministic reply — this used to leave resolved_appointment
+                # None and fall all the way through to the LLM/tool-calling path,
+                # which had nothing but the stale, symptom-triage-authored
+                # DOCTOR_OPTIONS card to go on (see _most_recent_availability_marker
+                # below — it isn't producer-aware, so a card symptom_agent showed
+                # for triage purposes gets handed to the LLM here as if it were
+                # live appointment context). The LLM's freehand reply re-engaged
+                # with that card's chest-pain-flavored wording, tripped
+                # diagnosis_guard's diagnostic-phrase check, and got replaced with
+                # its generic "I'm not able to diagnose conditions..." redirect —
+                # a bizarre non-answer to a plain reschedule/cancel request. Same
+                # deterministic "you don't have one" reply as the named-doctor case
+                # just above, minus the doctor's name since none was given.
+                #
+                # Guarded against a plain list/status query ("show my cancelled
+                # appointments") — see _message_looks_like_appointment_list_request's
+                # own comment for why that's a real, distinct false positive here:
+                # names no action at all, just asks to see a list, which the normal
+                # LLM/tool-calling flow below already handles correctly on its own.
+                if not _message_looks_like_appointment_list_request(message):
+                    verb = "cancel" if action == "cancel" else "reschedule"
+                    return f"You don't have an upcoming appointment to {verb}."
 
     # Cancel is a one-way, immediately-effective mutation with no natural
     # confirming step of its own (unlike reschedule, where picking a new slot IS

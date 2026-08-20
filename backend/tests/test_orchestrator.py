@@ -4101,6 +4101,54 @@ def test_run_appointment_agent_different_action_supersedes_a_stale_cancel_disamb
     assert "which one would you like to reschedule" in payload["question"].lower()
 
 
+def test_run_appointment_agent_reschedule_with_zero_active_appointments_and_no_doctor_named(
+    monkeypatch, db, ctx, patient
+):
+    # Reported live: a patient was shown Cardiology availability by symptom_agent
+    # for a chest-pain complaint (never booked anything — just a triage card), then
+    # said "i want to reschedule my appointment" (no doctor named, no real active
+    # appointment to reschedule). This used to fall through every branch with no
+    # deterministic reply, reach the LLM primed only with the stale, symptom-agent-
+    # authored Cardiology card as context, and come back with a diagnosis_guard
+    # redirect ("I'm not able to diagnose conditions...") — a bizarre non-answer to
+    # a plain reschedule request. Must now short-circuit deterministically instead,
+    # same as the already-handled named-doctor-with-no-appointment case.
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM")),
+    )
+
+    # The stale symptom-agent card from triage — present in history exactly as it
+    # would be live, to prove it's no longer treated as relevant appointment context.
+    stale_card = DOCTOR_OPTIONS_MARKER + json.dumps({
+        "department_name": "Cardiology",
+        "note": "Based on what you've described, this mild chest pain related to physical "
+        "activity could be evaluated by Cardiology.",
+        "doctors": [{"doctor_name": "Dr. Ahmed Farooq", "slots": []}],
+    })
+    history = [
+        _row("user", "i have mild chest pain during physical activity"),
+        _row("assistant", stale_card),
+    ]
+    result = appointment_agent.run_appointment_agent(db, ctx, "i want to reschedule my appointment", "en", history)
+
+    assert result == "You don't have an upcoming appointment to reschedule."
+
+
+def test_run_appointment_agent_cancel_with_zero_active_appointments_and_no_doctor_named(
+    monkeypatch, db, ctx, patient
+):
+    # Same gap, cancel side.
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM")),
+    )
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "i want to cancel my appointment", "en", [])
+
+    assert result == "You don't have an upcoming appointment to cancel."
+
+
 def test_run_appointment_agent_does_not_treat_a_retracted_reschedule_as_a_live_action(
     monkeypatch, db, ctx, doctor
 ):
@@ -5121,7 +5169,15 @@ def test_run_appointment_agent_only_binds_its_five_tools(monkeypatch, db, ctx):
 
     monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
 
-    appointment_agent.run_appointment_agent(db, ctx, "cancel my appointment", "en", [])
+    # Deliberately a message with no cancel/reschedule action word and no doctor
+    # name — tools are bound unconditionally for every appointment_agent call
+    # regardless of message content, so this only needs to reach the LLM/tool-
+    # calling path at all, not exercise any particular action-resolution branch.
+    # ("cancel my appointment" used to serve this purpose too, but with zero real
+    # appointments in this test's DB it now correctly short-circuits deterministically
+    # instead of reaching the LLM — see
+    # test_run_appointment_agent_cancel_with_zero_active_appointments_and_no_doctor_named.)
+    appointment_agent.run_appointment_agent(db, ctx, "can you help me with my appointment?", "en", [])
 
     assert captured["tools"] == {
         "book_appointment",
