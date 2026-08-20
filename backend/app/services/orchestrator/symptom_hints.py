@@ -183,7 +183,25 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
         ("endocrin", "internal medicine", "general medicine"),
         "blood sugar symptoms",
     ),
-    (frozenset({"brain", "tumor", "tumour", "cancer", "seizure", "seizures"}), ("neuro", "oncol"), "neurological symptoms"),
+    # A brain tumor is genuinely, clinically first evaluated by a Neurologist
+    # (Oncology is who eventually treats it, but Neurology does the initial
+    # workup/referral) — instructed live: "brain" naming an actual body part/
+    # organ still unconditionally hints Neurology even alongside tumor/cancer
+    # language, same as before. Only a BARE "cancer"/"tumor" claim with no body
+    # part named at all (nothing for Row below to match against) falls to the
+    # orphan-category apology further down when this clinic has no Oncology.
+    (frozenset({"brain", "seizure", "seizures"}), ("neuro",), "neurological symptoms"),
+    (
+        # Same pattern as the urinary/testicular entries above: only a genuine
+        # Oncology match ("oncol") is hinted — when no real Oncology department
+        # exists, this correctly hints nothing at all on its own, and
+        # _ORPHAN_SYMPTOM_CATEGORIES below turns a truly bare cancer/tumor claim
+        # (no body part named, e.g. "I think I have cancer") into an honest
+        # apology instead of a guessed department.
+        frozenset({"tumor", "tumour", "cancer"}),
+        ("oncol",),
+        "cancer/tumor-related symptoms",
+    ),
     (
         # Same neuro category, a second entry rather than folded into the one above:
         # numbness/weakness/tremor point at Neurology specifically, not Oncology —
@@ -467,6 +485,19 @@ _ORPHAN_SYMPTOM_CATEGORIES: tuple[tuple[frozenset[str], str, str | None], ...] =
         frozenset({"testicle", "testicles", "testicular", "testies", "groin", "scrotum", "scrotal"}),
         "groin/testicular symptoms",
         "urolog",
+    ),
+    # Instructed live: a BARE cancer/tumor claim with no body part/organ named at
+    # all (e.g. "I think I have cancer") has nothing for the table above to route
+    # on, and shouldn't get a guessed department — it needs its own honest
+    # apology unless this clinic genuinely has an Oncology department. A claim
+    # that DOES name a body part (e.g. "brain tumour") is unaffected by this —
+    # "brain" still unconditionally hints Neurology via the table entry above,
+    # since a neurologist genuinely is a real, clinically appropriate first stop
+    # for that, even without a dedicated Oncology department.
+    (
+        frozenset({"tumor", "tumour", "cancer"}),
+        "cancer/tumor-related symptoms",
+        "oncol",
     ),
 )
 

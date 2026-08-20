@@ -1280,13 +1280,18 @@ def test_run_symptom_agent_first_message_backstop_skips_when_duration_and_severi
     assert result == "Let me check availability for you."
 
 
-@pytest.mark.parametrize("message", ["i have brain tumor", "i think i have cancer"])
+@pytest.mark.parametrize("message", ["i have diabetes", "i think i have diabetes"])
 def test_run_symptom_agent_first_message_backstop_skips_self_diagnosis_claims(monkeypatch, db, ctx, message):
     # Self-diagnosis claims are deliberately excluded from the backstop — asking
-    # "is that mild, moderate, or severe?" in response to "I have a brain tumor"
+    # "is that mild, moderate, or severe?" in response to "I have diabetes"
     # reads as dismissive for something a patient is already alarmed about; the
     # established fix for this category is a fast, concise LLM-composed redirect
     # instead (see _is_self_diagnosis_claim's own comment in symptom_agent.py).
+    # Uses diabetes rather than brain tumor/cancer here — those are now cancer-
+    # orphan words that short-circuit to the honest apology before the LLM is
+    # even called (see test_run_symptom_agent_apologizes_for_a_bare_cancer_or_
+    # tumor_self_diagnosis_claim below), so they no longer exercise this
+    # specific backstop-skip path.
     monkeypatch.setattr(
         symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Let me check availability for you."
     )
@@ -1710,24 +1715,28 @@ def test_run_symptom_agent_keeps_a_valid_path1_emergency_reply_intact(monkeypatc
 
 
 def test_run_symptom_agent_overrides_path1_for_a_bare_self_diagnosis_claim(monkeypatch, db, ctx, clinic):
-    # Reported live: "i have a brain tumour" got a full PATH 1 emergency reply
-    # while "i think i have a brain tumour" — the identical claim, just hedged —
-    # correctly got a routine department redirect. A bare self-diagnosis claim
-    # (nothing else describing severity/a real red-flag) must get the same
-    # deterministic outcome regardless of the "i think" hedge, so this confirms
-    # the override converts an otherwise-valid PATH 1 reply into a real
-    # Neurology card for the unhedged phrasing.
+    # Reported live (original report used "brain tumour" — see the two cancer/
+    # tumor-specific tests above for why that phrasing now short-circuits to an
+    # apology instead; diabetes exercises the same PATH1-override mechanism
+    # without tripping the newer cancer-orphan behavior): "i have diabetes" got
+    # a full PATH 1 emergency reply while "i think i have diabetes" — the
+    # identical claim, just hedged — correctly got a routine department
+    # redirect. A bare self-diagnosis claim (nothing else describing severity/a
+    # real red-flag) must get the same deterministic outcome regardless of the
+    # "i think" hedge, so this confirms the override converts an
+    # otherwise-valid PATH 1 reply into a real department card for the
+    # unhedged phrasing.
     from datetime import datetime, timedelta, timezone
 
     from app.models.department import Department
     from app.models.doctor import Doctor
     from app.models.slot import Slot
 
-    neurology = Department(clinic_id=clinic.id, name="Neurology")
-    db.add(neurology)
+    general_medicine = Department(clinic_id=clinic.id, name="General Medicine")
+    db.add(general_medicine)
     db.flush()
     doctor = Doctor(
-        clinic_id=clinic.id, department_id=neurology.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        clinic_id=clinic.id, department_id=general_medicine.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
         full_name="Dr. Sana Qureshi", is_active=True,
     )
     db.add(doctor)
@@ -1749,21 +1758,30 @@ def test_run_symptom_agent_overrides_path1_for_a_bare_self_diagnosis_claim(monke
     )
     monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: emergency_reply)
 
-    result = symptom_agent.run_symptom_agent(db, ctx, "i have a brain tumour", "en", [])
+    result = symptom_agent.run_symptom_agent(db, ctx, "i have diabetes", "en", [])
 
     assert result.startswith(DOCTOR_OPTIONS_MARKER)
     payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
-    assert payload["department_name"] == "Neurology"
+    assert payload["department_name"] == "General Medicine"
     assert "1122" not in result
 
 
 def test_run_symptom_agent_keeps_path1_for_a_self_diagnosis_claim_with_a_real_red_flag(
-    monkeypatch, db, ctx
+    monkeypatch, db, ctx, clinic
 ):
     # A self-diagnosis claim genuinely accompanied by a real emergency signal
     # (here: seizure) must still be allowed to go through PATH 1 normally — the
     # override above is scoped to a BARE claim only, never a claim with real
-    # red-flag content alongside it.
+    # red-flag content alongside it. A real Neurology department is added so
+    # "seizure" hints something real — otherwise the top-level orphan-category
+    # apology (from "brain tumour" with no matching Oncology department) would
+    # short-circuit before the LLM is even called, which isn't what this test
+    # is exercising.
+    from app.models.department import Department
+
+    db.add(Department(clinic_id=clinic.id, name="Neurology"))
+    db.flush()
+
     emergency_reply = (
         "This sounds like an emergency; please call 1122 or go to the nearest emergency department right away.\n"
         "1) Keep the person safe from injury and do not restrain them.\n"
@@ -2124,29 +2142,98 @@ def test_run_symptom_agent_recovers_when_the_model_fakes_a_tool_payload_instead_
     assert "Dr. Ali Raza" not in result
 
 
-def test_run_symptom_agent_recovers_neurology_when_the_model_diagnosed_a_brain_tumor(monkeypatch, db, ctx, clinic):
-    # Reported live: "i have brain tumor" got a long free-text breakdown (department
-    # + doctor schedule + booking/reschedule mechanics) from general_info_agent
-    # instead of a concise department card, because the message had no matching
-    # symptom keyword at all and never reached symptom_agent. Now that routing is
-    # fixed (message_classifier._SYMPTOM_KEYWORDS includes "tumor"/"tumour"/
-    # "cancer"), this confirms symptom_agent's own diagnosis-recovery net also has a
-    # real department to fall back to if the model still names the condition in
-    # free text instead of calling the tool.
+def test_run_symptom_agent_apologizes_for_a_bare_cancer_or_tumor_self_diagnosis_claim(monkeypatch, db, ctx, clinic):
+    # Instructed live: this clinic has no Oncology department, so a truly BARE
+    # cancer/tumor claim with no body part/organ named at all (nothing for the
+    # symptom-hint table to route on) must get an honest "no matching
+    # department" apology instead of being left to the LLM to freehand a guess.
+    # A claim that DOES name a body part — "brain tumour" — is a different,
+    # deliberately NOT-apologized case: see the sibling test below, since a
+    # neurologist genuinely is a real first stop for that even without
+    # Oncology. Only a Neurology department exists here (irrelevant to this
+    # bare claim, since nothing hints Neurology without "brain"/"seizure"), so
+    # this fires before the LLM is even called.
     from app.models.department import Department
-    from app.models.doctor import Doctor
-    from app.models.slot import Slot
-    from datetime import datetime, timedelta, timezone
 
     neuro = Department(clinic_id=clinic.id, name="Neurology")
     db.add(neuro)
     db.flush()
+
+    monkeypatch.setattr(
+        symptom_agent.llm,
+        "run_tool_calling_agent",
+        lambda *a, **k: pytest.fail("LLM should never be called — the apology short-circuits first"),
+    )
+
+    result = symptom_agent.run_symptom_agent(db, ctx, "i think i have cancer", "en", [])
+
+    assert not result.startswith(DOCTOR_OPTIONS_MARKER)
+    assert "Neurology" not in result
+    assert "sorry" in result.lower()
+
+
+def test_run_symptom_agent_routes_a_brain_tumor_claim_to_neurology_even_without_oncology(
+    monkeypatch, db, ctx, clinic
+):
+    # Instructed live: "isn't brain tumour treated by neurologist?" — clinically
+    # yes, a suspected brain tumor is genuinely first evaluated by Neurology
+    # (Oncology treats it once confirmed, but Neurology does the initial
+    # workup/referral). Unlike a bare "I have cancer" with no body part named
+    # (see the apology test above), naming "brain" specifically still routes to
+    # Neurology normally, even when this clinic has no Oncology department.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    neurology = Department(clinic_id=clinic.id, name="Neurology")
+    db.add(neurology)
+    db.flush()
     doctor = Doctor(
-        clinic_id=clinic.id,
-        department_id=neuro.id,
-        external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
-        full_name="Dr. Sana Qureshi",
-        is_active=True,
+        clinic_id=clinic.id, department_id=neurology.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Sana Qureshi", is_active=True,
+    )
+    db.add(doctor)
+    db.flush()
+    db.add(Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=20),
+        status="open",
+    ))
+    db.flush()
+
+    diagnostic_reply = "This sounds like it could be a brain tumor. You should get it checked soon."
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: diagnostic_reply)
+
+    result = symptom_agent.run_symptom_agent(db, ctx, "i think i have a brain tumor", "en", [])
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "Neurology"
+    assert payload["doctors"][0]["doctor_name"] == "Dr. Sana Qureshi"
+
+
+def test_run_symptom_agent_routes_a_cancer_claim_to_a_real_oncology_department_when_one_exists(
+    monkeypatch, db, ctx, clinic
+):
+    # The apology above only fires when this clinic genuinely has no matching
+    # department — a clinic that DOES have Oncology should still route there
+    # normally, same as every other _ORPHAN_SYMPTOM_CATEGORIES entry (e.g.
+    # Urology for urinary symptoms).
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.department import Department
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    oncology = Department(clinic_id=clinic.id, name="Oncology")
+    db.add(oncology)
+    db.flush()
+    doctor = Doctor(
+        clinic_id=clinic.id, department_id=oncology.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Amna Siddiqui", is_active=True,
     )
     db.add(doctor)
     db.flush()
@@ -2165,9 +2252,9 @@ def test_run_symptom_agent_recovers_neurology_when_the_model_diagnosed_a_brain_t
 
     assert result.startswith(DOCTOR_OPTIONS_MARKER)
     payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
-    assert payload["department_name"] == "Neurology"
-    assert payload["doctors"][0]["doctor_name"] == "Dr. Sana Qureshi"
-    assert "tumor" not in result.lower()
+    assert payload["department_name"] == "Oncology"
+    assert payload["doctors"][0]["doctor_name"] == "Dr. Amna Siddiqui"
+    assert "checked soon" not in result.lower()
 
 
 def test_run_symptom_agent_leaves_a_diagnostic_reply_alone_when_no_department_can_be_hinted(monkeypatch, db, ctx):
