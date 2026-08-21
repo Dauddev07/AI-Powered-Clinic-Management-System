@@ -37,6 +37,7 @@ from app.services.message_classifier import (
 from app.services.message_classifier import (
     _CANCEL_ACTION_WORDS,
     _RESCHEDULE_ACTION_WORDS,
+    _action_word_is_negated,
     _preceding_assistant_turn_looks_like_a_question,
     is_department_list_request,
     is_department_recommendation_request,
@@ -213,17 +214,29 @@ def _rule_0_7_clinic_logistics_question(message, history, last_role, last_conten
 
 
 def _message_states_a_cancel_or_reschedule_action(message: str) -> bool:
-    """Deliberately just the raw keyword check (_CANCEL_ACTION_WORDS/
-    _RESCHEDULE_ACTION_WORDS, the same shared vocabulary appointment_agent's own
-    _detect_action_intent scans) — NOT needs_booking_action_tools(), which also has
-    its own "preceding assistant turn looks like a question" fallback trigger. That
-    fallback is exactly why rule 3 (which reuses needs_booking_action_tools) sits
-    AFTER rule 2 in the first place (see rule 3's own docstring) — reusing it here,
-    before rule 2, would make a plain screening-answer like "mild" (a reply to a
-    question) misfire this rule too. Only the CURRENT message's own explicit
-    cancel/reschedule wording should be able to jump the queue this early."""
-    words = set(re.findall(r"[a-z0-9']+", message.lower()))
-    return bool(words & (_CANCEL_ACTION_WORDS | _RESCHEDULE_ACTION_WORDS))
+    """The same shared vocabulary appointment_agent's own _detect_action_intent
+    scans (_CANCEL_ACTION_WORDS/_RESCHEDULE_ACTION_WORDS) — NOT
+    needs_booking_action_tools(), which also has its own "preceding assistant
+    turn looks like a question" fallback trigger. That fallback is exactly why
+    rule 3 (which reuses needs_booking_action_tools) sits AFTER rule 2 in the
+    first place (see rule 3's own docstring) — reusing it here, before rule 2,
+    would make a plain screening-answer like "mild" (a reply to a question)
+    misfire this rule too. Only the CURRENT message's own explicit
+    cancel/reschedule wording should be able to jump the queue this early.
+
+    Reported live: "no no not cancel, symptoms" (a patient correcting their own
+    earlier "cancelling" answer) still force-routed to appointment_agent via
+    this rule — a plain word-set intersection has no concept of negation, so
+    the literal word "cancel" inside "not cancel" still counted. Walks tokens
+    in order via _action_word_is_negated (shared with
+    appointment_agent._detect_action_intent, same negation-lookback logic) so
+    a negated mention is correctly skipped instead of jumping the queue."""
+    tokens = re.findall(r"[a-z0-9']+", message.lower())
+    action_words = _CANCEL_ACTION_WORDS | _RESCHEDULE_ACTION_WORDS
+    return any(
+        token in action_words and not _action_word_is_negated(tokens, index)
+        for index, token in enumerate(tokens)
+    )
 
 
 def _rule_0_8_cancel_reschedule_action_overrides_screening_continuity(message, history, last_role, last_content):

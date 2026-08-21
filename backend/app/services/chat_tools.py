@@ -380,6 +380,17 @@ _BARE_SEPARATOR_CLOCK_RE = re.compile(r"\b(\d{1,2})[:.](\d{2})\s*(am|pm)?\b", re
 # "1045" yields hour=10/minute=45, accepted.
 _BARE_DIGIT_CLOCK_RE = re.compile(r"\b(\d{3,4})\s*(am|pm)?\b", re.IGNORECASE)
 
+# Reported live: "mon 12 pm" (an answer to a "what day would you like?"
+# question — the day resolved fine, but the time silently didn't) and "book at
+# mon 12 pm" (the "at" here modifies "mon", not "12 pm", so _AT_CLOCK_RE never
+# matches at all — it requires "at" immediately before the number) both went
+# completely unrecognized as a time. A bare hour with an explicit am/pm
+# marker directly after it, no colon/dot/minutes needed, is unambiguous
+# enough to trust on its own — an accidental "12 pm" appearing for some other
+# reason is vanishingly rare, unlike a bare digit run (see
+# _BARE_DIGIT_CLOCK_RE's own comment on why THAT needs validation first).
+_BARE_HOUR_WITH_MERIDIEM_RE = re.compile(r"\b(\d{1,2})\s*(am|pm)\b", re.IGNORECASE)
+
 
 def _parse_bare_digit_clock(digits: str) -> tuple[str, str] | None:
     """'1045' -> ('10', '45'); '945' -> ('9', '45'). None if the split isn't a
@@ -439,6 +450,12 @@ def resolve_time_of_day_window(message: str) -> tuple[time | None, time | None] 
         split = _parse_bare_digit_clock(bare_digit_match.group(1))
         if split is not None:
             return (_parse_12_hour_clock(split[0], split[1], bare_digit_match.group(2)), None)
+    # Checked after the digit-clock cases above so a longer run like "1045 pm"
+    # is still matched as 10:45 by _BARE_DIGIT_CLOCK_RE first, rather than
+    # this pattern grabbing just the trailing "45 pm" on its own.
+    bare_hour_meridiem_match = _BARE_HOUR_WITH_MERIDIEM_RE.search(message)
+    if bare_hour_meridiem_match:
+        return (_parse_12_hour_clock(bare_hour_meridiem_match.group(1), None, bare_hour_meridiem_match.group(2)), None)
 
     lowered = message.lower()
     for phrase, start, end in _TIME_OF_DAY_PHRASES:

@@ -390,6 +390,25 @@ def test_router_rule0_8_does_not_swallow_a_plain_screening_answer():
 @pytest.mark.parametrize(
     "message",
     [
+        "no no not cancel, symptoms",
+        "don't cancel it, i want to talk about my headache instead",
+        "no not reschedule, just symptoms",
+    ],
+)
+def test_router_rule0_8_does_not_fire_on_a_negated_cancel_or_reschedule_mention(message):
+    # Reported live: "no no not cancel, symptoms" (a patient correcting their
+    # own earlier "cancelling" answer) still force-routed to appointment_agent
+    # via this rule — the old check was a plain word-set intersection with no
+    # concept of negation, so the literal word "cancel" inside "not cancel"
+    # still counted. Must NOT force APPOINTMENT here.
+    from app.services.orchestrator.router import _message_states_a_cancel_or_reschedule_action
+
+    assert _message_states_a_cancel_or_reschedule_action(message) is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
         "when was my last cancelled appointment",
         "what was my last completed appointment",
         "when was my most recent missed appointment",
@@ -754,6 +773,103 @@ def test_run_symptom_agent_only_binds_its_two_tools(monkeypatch, db, ctx):
     assert result == "reply"
     assert captured["tools"] == {"get_department_availability", "find_doctors_by_name"}
     assert "SYMPTOM TRIAGE RULE" in captured["system_prompt"]
+
+
+# --- emergency-downgrade safety note ------------------------------------------------
+# Reported live, full transcript: "very severe" headache -> PATH 1 emergency reply
+# (twice, once initially and once again after "but i dont wana goto er") -> "no no
+# its notn severe its mild" -> screened normally -> ended with a plain "General
+# Medicine would be appropriate" card with ZERO acknowledgment that this same patient
+# had just described the same headache as an emergency moments earlier.
+
+
+def test_append_emergency_downgrade_safety_note_adds_note_to_a_doctor_options_card():
+    history = [
+        _row("user", "i got headache"),
+        _row("assistant", "Could you tell me how severe this is (mild, moderate, or severe) and how long you've had it?"),
+        _row("user", "very severe"),
+        _row("assistant", "This sounds like an emergency. Call 1122 right away or go to the nearest ER.\n\n1) Sit down, stay calm..."),
+        _row("user", "but i dont wana goto er"),
+        _row("assistant", "I understand, but a very severe headache can be life-threatening. Please call 1122 right away..."),
+        _row("user", "no no its notn severe its mild"),
+        _row("assistant", "Could you let me know how long you've been experiencing the headache and if you've noticed any other symptoms?"),
+    ]
+    reply = DOCTOR_OPTIONS_MARKER + json.dumps(
+        {"department_name": "General Medicine", "note": "Based on the head pain described, General Medicine would be appropriate.", "doctors": []}
+    )
+
+    result = symptom_agent._append_emergency_downgrade_safety_note(reply, history)
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert "General Medicine would be appropriate" in payload["note"]
+    assert "described as very severe" in payload["note"]
+    assert "seek emergency care immediately" in payload["note"]
+
+
+def test_append_emergency_downgrade_safety_note_adds_note_to_plain_text_reply():
+    history = [
+        _row("user", "i got headache"),
+        _row("assistant", "This sounds like an emergency. Call 1122 right away or go to the nearest ER."),
+    ]
+
+    result = symptom_agent._append_emergency_downgrade_safety_note("Please describe your symptoms further.", history)
+
+    assert "Please describe your symptoms further." in result
+    assert "seek emergency care immediately" in result
+
+
+def test_append_emergency_downgrade_safety_note_no_note_when_no_earlier_emergency_happened():
+    # Regression guard: a completely ordinary conversation with no prior
+    # emergency reply must NOT get this note attached at all.
+    history = [
+        _row("user", "i got a headache"),
+        _row("assistant", "Could you tell me how severe this is (mild, moderate, or severe) and how long you've had it?"),
+        _row("user", "mild, since 2 days"),
+    ]
+    reply = DOCTOR_OPTIONS_MARKER + json.dumps(
+        {"department_name": "General Medicine", "note": "General Medicine would be appropriate.", "doctors": []}
+    )
+
+    result = symptom_agent._append_emergency_downgrade_safety_note(reply, history)
+
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["note"] == "General Medicine would be appropriate."
+
+
+def test_append_emergency_downgrade_safety_note_skips_a_fresh_emergency_reply():
+    # A FRESH PATH 1 emergency reply must never get the downgrade note
+    # appended to itself — it's already addressing the emergency head-on.
+    history = [
+        _row("user", "i got headache"),
+        _row("assistant", "This sounds like an emergency. Call 1122 right away..."),
+    ]
+    fresh_emergency_reply = "This sounds like an emergency. Call 1122 right away or go to the nearest ER."
+
+    result = symptom_agent._append_emergency_downgrade_safety_note(fresh_emergency_reply, history)
+
+    assert result == fresh_emergency_reply
+
+
+def test_append_emergency_downgrade_safety_note_triggers_on_the_persisted_red_flag_column_too():
+    # The red_flag.py pre-guard's own canned message also happens to contain
+    # "1122" (verified against RED_FLAG_MESSAGE_EN), but this proves the
+    # persisted ConversationMemory.red_flag column is checked independently,
+    # not just the text signature — a future wording change to that message
+    # must not silently break this safety net.
+    history = [
+        SimpleNamespace(role="user", content="i cant breathe"),
+        SimpleNamespace(role="assistant", content="Please seek emergency care.", red_flag=True),
+        SimpleNamespace(role="user", content="no its fine actually, just mild"),
+    ]
+    reply = DOCTOR_OPTIONS_MARKER + json.dumps(
+        {"department_name": "General Medicine", "note": "General Medicine would be appropriate.", "doctors": []}
+    )
+
+    result = symptom_agent._append_emergency_downgrade_safety_note(reply, history)
+
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert "seek emergency care immediately" in payload["note"]
 
 
 def test_run_symptom_agent_fetches_a_second_department_named_in_the_note_but_never_queried(
@@ -4682,6 +4798,119 @@ def test_run_appointment_agent_merges_a_later_named_day_with_an_earlier_resolved
     payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
     assert payload["kind"] == "book_confirm"
     assert payload["candidate"]["slot_id"] == str(matching_slot.id)
+
+
+def test_run_appointment_agent_books_the_exact_time_even_when_later_slots_also_match(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # Reported live, full transcript: "book at 12 pm" -> asked which day ->
+    # "mon 12 pm" -> showed a 5-slot card (12:00, 12:30, 1:00, 1:30, 2:00 —
+    # all "at or after 12pm", the SAME lower-bound semantics used for a plain
+    # browsing question) instead of ever booking anything, since "at X" being
+    # an inclusive lower bound meant more than one slot always matched. When
+    # an exact slot exists at THAT SPECIFIC time, "book at 12pm" plainly means
+    # book that one — regardless of how many later slots also matched the
+    # broader filter.
+    from datetime import date, datetime, timedelta, timezone
+
+    from app.models.slot import Slot
+    from app.services.chat_tools import resolve_bare_weekday_window
+
+    resolved_iso_date, _ = resolve_bare_weekday_window("on mon")
+    noon = datetime.combine(
+        date.fromisoformat(resolved_iso_date), datetime.min.time(), tzinfo=timezone.utc
+    ).replace(hour=12, minute=0)
+    exact_slot = Slot(clinic_id=clinic.id, doctor_id=doctor.id, start_utc=noon, end_utc=noon + timedelta(minutes=30), status="open")
+    later_slots = [
+        Slot(
+            clinic_id=clinic.id, doctor_id=doctor.id,
+            start_utc=noon + timedelta(minutes=30 * i), end_utc=noon + timedelta(minutes=30 * (i + 1)),
+            status="open",
+        )
+        for i in range(1, 5)
+    ]
+    db.add_all([exact_slot, *later_slots])
+    db.flush()
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM once the day+time are both known")),
+    )
+    history = [
+        _row("user", "show me available slots for cardiology"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + json.dumps({
+            "department_name": "Cardiology",
+            "doctors": [{"doctor_id": str(doctor.id), "doctor_name": doctor.full_name, "slots": []}],
+        })),
+        _row("user", "book at 12 pm"),
+        _row("assistant", DOCTOR_DISAMBIGUATION_MARKER + json.dumps({
+            "kind": "which_day_for_slot",
+            "question": f"What day would you like to see {doctor.full_name}?",
+            "doctor_id": str(doctor.id),
+            "doctor_name": doctor.full_name,
+            "department_name": "Cardiology",
+            "specialization": None,
+            "earliest_time": "12:00:00", "latest_time": None,
+        })),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "mon 12 pm", "en", history)
+
+    assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "book_confirm"
+    assert payload["candidate"]["slot_id"] == str(exact_slot.id)
+
+
+def test_run_appointment_agent_full_slot_pick_survives_an_unrelated_question_in_between(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # A single-doctor card shown -> an unrelated question asked and answered
+    # in between (never touching appointment_agent's own markers at all) ->
+    # THEN a complete "book at [day] [time]" message naming no doctor (since
+    # only one was ever shown) must still resolve straight to a real booking
+    # confirmation — the marker scan (_most_recent_availability_marker) looks
+    # across the WHOLE history for the most recent card, not just the last
+    # turn, so the detour in between doesn't lose the doctor context.
+    from datetime import date, datetime, timedelta, timezone
+
+    from app.models.slot import Slot
+    from app.services.chat_tools import resolve_bare_weekday_window
+
+    resolved_iso_date, _ = resolve_bare_weekday_window("on mon")
+    noon = datetime.combine(
+        date.fromisoformat(resolved_iso_date), datetime.min.time(), tzinfo=timezone.utc
+    ).replace(hour=12, minute=0)
+    exact_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id, start_utc=noon, end_utc=noon + timedelta(minutes=30), status="open"
+    )
+    later_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=noon + timedelta(minutes=30), end_utc=noon + timedelta(minutes=60), status="open",
+    )
+    db.add_all([exact_slot, later_slot])
+    db.flush()
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM")),
+    )
+    history = [
+        _row("user", "show me available slots for cardiology"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + json.dumps({
+            "department_name": "Cardiology",
+            "doctors": [{"doctor_id": str(doctor.id), "doctor_name": doctor.full_name, "slots": []}],
+        })),
+        _row("user", "what are your clinic hours?"),
+        _row("assistant", "We're open 9am to 5pm Monday to Saturday."),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "book at mon 12 pm", "en", history)
+
+    assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "book_confirm"
+    assert payload["candidate"]["slot_id"] == str(exact_slot.id)
 
 
 def test_run_appointment_agent_narrows_after_resolving_a_name_disambiguation_reply(

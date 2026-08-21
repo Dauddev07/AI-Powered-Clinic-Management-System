@@ -33,15 +33,14 @@ from app.services.diagnosis_guard import enforce_no_diagnosis
 from app.services.language import detect_language
 from app.services.memory_summary import reset_patient_summary
 from app.services.message_classifier import is_symptom_message
-from app.services.orchestrator.agents.appointment_agent import run_appointment_agent
+from app.services.orchestrator.agents.appointment_agent import _detect_action_intent, run_appointment_agent
 from app.services.orchestrator.agents.general_info_agent import run_general_info_agent
-from app.services.orchestrator.agents.symptom_agent import run_symptom_agent
+from app.services.orchestrator.agents.symptom_agent import _looks_like_a_valid_emergency_reply, run_symptom_agent
 from app.services.orchestrator.router import (
     APPOINTMENT,
     GENERAL_INFO,
     SYMPTOM_GENERAL,
     _message_is_clinic_logistics_question,
-    _message_states_a_cancel_or_reschedule_action,
     classify_agent_intent,
 )
 from app.services.red_flag import detect_red_flag, red_flag_message
@@ -248,10 +247,21 @@ _COMPOUND_INTENT_QUESTION_SIGNATURE = "which would you like me to help with firs
 
 def _detect_compound_intent(message: str) -> tuple[str, str] | None:
     """Returns (label_a, label_b) naming the two distinct things detected in
-    `message`, or None when only one (or zero) applies."""
+    `message`, or None when only one (or zero) applies.
+
+    Reported live: "no no not cancel, symptoms" (a patient correcting their
+    own earlier "cancelling" answer) still saw a compound message and re-asked
+    the same clarifying question — router._message_states_a_cancel_or_
+    reschedule_action is a bare keyword check with no negation awareness (by
+    its own docstring, deliberately, for its own different use case in the
+    router cascade), so the literal word "cancel" inside "not cancel" still
+    counted. appointment_agent._detect_action_intent is the negation-aware
+    version already built for exactly this (walks tokens in order, skips a
+    negated match via _action_word_is_negated) — used here instead so a
+    correction/retraction is read the same way a human would."""
     if not is_symptom_message(message):
         return None
-    if _message_states_a_cancel_or_reschedule_action(message):
+    if _detect_action_intent(message) in ("cancel", "reschedule"):
         return ("symptom", "cancel_reschedule")
     if _message_is_clinic_logistics_question(message):
         return ("symptom", "logistics")
@@ -275,7 +285,10 @@ def _label_matches_choice(message: str, label: str) -> bool:
     if label == "symptom":
         return is_symptom_message(message) or bool(re.search(r"\bsymptoms?\b", message.lower()))
     if label == "cancel_reschedule":
-        return _message_states_a_cancel_or_reschedule_action(message) or bool(
+        # Negation-aware (see _detect_compound_intent's own comment) — "not
+        # cancel, symptoms" must NOT match this label just because the word
+        # "cancel" appears in it.
+        return _detect_action_intent(message) in ("cancel", "reschedule") or bool(
             re.search(r"\bappointment\b", message.lower())
         )
     if label == "logistics":
@@ -443,11 +456,20 @@ def handle_chat_message(
 
     reply = _run_post_agent_guards(reply, language)
 
+    # A PATH 1 emergency reply from symptom_agent's own screening (a patient's
+    # stated severity, e.g. "very severe", not the red_flag.py regex layer
+    # above) was never persisted as red_flag=True at all — only the pre-guard
+    # path was. That gap meant _session_had_an_earlier_emergency_flag
+    # (symptom_agent.py) had to fall back to scanning for the "1122" text
+    # signature instead of this column; fixed at the source here so the
+    # column is accurate regardless of which layer flagged the emergency.
+    is_red_flag_reply = intent == SYMPTOM_GENERAL and _looks_like_a_valid_emergency_reply(reply)
+
     _save_message(db, ctx, session_id, "user", message)
-    _save_message(db, ctx, session_id, "assistant", reply)
+    _save_message(db, ctx, session_id, "assistant", reply, red_flag=is_red_flag_reply)
     db.commit()
 
-    return ChatTurnResult(session_id=session_id, reply=reply, red_flag=False)
+    return ChatTurnResult(session_id=session_id, reply=reply, red_flag=is_red_flag_reply)
 
 
 def _session_title(db: Session, ctx: ClinicContext, session_id: uuid.UUID) -> str:

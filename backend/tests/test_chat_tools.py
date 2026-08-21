@@ -1103,3 +1103,26 @@ def test_resolve_time_of_day_window_rejects_an_implausible_bare_digit_time():
     # "2024" (e.g. a year) splits as hour=20/minute=24 — not a plausible
     # 12-hour clock time, so this must NOT be misread as a time at all.
     assert resolve_time_of_day_window("in 2024 I had surgery") is None
+
+
+# Reported live: "mon 12 pm" (an answer to a "what day would you like?"
+# question) and "book at mon 12 pm" (the "at" here modifies "mon", not "12
+# pm" — _AT_CLOCK_RE requires "at" immediately before the number) both went
+# completely unrecognized as a time at all — no colon/dot, and only 2 digits
+# (too few for the bare-digit-run case), but with an explicit am/pm marker.
+
+
+def test_resolve_time_of_day_window_accepts_a_bare_hour_with_explicit_meridiem():
+    assert resolve_time_of_day_window("12 pm") == (time(12, 0), None)
+    assert resolve_time_of_day_window("3 pm") == (time(15, 0), None)
+
+
+def test_resolve_time_of_day_window_accepts_a_bare_hour_with_meridiem_alongside_a_day():
+    assert resolve_time_of_day_window("mon 12 pm") == (time(12, 0), None)
+    assert resolve_time_of_day_window("book at mon 12 pm") == (time(12, 0), None)
+
+
+def test_resolve_time_of_day_window_prefers_the_longer_digit_run_over_bare_hour_meridiem():
+    # "1045 pm" must still resolve as 10:45 PM via the digit-clock case, not
+    # get misread as just "45 pm" by the bare-hour-with-meridiem fallback.
+    assert resolve_time_of_day_window("1045 pm") == (time(22, 45), None)

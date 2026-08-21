@@ -398,7 +398,77 @@ def _departments_named_in_note_but_not_covered(
 # department against what the patient's own symptoms actually support.
 
 
+def _session_had_an_earlier_emergency_flag(history: list[ConversationMemory]) -> bool:
+    """True when some earlier assistant turn THIS session was a genuine
+    emergency reply — either the deterministic red_flag.py guard (persisted
+    as ConversationMemory.red_flag=True by app.services.chat) or this agent's
+    own PATH 1 determination (not separately persisted as red_flag today, so
+    also checked via _looks_like_a_valid_emergency_reply's "1122" signature —
+    the one thing every PATH 1 reply contains and nothing else in this
+    prompt ever produces, per that function's own comment)."""
+    for row in history:
+        if getattr(row, "role", None) != "assistant":
+            continue
+        if getattr(row, "red_flag", False):
+            return True
+        if _looks_like_a_valid_emergency_reply(getattr(row, "content", "") or ""):
+            return True
+    return False
+
+
+# Reported live: a patient described a headache as "very severe" (a real PATH 1
+# emergency reply, twice — once initially, once again after they said "but i
+# dont wana goto er"), then said "no no its not severe its mild" — the very
+# next reply accepted this with ZERO acknowledgment of the earlier severe
+# claim, screened normally, and ended with a plain "General Medicine would be
+# appropriate" card as if the severe episode had never happened. Nothing
+# challenges or double-checks a downgrade like this today — it's entirely up
+# to the model's own in-context judgment, unlike every other safety-critical
+# decision in this codebase, which has a real code backstop. This still
+# RESPECTS the patient's own self-correction (never repeats the scary message
+# again, never blocks the routine booking) — it only makes sure the earlier
+# claim isn't silently erased, by attaching a one-time reminder to whatever
+# routine reply eventually follows.
+_EMERGENCY_DOWNGRADE_SAFETY_NOTE = (
+    "Earlier in this conversation this was described as very severe. If it becomes that severe "
+    "again, or you notice any concerning new symptoms, please seek emergency care immediately."
+)
+
+
+def _append_emergency_downgrade_safety_note(reply: str, history: list[ConversationMemory]) -> str:
+    if _looks_like_a_valid_emergency_reply(reply):
+        # This reply IS itself a fresh PATH 1 emergency reply — nothing to
+        # append, the emergency is already being addressed head-on.
+        return reply
+    if not _session_had_an_earlier_emergency_flag(history):
+        return reply
+    if reply.startswith(DOCTOR_OPTIONS_MARKER):
+        payload = json.loads(reply[len(DOCTOR_OPTIONS_MARKER):])
+        existing_note = payload.get("note")
+        payload["note"] = f"{existing_note} {_EMERGENCY_DOWNGRADE_SAFETY_NOTE}" if existing_note else _EMERGENCY_DOWNGRADE_SAFETY_NOTE
+        return DOCTOR_OPTIONS_MARKER + json.dumps(payload, default=str)
+    if reply.startswith((DEPARTMENT_LIST_MARKER, NO_SLOTS_MARKER)):
+        # Multi-department/no-slots shapes are rarer right after a downgrade
+        # and more involved to rewrite structurally — left untouched rather
+        # than risk corrupting a real card; the common single-department case
+        # above is what the reported transcript actually showed.
+        return reply
+    return f"{reply}\n\n{_EMERGENCY_DOWNGRADE_SAFETY_NOTE}"
+
+
 def run_symptom_agent(
+    db: Session,
+    ctx: ClinicContext,
+    message: str,
+    language: str,
+    history: list[ConversationMemory],
+) -> str:
+    return _append_emergency_downgrade_safety_note(
+        _run_symptom_agent_body(db, ctx, message, language, history), history
+    )
+
+
+def _run_symptom_agent_body(
     db: Session,
     ctx: ClinicContext,
     message: str,

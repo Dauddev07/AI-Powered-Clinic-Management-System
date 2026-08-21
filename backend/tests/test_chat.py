@@ -82,6 +82,33 @@ def test_symptom_general_intent_routes_to_symptom_agent(db, ctx, monkeypatch):
     assert result.reply == "Let's figure out which department fits."
 
 
+def test_symptom_agents_own_path1_emergency_reply_is_persisted_as_red_flag(db, ctx, monkeypatch):
+    # Requested: only the red_flag.py pre-guard's own canned message was ever
+    # persisted with red_flag=True — symptom_agent's own PATH 1 determination
+    # (a patient's stated severity, e.g. "very severe") was never marked at
+    # all, so nothing downstream (including the emergency-downgrade safety
+    # note) could reliably tell "this session already had an emergency" from
+    # the DB column alone.
+    _patch_intent(monkeypatch, SYMPTOM_GENERAL)
+    _patch_symptom_reply(
+        monkeypatch,
+        "This sounds like an emergency. Call 1122 right away or go to the nearest ER.",
+    )
+
+    result = handle_chat_message(db, ctx, "very severe headache", None)
+
+    assert result.red_flag is True
+
+
+def test_symptom_agents_ordinary_reply_is_not_persisted_as_red_flag(db, ctx, monkeypatch):
+    _patch_intent(monkeypatch, SYMPTOM_GENERAL)
+    _patch_symptom_reply(monkeypatch, "Let's figure out which department fits.")
+
+    result = handle_chat_message(db, ctx, "I have a mild headache", None)
+
+    assert result.red_flag is False
+
+
 def test_appointment_intent_routes_to_appointment_agent(db, ctx, monkeypatch):
     _patch_intent(monkeypatch, APPOINTMENT)
 
@@ -220,6 +247,41 @@ def test_compound_message_answered_with_an_unrelated_reply_falls_through_to_norm
     result = handle_chat_message(db, ctx, "where is this clinic located", first.session_id)
 
     assert result.reply == "We're open 9am-5pm."
+
+
+def test_compound_correction_after_a_wrong_choice_is_not_reasked_as_compound_again(db, ctx, monkeypatch):
+    # Reported live, full transcript: "i am having pain in my back, i want to
+    # cancel my appointment" -> asked which one first -> "cancelling" ->
+    # appointment_agent said "you don't have an upcoming appointment to
+    # cancel" -> "no no not cancel, symptoms" (a correction) WRONGLY got the
+    # exact same compound question again, instead of being read as "just the
+    # symptom, please" — router._message_states_a_cancel_or_reschedule_action
+    # is a bare keyword check with no negation awareness, so the literal word
+    # "cancel" inside "not cancel" still counted as a second thing.
+    monkeypatch.setattr(
+        "app.services.chat.run_appointment_agent",
+        lambda db, ctx, message, language, history: "You don't have an upcoming appointment to cancel.",
+    )
+    seen = {}
+
+    def fake_symptom_agent(db, ctx, message, language, history):
+        seen["message"] = message
+        return "Let's figure out which department fits."
+
+    monkeypatch.setattr("app.services.chat.run_symptom_agent", fake_symptom_agent)
+
+    original = "i am having pain in my back, i want to cancel my appointment"
+    first = handle_chat_message(db, ctx, original, None)
+    assert "which would you like me to help with first" in first.reply.lower()
+
+    second = handle_chat_message(db, ctx, "cancelling", first.session_id)
+    assert second.reply == "You don't have an upcoming appointment to cancel."
+
+    third = handle_chat_message(db, ctx, "no no not cancel,symptoms", second.session_id)
+
+    assert "which would you like me to help with first" not in third.reply.lower()
+    assert third.reply == "Let's figure out which department fits."
+    assert seen["message"] == "no no not cancel,symptoms"
 
 
 def test_a_genuinely_coherent_single_ask_is_never_treated_as_compound(db, ctx, monkeypatch):
