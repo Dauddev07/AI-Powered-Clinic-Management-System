@@ -570,12 +570,50 @@ def _reschedule_different_day_reply(appointment: dict) -> str:
 # all to know the answer — same-day-only means ANY different day is refused,
 # regardless of which one.
 _VAGUE_DIFFERENT_DAY_RE = re.compile(
-    r"\b(?:a\s+|some\s+)?(?:different|another|other)\s+(?:day|date)\b", re.IGNORECASE
+    r"\b(?:a\s+|some\s+)?(?:different|another|other)\s+(?:day|date)\b"
+    # Reported live: "anyother day then this one" — "any"+"other" fused into
+    # one word with no space at all — has no word boundary before "other" for
+    # the pattern above to find at all ("y" immediately precedes "o"), a
+    # common informal contraction distinct from the properly-spaced "any
+    # other day" (already matched above via the bare "other day" alternative).
+    r"|\banyother\b",
+    re.IGNORECASE,
 )
 
 
 def _message_asks_for_a_different_day_vaguely(message: str) -> bool:
     return bool(_VAGUE_DIFFERENT_DAY_RE.search(message))
+
+
+# Reported live: a reschedule slot-pick card shown ("Select a time below to
+# reschedule your appointment with Dr. X.") -> "anyother day then this one" —
+# this follow-up names NO cancel/reschedule keyword and NO doctor at all, so
+# resolved_appointment/resolved_appointment_action never got set for this turn
+# (every place that sets them requires _detect_action_intent/
+# _most_recent_action_intent to find an action word first). That meant this
+# message skipped the ENTIRE deterministic reschedule pipeline below —
+# including the same-day-only enforcement — and fell straight to the LLM,
+# which has zero code-level guarantee against offering a different day (and
+# did: it called get_department_availability for a different date and showed
+# it). Recovers the real appointment being rescheduled from the shown card's
+# own note text (composed in code, never model-generated — see the note built
+# a few lines below this), the same "context isn't just the current message"
+# principle _most_recently_named_doctor already applies for a plain doctor
+# card one level up.
+_RESCHEDULE_CARD_NOTE_RE = re.compile(r"to reschedule your appointment with (.+?)\.\s*$")
+
+
+def _pending_reschedule_flow_appointment(db: Session, ctx: ClinicContext, history: list[ConversationMemory]) -> dict | None:
+    marker = _most_recent_availability_marker(history)
+    if marker is None:
+        return None
+    match = _RESCHEDULE_CARD_NOTE_RE.search(marker.get("note") or "")
+    if match is None:
+        return None
+    doctor_name = match.group(1).strip()
+    active = list_upcoming_appointments(db, ctx)
+    matches = [a for a in active if a["doctor_name"] == doctor_name]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _cancel_confirmation_reply(appointment: dict, phrased_as_capability_question: bool = False) -> str:
@@ -1851,6 +1889,17 @@ def run_appointment_agent(
                 if not _message_looks_like_appointment_list_request(message):
                     verb = "cancel" if action == "cancel" else "reschedule"
                     return f"You don't have an upcoming appointment to {verb}."
+
+    # Recovers a reschedule already in progress (a slot-pick card just shown)
+    # for a follow-up naming no action word and no doctor at all — see
+    # _pending_reschedule_flow_appointment's own comment. Only engages when
+    # NOTHING else resolved anything this turn, and never for an explicit slot
+    # pick (that has its own dedicated confirm-then-act handling below).
+    if resolved_appointment is None and not _message_has_explicit_slot_id(message):
+        recovered_reschedule_appointment = _pending_reschedule_flow_appointment(db, ctx, history)
+        if recovered_reschedule_appointment is not None:
+            resolved_appointment = recovered_reschedule_appointment
+            resolved_appointment_action = "reschedule"
 
     # Cancel is a one-way, immediately-effective mutation with no natural
     # confirming step of its own (unlike reschedule, where picking a new slot IS

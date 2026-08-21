@@ -3598,6 +3598,54 @@ def test_run_appointment_agent_refuses_a_reschedule_naming_a_different_day_vague
     assert "cancel" in result.lower()
 
 
+def test_run_appointment_agent_refuses_a_different_day_follow_up_naming_no_action_word_at_all(
+    monkeypatch, db, ctx, clinic, department, doctor, patient
+):
+    # Reported live: a reschedule slot-pick card shown ("Select a time below
+    # to reschedule your appointment with Dr. X.") -> "anyother day then this
+    # one" — this follow-up names NO cancel/reschedule keyword and NO doctor
+    # at all, so resolved_appointment never got set for this turn (every
+    # place that sets it requires an action word first), which meant this
+    # message skipped the ENTIRE deterministic reschedule pipeline —
+    # including the same-day-only refusal — and fell straight to the LLM,
+    # which showed a real card for a DIFFERENT day with zero guarantee
+    # against it. Also covers "anyother" (no space) not matching the
+    # existing vague-different-day regex at all.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.appointment import Appointment
+    from app.models.slot import Slot
+
+    appt_start = datetime.now(timezone.utc) + timedelta(days=1)
+    slot = Slot(clinic_id=clinic.id, doctor_id=doctor.id, start_utc=appt_start, end_utc=appt_start + timedelta(minutes=30))
+    db.add(slot)
+    db.flush()
+    db.add(Appointment(clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id, status="confirmed"))
+    db.flush()
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM for a same-day-only refusal")),
+    )
+    monkeypatch.setattr(
+        appointment_agent, "get_department_availability",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not query availability for a different day")),
+    )
+    history = [
+        _row("user", "reschedule my appointment"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + json.dumps({
+            "department_name": department.name,
+            "note": f"Select a time below to reschedule your appointment with {doctor.full_name}.",
+            "doctors": [{"doctor_id": str(doctor.id), "doctor_name": doctor.full_name, "slots": []}],
+        })),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "anyother day then this one", "en", history)
+
+    assert "same day" in result.lower()
+    assert "cancel" in result.lower()
+
+
 def test_run_appointment_agent_generic_doctor_availability_question_falls_through_normally(
     monkeypatch, db, ctx, doctor
 ):
