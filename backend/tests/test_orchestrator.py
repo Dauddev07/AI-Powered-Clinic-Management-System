@@ -3103,6 +3103,30 @@ def test_run_appointment_agent_suggests_next_steps_after_a_reschedule_cutoff_rep
     assert "cancel it and book" not in result.lower()
 
 
+def test_run_appointment_agent_suggests_next_steps_after_a_booking_cap_reply(monkeypatch, db, ctx):
+    # Reported live: "show me available slots for general medicine" -> picked a
+    # slot -> "You've reached the limit of 2 appointments in General Medicine
+    # for this day." -> "what to do now?" got NO guidance at all — it fell
+    # through to the LLM/tool-calling path with nothing resolved this turn,
+    # which the bare-confirmation-suppression fix correctly refused ("could you
+    # tell me again which appointment..."), a confusing non-answer to a plain
+    # "what now" question. Also the trigger for "what TO do now" (no "can/
+    # should/do I do") not matching _WHAT_CAN_I_DO_NOW_RE at all before this fix.
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM for this deterministic reply")),
+    )
+    history = [
+        _row("user", "book with dr ali raza at mon aug 24 11:00 am"),
+        _row("assistant", "You've reached the limit of 2 appointments in General Medicine for this day."),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "what to do now?", "en", history)
+
+    assert "different day" in result.lower() or "another day" in result.lower()
+    assert "different department" in result.lower()
+
+
 def test_run_appointment_agent_suggests_cancel_and_rebook_after_a_reschedule_cap_reply(monkeypatch, db, ctx):
     # The reschedule daily-cap reply is a genuinely different limit than the
     # cutoff above — cancelling is NOT subject to it, so "cancel and book new"

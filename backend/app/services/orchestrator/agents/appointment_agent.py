@@ -447,7 +447,11 @@ def _booking_cap_reply(department_name: str) -> str:
 # substring match on the exact fixed phrasing is a reliable, simple way to tell
 # which one was just shown.
 _WHAT_CAN_I_DO_NOW_RE = re.compile(
-    r"\bwhat (?:can|should|do) i do(?: now)?\b|\bwhat (?:are my options|else can i do)\b|\bwhat now\b",
+    # Reported live: "what to do now?" (following a booking-cap reply) didn't
+    # match at all — the original pattern only covered "what can/should/do I
+    # do", never the "what TO do" construction with no subject pronoun.
+    r"\bwhat (?:can|should|do) i do(?: now)?\b|\bwhat to do(?: now)?\b"
+    r"|\bwhat (?:are my options|else can i do)\b|\bwhat now\b",
     re.IGNORECASE,
 )
 
@@ -492,6 +496,19 @@ def _next_steps_after_reschedule_cap_reply() -> str:
         "reschedule limit for this day has already been reached. You can contact the clinic "
         "directly, or cancel this appointment and book a new one instead — cancelling "
         "isn't subject to that reschedule limit."
+    )
+
+
+def _next_steps_after_booking_cap_reply() -> str:
+    # Reported live: "what to do now?" right after this reply got no guidance
+    # at all — it fell through to the LLM/tool-calling path with nothing
+    # resolved this turn, which suppress_bare_confirmation_booking correctly
+    # refused ("could you tell me again which appointment..."), a confusing
+    # non-answer to what was actually a plain "what now" question.
+    return (
+        "That department's daily booking limit for this day has already been reached, so no "
+        "further appointments can be booked there today. You can either browse availability for "
+        "a different day, or book with a different department instead."
     )
 
 
@@ -1526,9 +1543,10 @@ def run_appointment_agent(
     if _message_asks_how_to_book(message) and _most_recent_availability_marker(history) is not None:
         return _HOW_TO_BOOK_REPLY
 
-    # "What can I do now?" right after a cancel/reschedule cutoff or reschedule
-    # daily-cap reply — see _WHAT_CAN_I_DO_NOW_RE's own comment for why this is
-    # checked as a substring match on the assistant's last fixed reply text.
+    # "What can I do now?" right after a cancel/reschedule cutoff or a
+    # reschedule/booking daily-cap reply — see _WHAT_CAN_I_DO_NOW_RE's own
+    # comment for why this is checked as a substring match on the assistant's
+    # last fixed reply text.
     if _message_asks_what_can_i_do_now(message):
         last_reply = _most_recent_assistant_message(history)
         if last_reply is not None:
@@ -1538,6 +1556,8 @@ def run_appointment_agent(
                 return _next_steps_after_reschedule_cutoff_reply()
             if "already been rescheduled" in last_reply and "for that department" in last_reply:
                 return _next_steps_after_reschedule_cap_reply()
+            if "reached the limit of" in last_reply and "appointments in" in last_reply:
+                return _next_steps_after_booking_cap_reply()
 
     # "What's my most recent cancelled/completed/missed appointment" is answered
     # entirely from the real DB — see _most_recent_appointment_by_status_reply's
