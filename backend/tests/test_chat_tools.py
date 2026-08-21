@@ -367,6 +367,59 @@ def test_build_tools_forces_cancel_appointment_to_use_redirect_id_regardless_of_
     assert "Dr. Jane Example" in result
 
 
+def test_build_tools_cancel_appointment_refuses_without_a_verified_redirect_id(db, clinic, doctor, patient, ctx):
+    # Reported live: a cancel-confirmation question was asked ("...let me know if
+    # you'd like me to go ahead and cancel it"), the patient then asked an unrelated
+    # question, got answered, and only THEN said "yes" — three turns later.
+    # needs_booking_action_tools' full-history marker scan (message_classifier.py)
+    # kept cancel_appointment bound for that later turn despite the confirmation no
+    # longer being live, and the LLM — seeing its own earlier question sitting in
+    # conversation history — called cancel_appointment on its own initiative,
+    # supplying whatever appointment_id it inferred, and the real appointment got
+    # cancelled with no fresh, code-verified confirmation at all. Without
+    # cancel_redirect_appointment_id set (i.e. no deterministic, live confirmation
+    # from appointment_agent's own resolution), the tool must refuse to cancel
+    # anything — regardless of what appointment_id the model supplies — rather
+    # than trusting the model's own judgment for a real mutating action.
+    real_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=1))
+    real_appointment = _appointment(db, clinic, patient, doctor, real_slot)
+
+    tools = build_tools(db, ctx)  # no cancel_redirect_appointment_id
+    cancel_tool = next(t for t in tools if t.name == "cancel_appointment")
+
+    result = cancel_tool.invoke({"appointment_id": str(real_appointment.id)})
+
+    assert "has been cancelled" not in result
+    assert "cancel" in result.lower()
+
+
+def test_build_tools_reschedule_appointment_refuses_without_a_verified_redirect_id(
+    db, clinic, doctor, patient, ctx
+):
+    # Same vulnerability class and same fix as cancel's own test just above,
+    # applied to reschedule: reschedule_redirect_appointment_id is ONLY ever set by
+    # appointment_agent's own deterministic resolution — the `or appointment_id`
+    # fallback that used to let the model supply its own appointment_id had no
+    # legitimate use case, and was exploitable the same way (a stale
+    # "reschedule_confirm" marker no longer the assistant's literal last turn,
+    # then an unrelated later "yes" the model could still act on).
+    real_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=1))
+    real_appointment = _appointment(db, clinic, patient, doctor, real_slot)
+    new_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=2))
+
+    tools = build_tools(db, ctx)  # no reschedule_redirect_appointment_id
+    reschedule_tool = next(t for t in tools if t.name == "reschedule_appointment")
+
+    result = reschedule_tool.invoke({"appointment_id": str(real_appointment.id), "new_slot_id": str(new_slot.id)})
+
+    assert "rescheduled" not in result.lower()
+    db.refresh(real_appointment)
+    assert real_appointment.slot_id == real_slot.id
+
+    db.refresh(real_appointment)
+    assert real_appointment.status == "confirmed"
+
+
 def test_build_tools_without_redirect_ids_behaves_exactly_as_before(db, clinic, doctor, patient, ctx):
     slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=1))
 

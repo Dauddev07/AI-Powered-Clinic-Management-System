@@ -887,12 +887,64 @@ def build_tools(
         return _book_appointment_impl(db, ctx, slot_id, reason)
 
     def _reschedule(appointment_id: str, new_slot_id: str) -> str:
-        target_id = reschedule_redirect_appointment_id or appointment_id
-        return _reschedule_appointment_impl(db, ctx, target_id, new_slot_id)
+        # Same vulnerability class as _cancel just below, closed the same way: the
+        # `or appointment_id` fallback used to let the model reschedule using
+        # whatever appointment_id IT supplied whenever reschedule_redirect_appointment_id
+        # wasn't set — but reschedule_redirect_appointment_id IS set, unconditionally,
+        # every time appointment_agent's own deterministic resolution has genuinely
+        # determined resolved_appointment_action == "reschedule" this turn (see
+        # run_appointment_agent's reschedule_redirect_id) — there is no legitimate
+        # scenario where the model is meant to supply its own appointment_id here.
+        # The fallback existed purely as an unused escape hatch that also happened to
+        # be a live vulnerability: a stale "reschedule_confirm" marker sitting
+        # earlier in history (the confirmation no longer the assistant's literal
+        # last turn — see _pending_reschedule_confirmation's own history[-1]-only
+        # check) combined with appointment_agent always having reschedule_appointment
+        # available regardless of the current turn's own context meant the model
+        # could independently decide a later, unrelated "yes" answered that stale
+        # question and reschedule using an appointment_id it recalled from the old
+        # marker's own JSON — with nothing stopping it. Refusing without a verified
+        # redirect closes this exactly like _cancel's own fix.
+        if reschedule_redirect_appointment_id is None:
+            return (
+                "I want to make sure before rescheduling anything — could you tell me again which "
+                "appointment you'd like to reschedule, and to when?"
+            )
+        return _reschedule_appointment_impl(db, ctx, reschedule_redirect_appointment_id, new_slot_id)
 
     def _cancel(appointment_id: str) -> str:
-        target_id = cancel_redirect_appointment_id or appointment_id
-        return _cancel_appointment_impl(db, ctx, target_id)
+        # Reported live: a cancel-confirmation question was asked ("...let me know
+        # if you'd like me to go ahead and cancel it"), the patient then asked an
+        # unrelated question, got answered, and only THEN said "yes" — three turns
+        # later. The code-level pending-confirmation gate (_pending_cancel_confirmation
+        # in appointment_agent.py) correctly requires the confirmation question to be
+        # the assistant's LITERAL last turn, so it correctly saw this "yes" as not
+        # answering anything live. But needs_booking_action_tools (message_classifier.py)
+        # scans the WHOLE history for any marker card ever shown, with no such
+        # recency check — so cancel_appointment was still bound as a callable tool,
+        # and the LLM, seeing its own earlier "would you like me to cancel it?"
+        # question sitting in the full conversation history, independently decided
+        # "yes" was answering IT and called this tool directly — with nothing
+        # stopping it, since this closure used to trust any appointment_id the model
+        # supplied unconditionally.
+        #
+        # cancel_redirect_appointment_id is ONLY ever set by appointment_agent's own
+        # deterministic resolution (see run_appointment_agent's reschedule_redirect_id/
+        # cancel_redirect_id, and _pending_cancel_confirmation's own history[-1]-only
+        # check) — a genuinely live, code-verified confirmation, never the model's own
+        # guess from raw history. Refusing to cancel anything without it closes this at
+        # the one place a real mutation can actually happen, regardless of what
+        # (possibly stale) context led the model to attempt the call — same
+        # never-let-the-model-freehand-a-mutating-action principle already used for
+        # reschedule_redirect_appointment_id/forced_date_window above, just enforced as
+        # an outright refusal here instead of a silent redirect, since there is no safe
+        # appointment_id to redirect a cancel to without a verified, live confirmation.
+        if cancel_redirect_appointment_id is None:
+            return (
+                "I want to make sure before cancelling anything — could you tell me again which "
+                "appointment you'd like to cancel?"
+            )
+        return _cancel_appointment_impl(db, ctx, cancel_redirect_appointment_id)
 
     def _get_my_appointments(status: str = "all", limit: int = 10) -> str:
         return _get_my_appointments_impl(db, ctx, status, limit)

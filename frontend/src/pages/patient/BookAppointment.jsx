@@ -12,10 +12,12 @@ import DateInput from "../../components/DateInput";
 import DoctorRatingBadge from "../../components/DoctorRatingBadge";
 import StatusBadge from "../../components/StatusBadge";
 import EmptyState from "../../components/EmptyState";
+import Modal from "../../components/Modal";
 import Skeleton from "../../components/Skeleton";
 import SuccessCheck from "../../components/SuccessCheck";
 import Pagination from "../../components/Pagination";
 import { useReveal, revealDelayClass } from "../../hooks/useReveal";
+import { formatClinicDateTime as formatDateTime } from "../../utils/formatDateTime";
 import styles from "./PatientScreens.module.css";
 
 const PAGE_SIZE = 20;
@@ -244,6 +246,12 @@ export default function BookAppointment() {
   const [error, setError] = useState(null);
   const [bookingSlotId, setBookingSlotId] = useState(null);
   const [message, setMessage] = useState(null);
+  // Holds the full slot object (not just an id) while the confirmation modal is
+  // open, so the modal's own copy can name the doctor/time/department being
+  // booked rather than a generic "are you sure?" with no specifics — same
+  // pattern as UpcomingAppointments' own cancel-confirmation modal.
+  const [pendingSlot, setPendingSlot] = useState(null);
+  const [bookError, setBookError] = useState(null);
 
   const [doctorId, setDoctorId] = useState("");
   const [dateFilter, setDateFilter] = useState("");

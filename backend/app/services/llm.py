@@ -924,10 +924,36 @@ def run_tool_calling_agent(system_prompt: str, message: str, history: list[Conve
         messages.append(response)
         terminal_reply: str | None = None
 
+        # Reported live: "show slots for wed 26 aug then" (a plain browse request —
+        # the patient never named a specific slot) got silently BOOKED instead of
+        # showing availability. The model called get_department_availability for
+        # fresh Wed slots and, in the very same turn, immediately called
+        # book_appointment using one of those never-yet-shown results — self-
+        # selecting a slot on the patient's behalf with zero confirmation. Every
+        # booking tool's own description already says "only call this once the
+        # patient has clearly picked a specific slot [already shown to them]" — but
+        # that's a prompt instruction only, and the model didn't follow it live. A
+        # slot fetched THIS SAME turn has, by definition, never been shown to the
+        # patient yet, so a terminal booking call is never valid alongside a
+        # get_department_availability call in the same turn — checked across BOTH
+        # this iteration's own tool_calls (the model can request several calls in
+        # one response, in either order) and every prior iteration this turn.
+        # Checked BEFORE invoking the terminal tool for real, not just before
+        # returning its reply — the underlying booking_engine mutation must never
+        # happen at all, not merely be hidden from the patient afterward.
+        availability_looked_up_this_turn = bool(dept_availability_results) or any(
+            call["name"] == "get_department_availability" for call in tool_calls
+        )
+
         for call in tool_calls:
             tool = tools_by_name.get(call["name"])
             if tool is None:
                 result = f"Unknown tool '{call['name']}'."
+            elif call["name"] in _TERMINAL_TOOLS and availability_looked_up_this_turn:
+                result = (
+                    "Let me show you the available slots first — once you've picked one, "
+                    "just let me know and I'll take care of the rest."
+                )
             else:
                 try:
                     result = tool.invoke(call["args"])
@@ -946,7 +972,7 @@ def run_tool_calling_agent(system_prompt: str, message: str, history: list[Conve
 
             if call["name"] == "get_department_availability":
                 dept_availability_results.append(str(result))
-            elif call["name"] in _TERMINAL_TOOLS:
+            elif call["name"] in _TERMINAL_TOOLS and not availability_looked_up_this_turn:
                 terminal_reply = str(result)
 
         if terminal_reply is not None:

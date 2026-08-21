@@ -1012,6 +1012,82 @@ def test_terminal_tool_short_circuits_immediately(monkeypatch):
     assert len(book_tool.calls) == 1
 
 
+def test_terminal_tool_is_refused_when_called_the_same_turn_as_availability_lookup(monkeypatch):
+    # Reported live: "show slots for wed 26 aug then" (a plain browse request, no
+    # specific slot named by the patient) got silently BOOKED instead of showing
+    # availability. The model called get_department_availability for fresh slots
+    # and, in the very same turn, immediately called book_appointment using one of
+    # those never-yet-shown results — self-selecting a slot with zero confirmation.
+    # A slot fetched THIS SAME turn has, by definition, never been shown to the
+    # patient, so book_appointment must be refused (and never actually invoked —
+    # the underlying mutation must not happen at all) whenever
+    # get_department_availability was also called this turn, regardless of call
+    # order within the model's response.
+    card = "DOCTOR_OPTIONS::{\"department_name\": \"General Medicine\", \"doctors\": []}"
+    dept_tool = _FakeTool("get_department_availability", result=card)
+    book_tool = _FakeTool("book_appointment", result="BOOKING_CONFIRMED::{\"doctor_name\": \"Dr. Farhan Rehman\"}")
+
+    _patch_chat_groq(
+        monkeypatch,
+        {
+            llm._MODEL_RETRY_SEQUENCE[0]: [
+                _FakeToolCallResponse([
+                    _tool_call("get_department_availability", {"department_name": "General Medicine"}, "call-1"),
+                    _tool_call("book_appointment", {"slot_id": "guessed-slot"}, "call-2"),
+                ]),
+                # The refusal ToolMessage doesn't end the turn by itself (terminal_reply
+                # stays None) — the loop comes back to the model once more, which here
+                # gives up and replies in plain text with no further tool calls.
+                _FakeFinalResponse("Here are the available slots."),
+            ]
+        },
+    )
+
+    result = llm.run_tool_calling_agent(
+        "test system prompt", "show slots for wed 26 aug then", [], [dept_tool, book_tool]
+    )
+
+    # book_appointment must never actually execute — the real mutation, not just
+    # the reply shown to the patient, must be prevented.
+    assert len(book_tool.calls) == 0
+    # The freshly-fetched availability wins, exactly as if book_appointment had
+    # never been called at all this turn — the model's own final plain-text
+    # content above is discarded, same as _finalize_reply always does once
+    # get_department_availability was actually called.
+    assert result == card
+
+
+def test_terminal_tool_is_refused_when_availability_lookup_came_in_an_earlier_iteration(monkeypatch):
+    # Same guard, opposite call order: get_department_availability in one model
+    # response, then book_appointment in a LATER response within the same turn —
+    # must be blocked just as reliably as the same-iteration case above.
+    card = "DOCTOR_OPTIONS::{\"department_name\": \"General Medicine\", \"doctors\": []}"
+    dept_tool = _FakeTool("get_department_availability", result=card)
+    book_tool = _FakeTool("book_appointment", result="BOOKING_CONFIRMED::{\"doctor_name\": \"Dr. Farhan Rehman\"}")
+
+    _patch_chat_groq(
+        monkeypatch,
+        {
+            llm._MODEL_RETRY_SEQUENCE[0]: [
+                _FakeToolCallResponse([
+                    _tool_call("get_department_availability", {"department_name": "General Medicine"}, "call-1"),
+                ]),
+                _FakeToolCallResponse([
+                    _tool_call("book_appointment", {"slot_id": "guessed-slot"}, "call-2"),
+                ]),
+                _FakeFinalResponse("Here are the available slots."),
+            ]
+        },
+    )
+
+    result = llm.run_tool_calling_agent(
+        "test system prompt", "show slots for wed 26 aug then", [], [dept_tool, book_tool]
+    )
+
+    assert len(book_tool.calls) == 0
+    assert result == card
+
+
 # --- token-reduction: conditional triage section (item 1 of the token-usage work) ---
 #
 # Whether the triage section is included at all is now decided by which specialist
