@@ -85,6 +85,10 @@ class DoctorMatch:
     doctor_id: uuid.UUID
     full_name: str
     department_name: str
+    # Added so a "who is Dr. X" identity question (see appointment_agent's
+    # _message_asks_who_is_a_doctor) can answer with real specialty info instead
+    # of only ever being able to show availability slots.
+    specialization: str | None = None
 
 
 def _name_words(name: str) -> set[str]:
@@ -125,7 +129,12 @@ def find_doctors_by_name(db: Session, clinic_id: uuid.UUID, name_query: str) -> 
         doctor_words = _name_words(doctor.full_name)
         if not doctor_words:
             continue
-        match = DoctorMatch(doctor_id=doctor.id, full_name=doctor.full_name, department_name=department_name)
+        match = DoctorMatch(
+            doctor_id=doctor.id,
+            full_name=doctor.full_name,
+            department_name=department_name,
+            specialization=doctor.specialization,
+        )
         if doctor_words <= query_words:
             exact_matches.append(match)
         elif query_words & doctor_words:

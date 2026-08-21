@@ -4273,6 +4273,94 @@ def test_run_appointment_agent_narrowing_phrase_without_prior_card_falls_through
     assert "ask ONE direct confirming question" in captured["system_prompt"]
 
 
+def test_run_appointment_agent_who_is_a_real_doctor_answers_identity_not_slots(
+    monkeypatch, db, ctx, clinic, department
+):
+    # Reported live: "who is Dr. X?" mid-conversation showed that doctor's
+    # available SLOTS instead of answering the identity question — nothing
+    # distinguished "who is X" from "book with X"/"show me X's availability".
+    from app.models.doctor import Doctor
+
+    doc = Doctor(
+        clinic_id=clinic.id, department_id=department.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Ahmed Farooq", specialization="Interventional Cardiology", is_active=True,
+    )
+    db.add(doc)
+    db.flush()
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM for a real-doctor identity answer")),
+    )
+    monkeypatch.setattr(
+        appointment_agent, "get_department_availability",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not fetch availability for a plain identity question")),
+    )
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "who is dr ahmed farooq", "en", [])
+
+    assert "Ahmed Farooq" in result
+    assert "Cardiology" in result
+    assert "Interventional Cardiology" in result
+    assert "book" in result.lower()
+    assert DOCTOR_OPTIONS_MARKER not in result
+
+
+def test_run_appointment_agent_who_is_a_real_doctor_mid_conversation_answers_identity_not_slots(
+    monkeypatch, db, ctx, clinic, department
+):
+    # Same bug, but reproducing the exact "mid conversation" shape reported: a
+    # doctor already shown/named earlier in history, so resolved_match comes
+    # back via the already-shown/direct-match path rather than a first mention
+    # — the deterministic availability short-circuit fires purely on name-match
+    # signals with no phrasing check, which is the actual root cause.
+    from app.models.doctor import Doctor
+
+    doc = Doctor(
+        clinic_id=clinic.id, department_id=department.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Ahmed Farooq", specialization="Interventional Cardiology", is_active=True,
+    )
+    db.add(doc)
+    db.flush()
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM for a real-doctor identity answer")),
+    )
+    monkeypatch.setattr(
+        appointment_agent, "get_department_availability",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not fetch availability for a plain identity question")),
+    )
+    # A real DOCTOR_OPTIONS_MARKER-prefixed assistant turn so
+    # doctor_already_shown resolves True, matching the reported "mid convo"
+    # shape.
+    history = [
+        _row("user", "show me available slots for dr ahmed farooq"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + json.dumps({
+            "department_name": "Cardiology",
+            "doctors": [{"doctor_id": str(doc.id), "full_name": "Dr. Ahmed Farooq", "specialization": "Interventional Cardiology", "slots": []}],
+        })),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "who is dr ahmed farooq", "en", history)
+
+    assert "Ahmed Farooq" in result
+    assert "Cardiology" in result
+    assert DOCTOR_OPTIONS_MARKER not in result
+
+
+def test_run_appointment_agent_who_is_a_made_up_doctor_says_it_doesnt_know(monkeypatch, db, ctx):
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM for a made-up doctor name")),
+    )
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "who is dr fake name", "en", [])
+
+    assert "don't know" in result.lower()
+    assert DOCTOR_OPTIONS_MARKER not in result
+
+
 def test_run_appointment_agent_narrows_after_resolving_a_name_disambiguation_reply(
     monkeypatch, db, ctx, clinic
 ):

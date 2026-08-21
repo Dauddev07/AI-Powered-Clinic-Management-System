@@ -95,6 +95,7 @@ from app.services.chat_tools import (
     resolve_time_of_day_window,
 )
 from app.services.department_availability import (
+    DoctorMatch,
     find_doctors_by_name,
     get_department_availability,
     list_active_department_names,
@@ -307,6 +308,31 @@ _CAPABILITY_QUESTION_RE = re.compile(
 
 def _message_is_a_capability_question(message: str) -> bool:
     return bool(_CAPABILITY_QUESTION_RE.match(message.strip()))
+
+
+# Reported live: "who is Dr. X?" mid-conversation showed that doctor's available
+# SLOTS instead of answering the identity question actually asked — nothing
+# anywhere in this module's doctor-name handoff distinguished "who is X" from
+# "show me X's availability"/"book with X"; a resolved doctor match always
+# steered toward get_department_availability regardless of phrasing. Checked
+# alongside a real find_doctors_by_name lookup (the deterministic
+# already-real-doctor-vs-not distinction this whole module relies on
+# everywhere else): a genuine doctor gets a real info answer + booking offer,
+# a made-up name gets an honest "I don't know who that is" instead of ever
+# resolving to a department/slots card for a person who doesn't exist.
+_WHO_IS_DOCTOR_RE = re.compile(r"\bwho(?:'s|\s+is)\b", re.IGNORECASE)
+
+
+def _message_asks_who_is_a_doctor(message: str) -> bool:
+    return bool(_WHO_IS_DOCTOR_RE.search(message))
+
+
+def _doctor_identity_reply(match: DoctorMatch) -> str:
+    specialty_clause = f", specializing in {match.specialization}" if match.specialization else ""
+    return (
+        f"{match.full_name} is a doctor in {match.department_name}{specialty_clause}. "
+        "Would you like me to show their available slots to book an appointment?"
+    )
 
 
 # Every "I need one more thing from you before I can act" question this module
@@ -1910,6 +1936,14 @@ def run_appointment_agent(
         if resolved_match is None:
             attempted_name = _extract_attempted_doctor_name(message)
             if attempted_name is not None:
+                # "Who is Dr. Fake Name?" gets an honest identity-shaped answer
+                # ("I don't know who that is") rather than the spelling-check
+                # wording below, which reads as if a booking was being attempted.
+                if _message_asks_who_is_a_doctor(message):
+                    return (
+                        f"I don't know who that is — there's no doctor named "
+                        f"\"{attempted_name.title()}\" at this clinic."
+                    )
                 return (
                     f"I couldn't find a doctor named \"{attempted_name.title()}\" at this clinic. "
                     "Could you double-check the spelling, or let me know which department you'd "
@@ -1959,6 +1993,16 @@ def run_appointment_agent(
             doctor_already_shown = _doctor_already_shown(
                 history, resolved_match.full_name, resolved_match.department_name
             )
+
+    # "Who is Dr. X?" answers the identity question directly instead of ever
+    # reaching the availability short-circuit below — see
+    # _message_asks_who_is_a_doctor's own comment. The zero-match/made-up-name
+    # case is already handled above (attempted_name branch, "who is"-aware
+    # wording); this only needs to cover the real-doctor case, since
+    # resolved_match can also come from pronoun recovery/an affirmative
+    # confirmation further above, not just a direct name match this turn.
+    if resolved_appointment is None and resolved_match is not None and _message_asks_who_is_a_doctor(message):
+        return _doctor_identity_reply(resolved_match)
 
     # A patient narrowing an already-shown multi-doctor card down to just one of
     # those doctors ("only show me Dr. X's slots") gets a real, filtered card built
