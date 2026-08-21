@@ -420,6 +420,48 @@ def test_build_tools_reschedule_appointment_refuses_without_a_verified_redirect_
     assert real_appointment.status == "confirmed"
 
 
+def test_build_tools_book_appointment_refuses_when_suppressed_for_a_bare_confirmation(
+    db, clinic, doctor, patient, ctx
+):
+    # Reported live: "book with Dr. X at 3pm" -> confirm question -> an unrelated
+    # question (correctly answered) -> "Yeah" (correctly not booked) -> "Yes" —
+    # booked for real, from a confirmation question that was two turns stale. The
+    # model read its own earlier "would you like me to book...?" question still
+    # sitting in conversation history and decided this later "yes" answered it,
+    # extracting the slot_id straight out of that stale marker's own JSON text.
+    # appointment_agent sets suppress_bare_confirmation_booking exactly for this
+    # shape of turn (a bare yes/no that resolved nothing live) — the tool must
+    # refuse outright rather than book whatever slot_id the model supplies.
+    real_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=1))
+
+    tools = build_tools(db, ctx, suppress_bare_confirmation_booking=True)
+    book_tool = next(t for t in tools if t.name == "book_appointment")
+
+    result = book_tool.invoke({"slot_id": str(real_slot.id)})
+
+    assert "booked" not in result.lower()
+    db.refresh(real_slot)
+    assert real_slot.status == "open"
+
+
+def test_build_tools_book_appointment_still_works_for_a_genuine_natural_language_pick(
+    db, clinic, doctor, patient, ctx
+):
+    # Guard against the new gate being too broad: a real slot description (not a
+    # bare yes/no) must still book normally — suppress_bare_confirmation_booking
+    # defaults to False and is only ever set True by appointment_agent for the
+    # exact bare-confirmation case above.
+    real_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=1))
+
+    tools = build_tools(db, ctx)  # suppress_bare_confirmation_booking defaults False
+    book_tool = next(t for t in tools if t.name == "book_appointment")
+
+    result = book_tool.invoke({"slot_id": str(real_slot.id)})
+
+    payload = _parse_marker(result, BOOKING_MARKER)
+    assert payload["doctor_name"] == doctor.full_name
+
+
 def test_build_tools_without_redirect_ids_behaves_exactly_as_before(db, clinic, doctor, patient, ctx):
     slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=1))
 

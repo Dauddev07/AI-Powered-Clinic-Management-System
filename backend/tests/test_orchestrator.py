@@ -4366,6 +4366,48 @@ def test_run_appointment_agent_cancel_with_zero_active_appointments_and_no_docto
     assert result == "You don't have an upcoming appointment to cancel."
 
 
+def test_run_appointment_agent_bare_yes_after_a_stale_confirmation_cannot_book(
+    monkeypatch, db, clinic, doctor, ctx
+):
+    # Full reported scenario: "book with Dr. X at 3pm" -> confirm question ->
+    # "what are clinic opening hours?" (correctly answered, unrelated) -> "Yeah"
+    # (correctly generic, not booked) -> "Yes" — booked for real live, from a
+    # confirmation question that was two turns stale by then. The tools list
+    # appointment_agent hands to the LLM for this final "Yes" must have
+    # book_appointment gated shut (see build_tools' suppress_bare_confirmation_booking),
+    # since none of this turn's own deterministic checks resolved anything live —
+    # this is a bare yes/no answering nothing.
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["tools"] = tools
+        return "reply"
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+
+    history = [
+        _row("user", f"Book with {doctor.full_name} at Mon, Aug 24 at 3:00 PM"),
+        _row(
+            "assistant",
+            f"Just to confirm — book your appointment with {doctor.full_name} in Cardiology on "
+            "Mon, Aug 24 at 3:00 PM?",
+        ),
+        _row("user", "What are clinic opening hours?"),
+        _row("assistant", "The clinic is open every day of the week, 8:00 am to 9:00 pm."),
+        _row("user", "Yeah"),
+        _row(
+            "assistant",
+            "Glad to hear that! Let me know if you'd like to book, reschedule, or cancel an "
+            "appointment. I'm here to help.",
+        ),
+    ]
+    appointment_agent.run_appointment_agent(db, ctx, "Yes", "en", history)
+
+    book_tool = next(t for t in captured["tools"] if t.name == "book_appointment")
+    result = book_tool.invoke({"slot_id": str(uuid.uuid4())})
+    assert "booked" not in result.lower()
+
+
 def test_run_appointment_agent_does_not_treat_a_retracted_reschedule_as_a_live_action(
     monkeypatch, db, ctx, doctor
 ):
@@ -5554,6 +5596,44 @@ def test_scenario_matrix_doctor_name_disambiguation_pending_only_a_real_match_re
 # =====================================================================================
 # general_info_agent
 # =====================================================================================
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "what does dermatologist treat",
+        "so what symptoms does dermatologist treats?",
+        "what does cardiology handle",
+    ],
+)
+def test_run_general_info_agent_redirects_a_department_scope_question_instead_of_explaining_it(
+    monkeypatch, db, ctx, message
+):
+    # Instructed live: a department-scope question ("what does X treat/handle")
+    # used to be answered from KB content describing that department's role —
+    # product decision to stop entirely. This bot's job is triage-by-symptom, not
+    # an encyclopedia of what each specialty does. Deterministic — never the
+    # LLM/KB, regardless of which department is asked about.
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM/KB must not be called for a department-scope question")
+
+    monkeypatch.setattr(general_info_agent.llm, "run_plain_reply", _fail_if_called)
+    monkeypatch.setattr(
+        general_info_agent, "retrieve", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not retrieve"))
+    )
+
+    result = general_info_agent.run_general_info_agent(db, ctx, message, "en", [])
+
+    assert result == general_info_agent._DEPARTMENT_ROLE_REDIRECT_EN
+
+
+def test_run_general_info_agent_department_scope_redirect_is_in_urdu_when_language_is_ur(monkeypatch, db, ctx):
+    monkeypatch.setattr(
+        general_info_agent.llm, "run_plain_reply",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not call the LLM")),
+    )
+    result = general_info_agent.run_general_info_agent(db, ctx, "what does cardiology handle", "ur", [])
+    assert result == general_info_agent._DEPARTMENT_ROLE_REDIRECT_UR
 
 
 def test_run_general_info_agent_answers_department_list_request_deterministically(monkeypatch, db, ctx, department):

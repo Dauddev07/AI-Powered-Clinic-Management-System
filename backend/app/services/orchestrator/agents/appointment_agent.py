@@ -1905,6 +1905,19 @@ def run_appointment_agent(
 
     forced_date_window = resolve_bare_weekday_window(message)
     forced_time_window = resolve_time_of_day_window(message)
+
+    # Reported live: "book with Dr. X at 3pm" -> confirm question -> an unrelated
+    # question (correctly answered) -> "Yeah" (correctly NOT booked, no live
+    # confirmation) -> "Yes" — booked for real, from a confirmation question two
+    # turns stale. A bare yes/no that resolved NOTHING deterministically this turn
+    # (no action word, no doctor name, no still-live pending confirmation — all of
+    # which are checked above using literal-last-turn freshness) is, by
+    # definition, not answering anything live — see build_tools'
+    # suppress_bare_confirmation_booking for where this is actually enforced.
+    bare_confirmation_with_nothing_live = (
+        _is_short_affirmative_reply(message) or _is_short_negative_reply(message)
+    ) and resolved_appointment is None and resolved_match is None
+
     tools = [
         t
         for t in build_tools(
@@ -1914,6 +1927,7 @@ def run_appointment_agent(
             cancel_redirect_appointment_id=cancel_redirect_id,
             forced_date_window=forced_date_window,
             forced_time_window=forced_time_window,
+            suppress_bare_confirmation_booking=bare_confirmation_with_nothing_live,
         )
         if t.name in _APPOINTMENT_AGENT_TOOL_NAMES
     ]

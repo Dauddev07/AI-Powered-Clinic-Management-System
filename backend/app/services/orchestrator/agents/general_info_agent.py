@@ -34,6 +34,7 @@ from app.services.message_classifier import (
     is_department_list_explanation_request,
     is_department_list_followup_request,
     is_department_list_request,
+    is_department_scope_question,
 )
 from app.services.orchestrator.symptom_hints import department_symptom_labels
 from app.services.query_rewrite import rewrite_query
@@ -43,6 +44,26 @@ from app.services.query_rewrite import rewrite_query
 # match against some other assistant turn that happens to mention "departments" in
 # passing (e.g. quoting a KB chunk).
 _DEPARTMENT_LIST_REPLY_SIGNATURE = "departments available at this clinic"
+
+# Instructed live: a department-scope question ("what does cardiology treat",
+# "what is the role of ENT") used to be answered from KB content describing that
+# department's role — product decision to stop doing that entirely. This bot's job
+# is triage-by-symptom, not an encyclopedia of what each specialty does; answering
+# a role question, even accurately, invites the patient to self-diagnose which
+# department they need instead of describing what's actually wrong and letting
+# the bot route them. Deterministic and unconditional — never an LLM/KB call for
+# this category of question at all, regardless of which department is asked about.
+_DEPARTMENT_ROLE_REDIRECT_EN = (
+    "I'm not able to tell you what a department's role is — but if you describe your "
+    "symptoms, I can point you to the specific department that can actually treat "
+    "them. I'm here to help you get the right care, not to explain what each "
+    "department does."
+)
+_DEPARTMENT_ROLE_REDIRECT_UR = (
+    "میں یہ نہیں بتا سکتا کہ کسی شعبے کا کردار کیا ہے — لیکن اگر آپ اپنی علامات بتائیں تو "
+    "میں آپ کو اس مخصوص شعبے کی طرف رہنمائی کر سکتا ہوں جو ان کا علاج کر سکے۔ میں آپ کو "
+    "صحیح علاج دلانے میں مدد کے لیے یہاں ہوں، شعبوں کی وضاحت کرنے کے لیے نہیں۔"
+)
 
 
 def _is_department_list_reply(history: list[ConversationMemory]) -> bool:
@@ -62,6 +83,9 @@ def run_general_info_agent(
     language: str,
     history: list[ConversationMemory],
 ) -> str:
+    if is_department_scope_question(message):
+        return _DEPARTMENT_ROLE_REDIRECT_UR if language == "ur" else _DEPARTMENT_ROLE_REDIRECT_EN
+
     if is_department_list_request(message) or (
         is_department_list_followup_request(message) and _is_department_list_reply(history)
     ):
