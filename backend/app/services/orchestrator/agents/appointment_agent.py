@@ -205,6 +205,12 @@ _NAME_ATTEMPT_STOPWORDS = frozenset({
     "working", "open", "busy", "appointment", "appointments", "slot", "slots",
     "schedule", "scheduled", "book", "booking", "the", "a", "an", "any", "some",
     "this", "that", "department", "dept", "clinic",
+    # Defense-in-depth for "doctor based on my condition/symptoms" style phrasing —
+    # router.py's _RECOMMENDATION_RE is the primary catch (diverts the whole
+    # message to symptom_agent before this ever runs), but if some other
+    # "based on my X" variant slips past it, these words must never be treated
+    # as name-like on their own.
+    "based", "on", "my", "condition", "conditions", "symptom", "symptoms",
 })
 
 

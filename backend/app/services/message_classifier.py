@@ -490,12 +490,20 @@ _RECOMMENDATION_RE = re.compile(
     # Reported live: "i think cardiologist can be a best fit for it?" used "best
     # fit" rather than "better", which the pattern above didn't cover at all.
     r"|\b(?:best|good|better) fit\b"
-    r"|based on my symptoms"
+    r"|based on my (?:symptoms|condition)"
     # Reported live: "show me available dept according to my describes symptoms"
     # used "according to" rather than "based on", which the pattern above didn't
     # cover — allows 0-2 filler words between "my" and "symptoms" so a typo/
     # grammar slip like "describes" (meant "described") still matches.
     r"|according to (?:my|the)(?:\s+\w+){0,2}\s+symptoms"
+    # Reported live: "show me available dept and doctor based on my condition"
+    # (right after a mental-health crisis reply) matched none of the above —
+    # only "based on my symptoms" was covered, not "condition" — and fell through
+    # to appointment_agent's doctor-name resolver, which then parsed the literal
+    # words "based on my condition" (following the trigger word "doctor") as an
+    # attempted doctor name and reported it "not found". "condition" is the same
+    # request for a grounded recommendation, just worded differently than
+    # "symptoms".
     # Reported live: "find me a suitable dept" (after already describing a real
     # symptom) matched none of the above, so it fell through to the router's
     # generic fallback and landed on general_info_agent — which has no tool bound
