@@ -334,6 +334,54 @@ def _looks_like_a_valid_emergency_reply(reply: str) -> bool:
     return bool(_VALID_EMERGENCY_REPLY_RE.search(reply))
 
 
+# Reported live: "very severe" headache -> PATH 1 emergency reply -> "i dont
+# wanna goto er" (a REFUSAL of the action — correctly got the urgency
+# reiterated) -> "but its not severe" (a CORRECTION of the earlier severity
+# claim, a completely different kind of message) -> the model kept looping on
+# a THIRD variation of the same emergency wording instead of ever accepting
+# the correction and returning to normal screening. Nothing forced this
+# transition — it was left entirely to the model's own in-context judgment,
+# and it simply didn't make the call reliably. Deliberately narrow wording
+# (mild/moderate/"not severe"/"not that bad") so a refusal-to-go message
+# ("i dont wanna goto er" — no severity word in it at all) never matches this.
+_SEVERITY_DOWNGRADE_RE = re.compile(
+    r"\b(mild|moderate)\b"
+    r"|\bnot\b.{0,20}\bsevere\b"
+    r"|\bisn'?t\b.{0,20}\bsevere\b"
+    r"|\bnot\s+that\s+bad\b",
+    re.IGNORECASE,
+)
+
+
+def _message_downgrades_severity(message: str) -> bool:
+    return bool(_SEVERITY_DOWNGRADE_RE.search(message))
+
+
+def _last_reply_was_an_emergency_reply(history: list[ConversationMemory]) -> bool:
+    if not history:
+        return False
+    last = history[-1]
+    if getattr(last, "role", None) != "assistant":
+        return False
+    return _looks_like_a_valid_emergency_reply(getattr(last, "content", "") or "")
+
+
+# Appended to the system prompt ONLY for the one turn where this correction is
+# detected — an explicit, unambiguous instruction rather than trusting the
+# model to infer this nuance on its own from raw history, the same
+# "never trust a prompt-only inference for something this consequential"
+# principle used throughout this module.
+_SEVERITY_DOWNGRADE_INSTRUCTION = (
+    "\n\nIMPORTANT — THE PATIENT JUST CORRECTED THEIR OWN EARLIER SEVERITY CLAIM: their "
+    "last message states this is NOT severe (mild/moderate) after an earlier 'severe' "
+    "answer already triggered PATH 1. Accept this correction. Do NOT repeat the "
+    "emergency/ER message again. Continue normal screening from here exactly as PATH 2/3 "
+    "specify, treating the current stated severity as mild/moderate — ask about duration "
+    "and any other relevant differentiator, or proceed to PATH 3 and call "
+    "get_department_availability if enough is already known."
+)
+
+
 def _patient_named_this_department(department_name: str, message: str, history: list[ConversationMemory]) -> bool:
     """True when the patient themselves (never the assistant) said this
     department's name somewhere in the conversation — used to tell "the patient
@@ -627,6 +675,8 @@ def _run_symptom_agent_body(
 
     language_name = llm._LANGUAGE_NAMES.get(language, "English")
     system_prompt = _build_system_prompt(language_name, department_names, include_path2)
+    if _last_reply_was_an_emergency_reply(history) and _message_downgrades_severity(message):
+        system_prompt += _SEVERITY_DOWNGRADE_INSTRUCTION
 
     forced_date_window = resolve_bare_weekday_window(message)
     forced_time_window = resolve_time_of_day_window(message)

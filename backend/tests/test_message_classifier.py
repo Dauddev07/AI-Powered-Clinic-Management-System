@@ -424,10 +424,39 @@ def test_non_symptom_messages_not_detected(message):
         "yes please confirm that slot",
         "is there any cardiologist available on fri",
         "what's the availability like this week",
+        "i wanna see dr farhan",
+        "can i consult doctor smith",
+        "i want to meet dr ahmed",
     ],
 )
 def test_needs_booking_action_tools_true_for_explicit_booking_language(message):
     assert needs_booking_action_tools(message) is True
+
+
+def test_needs_booking_action_tools_see_doctor_phrasing_does_not_need_history_to_route_correctly():
+    # Reported live: "i wanna see dr farhan" named no booking-action keyword
+    # at all ("see" wasn't recognized) — it and its own follow-ups ("rehman",
+    # "dr farhan rehman") all fell through to general_info_agent (KB-only, no
+    # real doctor-lookup tool), which claimed "I don't have information" about
+    # a doctor the bot ITSELF had just listed moments earlier via
+    # appointment_agent's own find_doctors_by_name. Must route correctly with
+    # zero prior history, not rely on a fallback trigger.
+    assert needs_booking_action_tools("i wanna see dr farhan") is True
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "i see what you mean",
+        "let me see",
+        "see you later",
+        "i see, thanks",
+    ],
+)
+def test_needs_booking_action_tools_bare_see_without_a_doctor_title_is_not_a_false_positive(message):
+    # Guard against being too broad: "see" alone, with no "dr"/"doctor" title
+    # word nearby, must never be misread as wanting to see a doctor.
+    assert needs_booking_action_tools(message) is False
 
 
 @pytest.mark.parametrize(

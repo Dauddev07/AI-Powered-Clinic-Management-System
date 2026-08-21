@@ -861,6 +861,18 @@ _BOOKING_ACTION_PHRASES = (
     "no longer need", "don't need it anymore", "dont need it anymore", "never mind",
 )
 
+# Reported live: "i wanna see dr farhan" named no booking-action keyword at
+# all ("see" isn't "book"/"appointment"/"schedule"/etc.) — it and its own
+# follow-ups ("rehman", "dr farhan rehman") all fell through to
+# general_info_agent (KB-only, no real doctor-lookup tool at all), which
+# claimed "I don't have information" about a doctor the bot ITSELF had just
+# listed moments earlier via appointment_agent's own find_doctors_by_name. "see
+# a doctor" is an extremely common, natural way to phrase wanting to
+# book/check someone, distinct from a bare "see"/"I see" elsewhere in a
+# sentence — requires "see"/"consult"/"meet" directly near a "dr"/"doctor"
+# title word, never firing on unrelated uses of those verbs alone.
+_SEE_DOCTOR_RE = re.compile(r"\b(?:see|consult|meet)\b.{0,20}\b(?:dr\.?|doctor)\b", re.IGNORECASE)
+
 
 def needs_booking_action_tools(message: str, history=None) -> bool:
     """True when book_appointment/reschedule_appointment/cancel_appointment should be
@@ -876,6 +888,8 @@ def needs_booking_action_tools(message: str, history=None) -> bool:
     if words & _BOOKING_ACTION_KEYWORDS:
         return True
     if any(phrase in lowered for phrase in _BOOKING_ACTION_PHRASES):
+        return True
+    if _SEE_DOCTOR_RE.search(message):
         return True
     if _preceding_assistant_turn_looks_like_a_question(history):
         return True
