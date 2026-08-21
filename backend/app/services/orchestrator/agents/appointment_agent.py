@@ -1950,17 +1950,30 @@ def run_appointment_agent(
     forced_date_window = resolve_bare_weekday_window(message)
     forced_time_window = resolve_time_of_day_window(message)
 
-    # Reported live: "book with Dr. X at 3pm" -> confirm question -> an unrelated
-    # question (correctly answered) -> "Yeah" (correctly NOT booked, no live
-    # confirmation) -> "Yes" — booked for real, from a confirmation question two
-    # turns stale. A bare yes/no that resolved NOTHING deterministically this turn
-    # (no action word, no doctor name, no still-live pending confirmation — all of
-    # which are checked above using literal-last-turn freshness) is, by
-    # definition, not answering anything live — see build_tools'
-    # suppress_bare_confirmation_booking for where this is actually enforced.
-    bare_confirmation_with_nothing_live = (
-        _is_short_affirmative_reply(message) or _is_short_negative_reply(message)
-    ) and resolved_appointment is None and resolved_match is None
+    # Reported live (twice): "book with Dr. X at 3pm" -> confirm question -> an
+    # unrelated question (correctly answered) -> "Yeah" (correctly NOT booked) ->
+    # "Yes" — booked for real, from a confirmation question two turns stale. The
+    # first fix here only suppressed booking when the message matched
+    # _is_short_affirmative_reply/_is_short_negative_reply (yes/no/sure/ok-shaped
+    # wording) — but a second live report showed "do it" reaching this same path
+    # and booking anyway, since "do it"/"go ahead"/"please do"/"confirm it" match
+    # neither of those functions at all, so the earlier flag simply never
+    # activated for them.
+    #
+    # Narrowing to specific confirming PHRASES is a losing game (there's no fixed
+    # list of ways a patient might say "go ahead") — the actually reliable signal
+    # is the ABSENCE of anything real: by this point, every deterministic path
+    # above (action word this turn, a doctor named this turn, a still-live
+    # pending confirmation via literal-last-turn freshness, an explicit slot_id)
+    # has already had its chance to resolve resolved_appointment/resolved_match
+    # and return early if it did. If BOTH are still None here, this message —
+    # regardless of its own specific wording — carries no fresh grounds to book
+    # anything at all; a genuine natural-language slot pick ("book with Dr. X at
+    # 3pm") always sets resolved_match via find_doctors_by_name above, so this
+    # can never suppress a legitimate booking, only an illegitimate one. See
+    # build_tools' suppress_bare_confirmation_booking for where this is actually
+    # enforced (the tool itself refuses, not just this turn's system prompt).
+    bare_confirmation_with_nothing_live = resolved_appointment is None and resolved_match is None
 
     tools = [
         t

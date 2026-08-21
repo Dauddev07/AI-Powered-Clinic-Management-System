@@ -4505,6 +4505,43 @@ def test_run_appointment_agent_bare_yes_after_a_stale_confirmation_cannot_book(
     assert "booked" not in result.lower()
 
 
+@pytest.mark.parametrize("message", ["do it", "go ahead", "please do", "confirm it", "yes", "sure thing"])
+def test_run_appointment_agent_any_confirming_phrase_after_a_stale_confirmation_cannot_book(
+    monkeypatch, db, clinic, doctor, ctx, message
+):
+    # Second live report on the same bug: "do it" reached the exact same path as
+    # "Yes" above and booked anyway — _is_short_affirmative_reply/
+    # _is_short_negative_reply don't recognize "do it"/"go ahead"/"please do"/
+    # "confirm it" at all, so the FIRST fix's flag (narrowly keyed on yes/no
+    # wording) never activated for them. The real fix is keyed on the absence of
+    # anything resolved this turn, not on matching a fixed list of confirming
+    # phrases — must hold for any wording, not just yes/no.
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        return next(t for t in tools if t.name == "book_appointment").invoke({"slot_id": str(uuid.uuid4())})
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+
+    history = [
+        _row("user", f"Book with {doctor.full_name} at Sun, Aug 23 at 8:00 AM"),
+        _row(
+            "assistant",
+            f"Just to confirm — book your appointment with {doctor.full_name} in Dermatology on "
+            "Sun, Aug 23 at 8:00 AM?",
+        ),
+        _row("user", "i am having pain in my leg"),
+        _row(
+            "assistant",
+            "Could you tell me how severe this is (mild, moderate, or severe) and how long you've had it?",
+        ),
+        _row("user", "where is this clinic located"),
+        _row("assistant", "The clinic is located at 123 Main Boulevard, Gulberg III, Lahore, Punjab."),
+    ]
+    result = appointment_agent.run_appointment_agent(db, ctx, message, "en", history)
+
+    assert "appointment confirmed" not in result.lower()
+    assert "booked" not in result.lower()
+
+
 def test_run_appointment_agent_does_not_treat_a_retracted_reschedule_as_a_live_action(
     monkeypatch, db, ctx, doctor
 ):

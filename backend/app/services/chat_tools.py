@@ -932,26 +932,30 @@ def build_tools(
     Same belt-and-suspenders reasoning as forced_date_window immediately above.
 
     suppress_bare_confirmation_booking: set by appointment_agent when THIS message
-    is a bare "yes"/"no" that resolved NOTHING deterministically this turn (no
-    action word, no doctor name, no pending confirmation that's still the
-    assistant's literal last turn — see run_appointment_agent's own computation).
-    Reported live: "book with Dr. X at 3pm" -> "Just to confirm — book...?" -> an
-    unrelated question (answered correctly) -> "Yeah" (generic reply, correctly
-    not booked) -> "Yes" — booked for real, two turns after the confirmation
-    question was last live. The model, with book_appointment always available
-    regardless of the current turn's own context, read its own earlier "would you
-    like me to book...?" question still sitting in conversation history and
-    decided this later, unrelated "yes" answered it — extracting the slot_id
-    straight out of that stale marker's own JSON text. Unlike cancel/reschedule
-    (which always have a real appointment_id to redirect to), a genuinely fresh
-    booking has no equivalent "correct" id to fall back on — refusing outright
-    when this flag is set is the only safe response, same principle as
-    cancel_appointment/reschedule_appointment's own redirect-required gates just
-    below, adapted for booking's different shape (no legitimate non-redirect path
-    exists ONLY for this exact bare-yes/no-with-nothing-live case; a genuine
-    natural-language slot description ("book with Dr. X at 3pm") is completely
-    unaffected — this flag is never set for a message with real content of its
-    own).
+    resolved NOTHING deterministically this turn at all (no action word, no
+    doctor name matched, no pending confirmation that's still the assistant's
+    literal last turn, no explicit slot_id — see run_appointment_agent's own
+    computation). Reported live TWICE: "book with Dr. X at 3pm" -> "Just to
+    confirm — book...?" -> an unrelated question (answered correctly) -> a
+    generic reply (correctly not booked) -> "Yes"/"do it" — booked for real, from
+    a confirmation question that was already stale. The first fix only covered
+    literal "yes"/"no"-shaped wording; the second live report showed "do it"
+    reaching this exact path too, since it matches neither of those functions —
+    there is no fixed list of ways a patient might phrase "go ahead", so this is
+    now keyed on the ABSENCE of anything real resolved this turn, not on
+    matching specific confirming words. The model, with book_appointment always
+    available regardless of the current turn's own context, read its own
+    earlier "would you like me to book...?" question still sitting in
+    conversation history and decided this later, unrelated message answered it —
+    extracting the slot_id straight out of that stale marker's own JSON text.
+    Unlike cancel/reschedule (which always have a real appointment_id to
+    redirect to), a genuinely fresh booking has no equivalent "correct" id to
+    fall back on — refusing outright when this flag is set is the only safe
+    response, same principle as cancel_appointment/reschedule_appointment's own
+    redirect-required gates just below, adapted for booking's different shape. A
+    genuine natural-language slot description ("book with Dr. X at 3pm") always
+    sets resolved_match via find_doctors_by_name, so this flag is never set for a
+    message with real booking content of its own — only for one that has none.
     """
 
     def _book(slot_id: str, reason: str | None = None) -> str:
