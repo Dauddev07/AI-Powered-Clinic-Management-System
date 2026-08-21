@@ -90,6 +90,7 @@ from app.services.chat_tools import (
     get_slot_summary,
     list_upcoming_appointments,
     reschedule_appointment_now,
+    resolve_bare_weekday_reply,
     resolve_bare_weekday_window,
     resolve_explicit_calendar_date,
     resolve_time_of_day_window,
@@ -1473,6 +1474,95 @@ def _pending_which_doctor_for_slot(history: list[ConversationMemory]) -> dict | 
     return None
 
 
+def _which_day_for_slot_reply(doctor_match: DoctorMatch, earliest_time: time | None, latest_time: time | None) -> str:
+    question = f"What day would you like to see {doctor_match.full_name}? You mentioned a time, but not which day."
+    payload = {
+        "kind": "which_day_for_slot",
+        "question": question,
+        "doctor_id": str(doctor_match.doctor_id),
+        "doctor_name": doctor_match.full_name,
+        "department_name": doctor_match.department_name,
+        "specialization": doctor_match.specialization,
+        "earliest_time": earliest_time.isoformat() if earliest_time else None,
+        "latest_time": latest_time.isoformat() if latest_time else None,
+    }
+    return DOCTOR_DISAMBIGUATION_MARKER + json.dumps(payload)
+
+
+def _pending_which_day_for_slot(history: list[ConversationMemory]) -> dict | None:
+    """Same bounded-lookback/invalidation shape as _pending_which_doctor_for_slot
+    above — tolerates an intervening unrelated turn, invalidated by a newer
+    availability-related marker."""
+    for row in reversed(history):
+        if getattr(row, "role", None) != "assistant":
+            continue
+        content = getattr(row, "content", "") or ""
+        if content.startswith((DOCTOR_OPTIONS_MARKER, DEPARTMENT_LIST_MARKER)):
+            return None
+        if not content.startswith(DOCTOR_DISAMBIGUATION_MARKER):
+            continue
+        try:
+            payload = json.loads(content[len(DOCTOR_DISAMBIGUATION_MARKER):])
+        except (ValueError, TypeError):
+            return None
+        return payload if payload.get("kind") == "which_day_for_slot" else None
+    return None
+
+
+def _resolve_slot_reply_for_doctor_window(
+    db: Session,
+    ctx: ClinicContext,
+    doctor_match: DoctorMatch,
+    earliest_date: str | None,
+    latest_date: str | None,
+    earliest_time: time | None,
+    latest_time: time | None,
+) -> str:
+    """Shared by the two-doctor merge-across-turns case and the one-doctor
+    already-shown case below: given a doctor already known (from either path)
+    and a date/time window resolved from SOME message (this turn or an
+    earlier one), returns a real booking confirmation if exactly one slot
+    matches, a filtered card if more than one does, or a real "nothing in that
+    window" reply — never left to the LLM to freehand any of these three
+    outcomes.
+
+    Reported live: "room 305 please" (no day named at all) still ran the
+    availability query with just a time filter — it could resolve to a real
+    slot on some ARBITRARY future day the patient never actually named, and go
+    straight to a booking confirmation for it. A time with no day at all is
+    never enough to book anything; ask which day first, same as asking which
+    doctor when that's ambiguous instead of guessing."""
+    if earliest_date is None and latest_date is None and (earliest_time is not None or latest_time is not None):
+        return _which_day_for_slot_reply(doctor_match, earliest_time, latest_time)
+    availability = get_department_availability(
+        db,
+        ctx.clinic_id,
+        doctor_match.department_name,
+        doctor_id=doctor_match.doctor_id,
+        earliest_date=date.fromisoformat(earliest_date) if earliest_date else None,
+        latest_date=date.fromisoformat(latest_date) if latest_date else None,
+        earliest_time=earliest_time,
+        latest_time=latest_time,
+    )
+    if not availability.doctors:
+        if availability.next_available_when is not None:
+            tz = _clinic_timezone(db, ctx.clinic_id)
+            return (
+                f"{doctor_match.full_name} doesn't have any open slots in that window. "
+                f"Their earliest available slot is {_format_when(availability.next_available_when, tz)}. "
+                "Would you like me to book that instead, or check a different day?"
+            )
+        return f"{doctor_match.full_name} doesn't have any open slots right now. Please check back later."
+    matched_doctor = availability.doctors[0]
+    if len(matched_doctor.slots) == 1:
+        picked_slot = get_slot_summary(db, ctx.clinic_id, str(matched_doctor.slots[0].slot_id))
+        if picked_slot is not None:
+            if _booking_cap_reached(db, ctx, picked_slot):
+                return _booking_cap_reply(picked_slot["department_name"])
+            return _book_confirmation_reply(picked_slot)
+    return _doctor_options_payload(db, ctx.clinic_id, availability)
+
+
 def _match_candidate(message: str, candidates: list[dict]) -> dict | None:
     """Matches the patient's reply against exactly one candidate by doctor name
     (full name, or its last word as a plain surname reference like "the Sheikh
@@ -2083,6 +2173,49 @@ def run_appointment_agent(
     if resolved_appointment is None and resolved_match is not None and _message_asks_who_is_a_doctor(message):
         return _doctor_identity_reply(resolved_match)
 
+    # Requested: a time was given with no day at all ("room 305 please" could
+    # even misfire this way — see _resolve_slot_reply_for_doctor_window's own
+    # comment) -> _which_day_for_slot_reply asked which day. The doctor is
+    # already known from THAT payload itself (not from resolved_match this
+    # turn, which may well be None here since this message is just answering
+    # "which day", naming no doctor of its own) — reconstruct it and merge
+    # with whatever day this message resolves.
+    if resolved_appointment is None:
+        pending_day_clarify = _pending_which_day_for_slot(history)
+        if pending_day_clarify is not None:
+            # A lenient bare-weekday parse here (not the general
+            # _resolve_date_and_time_window used elsewhere) — a plain "sat"
+            # with nothing else is a completely natural, unambiguous answer to
+            # "what day would you like?", unlike everywhere else this module
+            # resolves a weekday, where "sat" alone is also a real English
+            # word and needs the stricter gating. Explicit calendar dates
+            # ("aug 26") still take priority when present, same ordering as
+            # _resolve_date_and_time_window's own.
+            explicit_date = resolve_explicit_calendar_date(message)
+            if explicit_date is not None:
+                earliest_date = latest_date = explicit_date
+            else:
+                lenient_window = resolve_bare_weekday_reply(message)
+                earliest_date, latest_date = lenient_window if lenient_window else (None, None)
+            if earliest_date is not None or latest_date is not None:
+                stored_doctor = DoctorMatch(
+                    doctor_id=uuid.UUID(pending_day_clarify["doctor_id"]),
+                    full_name=pending_day_clarify["doctor_name"],
+                    department_name=pending_day_clarify["department_name"],
+                    specialization=pending_day_clarify.get("specialization"),
+                )
+                earliest_time_str = pending_day_clarify.get("earliest_time")
+                latest_time_str = pending_day_clarify.get("latest_time")
+                return _resolve_slot_reply_for_doctor_window(
+                    db,
+                    ctx,
+                    stored_doctor,
+                    earliest_date,
+                    latest_date,
+                    time.fromisoformat(earliest_time_str) if earliest_time_str else None,
+                    time.fromisoformat(latest_time_str) if latest_time_str else None,
+                )
+
     # Requested: a 2+ doctor card shown, then the patient replies in FRAGMENTS
     # across turns ("at 10:45" -> "with dr ahmed") instead of one complete
     # message — see _pending_which_doctor_for_slot's own comment for why an
@@ -2096,37 +2229,17 @@ def run_appointment_agent(
         if pending_slot_clarify is not None and any(
             c["doctor_id"] == str(resolved_match.doctor_id) for c in pending_slot_clarify["candidates"]
         ):
-            earliest_date = pending_slot_clarify.get("earliest_date")
-            latest_date = pending_slot_clarify.get("latest_date")
             earliest_time_str = pending_slot_clarify.get("earliest_time")
             latest_time_str = pending_slot_clarify.get("latest_time")
-            availability = get_department_availability(
+            return _resolve_slot_reply_for_doctor_window(
                 db,
-                ctx.clinic_id,
-                resolved_match.department_name,
-                doctor_id=resolved_match.doctor_id,
-                earliest_date=date.fromisoformat(earliest_date) if earliest_date else None,
-                latest_date=date.fromisoformat(latest_date) if latest_date else None,
-                earliest_time=time.fromisoformat(earliest_time_str) if earliest_time_str else None,
-                latest_time=time.fromisoformat(latest_time_str) if latest_time_str else None,
+                ctx,
+                resolved_match,
+                pending_slot_clarify.get("earliest_date"),
+                pending_slot_clarify.get("latest_date"),
+                time.fromisoformat(earliest_time_str) if earliest_time_str else None,
+                time.fromisoformat(latest_time_str) if latest_time_str else None,
             )
-            if not availability.doctors:
-                if availability.next_available_when is not None:
-                    tz = _clinic_timezone(db, ctx.clinic_id)
-                    return (
-                        f"{resolved_match.full_name} doesn't have any open slots in that window. "
-                        f"Their earliest available slot is {_format_when(availability.next_available_when, tz)}. "
-                        "Would you like me to book that instead, or check a different day?"
-                    )
-                return f"{resolved_match.full_name} doesn't have any open slots right now. Please check back later."
-            matched_doctor = availability.doctors[0]
-            if len(matched_doctor.slots) == 1:
-                picked_slot = get_slot_summary(db, ctx.clinic_id, str(matched_doctor.slots[0].slot_id))
-                if picked_slot is not None:
-                    if _booking_cap_reached(db, ctx, picked_slot):
-                        return _booking_cap_reply(picked_slot["department_name"])
-                    return _book_confirmation_reply(picked_slot)
-            return _doctor_options_payload(db, ctx.clinic_id, availability)
 
     # Requested (companion to the merge above): a 2+ doctor card shown, then a
     # fragment naming a date/time but NO doctor at all ("at 10:45", "sat") —
@@ -2150,6 +2263,25 @@ def run_appointment_agent(
                 for d in recent_marker["doctors"]
             ]
             return _which_doctor_for_slot_reply(candidates, earliest_date, latest_date, earliest_time, latest_time)
+        # Companion to the 2+ doctor "ask which doctor" case just above: when
+        # only ONE doctor was shown, there's no ambiguity to clarify at all —
+        # "on sat at 10am" plainly means that one doctor, so resolve straight
+        # to a real booking confirmation/filtered card instead of leaving the
+        # LLM to (re)match a bare day/time fragment against PREVIOUSLY SHOWN
+        # OPTIONS on its own, the same "let the model freehand it" gap the
+        # 2+ doctor fix above just closed for that case.
+        if recent_marker is not None and len(recent_marker.get("doctors") or []) == 1:
+            only_doctor = recent_marker["doctors"][0]
+            single_match = DoctorMatch(
+                doctor_id=uuid.UUID(only_doctor["doctor_id"]),
+                full_name=only_doctor["doctor_name"],
+                department_name=recent_marker.get("department_name"),
+                specialization=only_doctor.get("specialization"),
+            )
+            earliest_date, latest_date, earliest_time, latest_time = _resolve_date_and_time_window(message)
+            return _resolve_slot_reply_for_doctor_window(
+                db, ctx, single_match, earliest_date, latest_date, earliest_time, latest_time
+            )
 
     # A patient narrowing an already-shown multi-doctor card down to just one of
     # those doctors ("only show me Dr. X's slots") gets a real, filtered card built

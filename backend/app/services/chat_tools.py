@@ -178,6 +178,18 @@ _ABBR_WEEKDAY_TOKEN_RE = re.compile(
     r"\b(?:on|for|this|next|by|until|til)\s+([a-z]{3,9})\b",
     re.IGNORECASE,
 )
+# Reported live: "sat 1045", "sat 10.45", "sat 10:45" (a fragmented reply, no
+# "on"/"for"/etc. word at all before the abbreviation) matched neither the
+# full-weekday regex above nor the trigger-word-gated abbreviation regex, so
+# the weekday was silently dropped entirely. An abbreviation immediately
+# followed by a clock-shaped token is unambiguous enough to trust on its own
+# even with no preceding trigger word — a bare "sat" with nothing after it
+# stays gated behind the trigger-word requirement above, since standalone it's
+# also a real English word ("I sat down").
+_ABBR_WEEKDAY_BEFORE_TIME_RE = re.compile(
+    r"\b([a-z]{3,9})\b(?=\s*\d{1,2}(?:[:.]?\d{2})?\s*(?:am|pm)?\b)",
+    re.IGNORECASE,
+)
 _WEEKDAY_ABBR_CANDIDATES = ("mon", "tue", "tues", "wed", "thu", "thurs", "fri", "sat", "sun")
 
 
@@ -234,14 +246,41 @@ def resolve_bare_weekday_window(message: str) -> tuple[str, str] | None:
     if not matches:
         abbr_tokens = _ABBR_WEEKDAY_TOKEN_RE.findall(message)
         matches = [m for m in (_closest_weekday_abbr(t) for t in abbr_tokens) if m]
+    if not matches:
+        abbr_tokens = _ABBR_WEEKDAY_BEFORE_TIME_RE.findall(message)
+        matches = [m for m in (_closest_weekday_abbr(t) for t in abbr_tokens) if m]
     if len(matches) != 1:
         return None
-    target_weekday = _WEEKDAY_INDEX[matches[0].lower()]
+    return _weekday_name_to_next_occurrence_window(matches[0])
+
+
+def _weekday_name_to_next_occurrence_window(weekday_name: str) -> tuple[str, str]:
+    target_weekday = _WEEKDAY_INDEX[weekday_name.lower()]
     today = datetime.now(timezone.utc).date()
     delta_days = (target_weekday - today.weekday()) % 7
     resolved = today + timedelta(days=delta_days)
     iso = resolved.isoformat()
     return iso, iso
+
+
+def resolve_bare_weekday_reply(message: str) -> tuple[str, str] | None:
+    """Like resolve_bare_weekday_window, but ALSO accepts a bare weekday name/
+    abbreviation with no surrounding trigger word or adjacent time token at
+    all ("sat" on its own) — only safe to use where the caller already knows
+    a day-only answer is expected (e.g. answering this module's own "which
+    day would you like?" clarifying question), since that context removes the
+    "sat" vs "I sat down" ambiguity resolve_bare_weekday_window's stricter
+    gating exists for everywhere else."""
+    window = resolve_bare_weekday_window(message)
+    if window is not None:
+        return window
+    token = message.strip().lower()
+    if not token.isalpha():
+        return None
+    resolved_name = _closest_weekday_abbr(token)
+    if resolved_name is None:
+        return None
+    return _weekday_name_to_next_occurrence_window(resolved_name)
 
 
 _MONTH_NAME_TO_NUMBER = {
@@ -326,6 +365,32 @@ _BEFORE_CLOCK_RE = re.compile(r"\bbefore\s+(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)\b
 # as "3:30 or the nearest slots after it."
 _AT_CLOCK_RE = re.compile(r"\bat\s+(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\b", re.IGNORECASE)
 
+# Reported live: "sat 10.45", "sat 1045", "sat 10:45" (a fragmented reply to a
+# "which doctor" clarifying question, no "at"/"after"/"before" word at all)
+# were all silently ignored — every clock-time pattern above requires one of
+# those trigger words first. A bare clock time with a colon/dot separator is
+# unambiguous enough to trust on its own (same "at X" semantics: an inclusive
+# lower bound, not an exact-only match).
+_BARE_SEPARATOR_CLOCK_RE = re.compile(r"\b(\d{1,2})[:.](\d{2})\s*(am|pm)?\b", re.IGNORECASE)
+
+# Companion to the separator case above: "1045"/"945" with NO separator at
+# all. Ambiguous on its own (could be a 3-4 digit ID/quantity/year), so this is
+# only trusted once _parse_bare_digit_clock validates it as a plausible time
+# (hour 1-12, minute 00-59) — e.g. "2024" (a year) yields hour=20, rejected;
+# "1045" yields hour=10/minute=45, accepted.
+_BARE_DIGIT_CLOCK_RE = re.compile(r"\b(\d{3,4})\s*(am|pm)?\b", re.IGNORECASE)
+
+
+def _parse_bare_digit_clock(digits: str) -> tuple[str, str] | None:
+    """'1045' -> ('10', '45'); '945' -> ('9', '45'). None if the split isn't a
+    plausible 12-hour clock time at all (hour 1-12, minute 00-59) — guards
+    against misreading an unrelated 3-4 digit number as a time."""
+    hour_str, minute_str = (digits[:2], digits[2:]) if len(digits) == 4 else (digits[:1], digits[1:])
+    hour, minute = int(hour_str), int(minute_str)
+    if not (1 <= hour <= 12) or not (0 <= minute <= 59):
+        return None
+    return hour_str, minute_str
+
 
 def _infer_meridiem(hour: int) -> str:
     """Best-effort default for "at X" when no am/pm was said at all — a bare
@@ -361,6 +426,19 @@ def resolve_time_of_day_window(message: str) -> tuple[time | None, time | None] 
     at_match = _AT_CLOCK_RE.search(message)
     if at_match:
         return (_parse_12_hour_clock(*at_match.groups()), None)
+
+    # Bare clock time, no "at"/"after"/"before" word at all — see
+    # _BARE_SEPARATOR_CLOCK_RE/_BARE_DIGIT_CLOCK_RE's own comments. Separator
+    # form checked first since it's unambiguous; the no-separator form only
+    # engages once digit-split validation confirms it's plausibly a time.
+    bare_sep_match = _BARE_SEPARATOR_CLOCK_RE.search(message)
+    if bare_sep_match:
+        return (_parse_12_hour_clock(*bare_sep_match.groups()), None)
+    bare_digit_match = _BARE_DIGIT_CLOCK_RE.search(message)
+    if bare_digit_match:
+        split = _parse_bare_digit_clock(bare_digit_match.group(1))
+        if split is not None:
+            return (_parse_12_hour_clock(split[0], split[1], bare_digit_match.group(2)), None)
 
     lowered = message.lower()
     for phrase, start, end in _TIME_OF_DAY_PHRASES:

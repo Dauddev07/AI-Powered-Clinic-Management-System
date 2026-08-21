@@ -4454,7 +4454,7 @@ def test_run_appointment_agent_merges_a_later_named_doctor_with_an_earlier_resol
                 {"doctor_id": str(doctor_b.id), "doctor_name": doctor_b.full_name, "slots": []},
             ],
         })),
-        _row("user", "at 10:45"),
+        _row("user", "on that day at 10:45"),
         _row("assistant", DOCTOR_DISAMBIGUATION_MARKER + json.dumps({
             "kind": "which_doctor_for_slot",
             "question": "Did you mean Dr. A or Dr. B?",
@@ -4462,7 +4462,12 @@ def test_run_appointment_agent_merges_a_later_named_doctor_with_an_earlier_resol
                 {"doctor_id": str(doctor.id), "doctor_name": doctor.full_name, "department_name": "Cardiology"},
                 {"doctor_id": str(doctor_b.id), "doctor_name": doctor_b.full_name, "department_name": "Cardiology"},
             ],
-            "earliest_date": None, "latest_date": None,
+            # A day IS stored here (unlike a bare "at 10:45" with no day at
+            # all, which now gets its own "which day?" clarify question — see
+            # test_run_appointment_agent_asks_which_day_when_only_a_time_is_known
+            # below) — this test is specifically about merging the DOCTOR with
+            # an already-resolved day+time, not about the day-clarify path.
+            "earliest_date": target_start.date().isoformat(), "latest_date": target_start.date().isoformat(),
             "earliest_time": "10:45:00", "latest_time": None,
         })),
     ]
@@ -4517,7 +4522,7 @@ def test_run_appointment_agent_merge_survives_an_unrelated_question_in_between(
                 {"doctor_id": str(doctor_b.id), "doctor_name": doctor_b.full_name, "slots": []},
             ],
         })),
-        _row("user", "at 10:45"),
+        _row("user", "on that day at 10:45"),
         _row("assistant", DOCTOR_DISAMBIGUATION_MARKER + json.dumps({
             "kind": "which_doctor_for_slot",
             "question": "Did you mean Dr. A or Dr. B?",
@@ -4525,7 +4530,7 @@ def test_run_appointment_agent_merge_survives_an_unrelated_question_in_between(
                 {"doctor_id": str(doctor.id), "doctor_name": doctor.full_name, "department_name": "Cardiology"},
                 {"doctor_id": str(doctor_b.id), "doctor_name": doctor_b.full_name, "department_name": "Cardiology"},
             ],
-            "earliest_date": None, "latest_date": None,
+            "earliest_date": target_start.date().isoformat(), "latest_date": target_start.date().isoformat(),
             "earliest_time": "10:45:00", "latest_time": None,
         })),
         # Intervening unrelated turn — a plain-text reply with no marker at all.
@@ -4534,6 +4539,144 @@ def test_run_appointment_agent_merge_survives_an_unrelated_question_in_between(
     ]
 
     result = appointment_agent.run_appointment_agent(db, ctx, f"with {doctor.full_name}", "en", history)
+
+    assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "book_confirm"
+    assert payload["candidate"]["slot_id"] == str(matching_slot.id)
+
+
+def test_run_appointment_agent_bare_day_and_time_resolves_straight_to_the_one_shown_doctor(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # Requested (companion to the 2-doctor case above): when only ONE doctor
+    # was shown, there's no ambiguity to clarify — "on sat at 10am" should
+    # resolve straight to a real booking confirmation for that one doctor,
+    # never left to the LLM to (re)match the fragment on its own.
+    from datetime import date, datetime, timedelta, timezone
+
+    from app.models.slot import Slot
+    from app.services.chat_tools import resolve_bare_weekday_window
+
+    # Resolve "sat" the exact same way the code under test does, rather than
+    # guessing an offset that may or may not land on a Saturday.
+    resolved_iso_date, _ = resolve_bare_weekday_window("on sat at 10am")
+    target_start = datetime.combine(
+        date.fromisoformat(resolved_iso_date), datetime.min.time(), tzinfo=timezone.utc
+    ).replace(hour=10, minute=0)
+    matching_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id, start_utc=target_start, end_utc=target_start + timedelta(minutes=30),
+        status="open",
+    )
+    decoy_start = target_start - timedelta(hours=2)
+    decoy_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=decoy_start, end_utc=decoy_start + timedelta(minutes=30),
+        status="open",
+    )
+    db.add_all([matching_slot, decoy_slot])
+    db.flush()
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM when only one doctor was shown")),
+    )
+    history = [
+        _row("user", "show me available slots for cardiology"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + json.dumps({
+            "department_name": "Cardiology",
+            "doctors": [{"doctor_id": str(doctor.id), "doctor_name": doctor.full_name, "slots": []}],
+        })),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "on sat at 10am", "en", history)
+
+    assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "book_confirm"
+    assert payload["candidate"]["slot_id"] == str(matching_slot.id)
+
+
+def test_run_appointment_agent_asks_which_day_when_only_a_time_is_known(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # Requested: "room 305 please" (or any message with only a time and no day
+    # at all) must never resolve straight to a booking confirmation for some
+    # arbitrary future day the patient never named — a time with no day isn't
+    # enough to book anything. Ask which day first.
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM before the day is known")),
+    )
+    history = [
+        _row("user", "show me available slots for cardiology"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + json.dumps({
+            "department_name": "Cardiology",
+            "doctors": [{"doctor_id": str(doctor.id), "doctor_name": doctor.full_name, "slots": []}],
+        })),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "at 3:05", "en", history)
+
+    assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "which_day_for_slot"
+    assert payload["doctor_id"] == str(doctor.id)
+    assert payload["earliest_time"] == "15:05:00"
+
+
+def test_run_appointment_agent_merges_a_later_named_day_with_an_earlier_resolved_time(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # Companion to the test above: once the patient answers the "which day?"
+    # question, it must combine that day with the time from the EARLIER
+    # message and resolve to a real booking confirmation — not re-ask, and not
+    # ignore the time and just show the whole day's slots.
+    from datetime import date, datetime, timedelta, timezone
+
+    from app.models.slot import Slot
+    from app.services.chat_tools import resolve_bare_weekday_window
+
+    resolved_iso_date, _ = resolve_bare_weekday_window("on sat")
+    target_start = datetime.combine(
+        date.fromisoformat(resolved_iso_date), datetime.min.time(), tzinfo=timezone.utc
+    ).replace(hour=10, minute=45)
+    matching_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id, start_utc=target_start, end_utc=target_start + timedelta(minutes=30),
+        status="open",
+    )
+    decoy_start = target_start - timedelta(hours=2)
+    decoy_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=decoy_start, end_utc=decoy_start + timedelta(minutes=30),
+        status="open",
+    )
+    db.add_all([matching_slot, decoy_slot])
+    db.flush()
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM once the day+time are both known")),
+    )
+    history = [
+        _row("user", "show me available slots for cardiology"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + json.dumps({
+            "department_name": "Cardiology",
+            "doctors": [{"doctor_id": str(doctor.id), "doctor_name": doctor.full_name, "slots": []}],
+        })),
+        _row("user", "at 10:45"),
+        _row("assistant", DOCTOR_DISAMBIGUATION_MARKER + json.dumps({
+            "kind": "which_day_for_slot",
+            "question": f"What day would you like to see {doctor.full_name}?",
+            "doctor_id": str(doctor.id),
+            "doctor_name": doctor.full_name,
+            "department_name": "Cardiology",
+            "specialization": None,
+            "earliest_time": "10:45:00", "latest_time": None,
+        })),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "sat", "en", history)
 
     assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
     payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])

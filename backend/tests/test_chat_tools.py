@@ -778,6 +778,30 @@ def test_resolve_bare_weekday_window_none_when_typo_is_too_far_off():
     assert resolve_bare_weekday_window("book a slot for cardiology") is None
 
 
+@pytest.mark.parametrize("message", ["sat 1045", "sat 10.45", "sat 10:45", "on sat 1045"])
+def test_resolve_bare_weekday_window_resolves_an_abbreviation_immediately_before_a_time(message):
+    # Reported live: a fragmented reply to a "which doctor" clarifying question
+    # ("sat 1045", no "on"/"for"/etc. word at all before the abbreviation)
+    # matched neither the full-weekday regex nor the trigger-word-gated
+    # abbreviation regex, so the weekday was silently dropped. An abbreviation
+    # immediately followed by a clock-shaped token is unambiguous enough to
+    # trust on its own, unlike a bare "sat"/"sun" with nothing after it (see
+    # the "I sat in the waiting room" test above, which must still stay None).
+    window = resolve_bare_weekday_window(message)
+    assert window is not None
+    earliest, latest = window
+    resolved = datetime.fromisoformat(earliest).date()
+    assert resolved.strftime("%A") == "Saturday"
+    assert earliest == latest
+
+
+def test_resolve_bare_weekday_window_still_none_for_a_word_with_unrelated_nearby_digits():
+    # A weekday-abbreviation-shaped word immediately followed by digits is
+    # trusted (see the test above) — but this must not regress the existing
+    # "sat"/"sun" collision guard for messages with NO digits nearby at all.
+    assert resolve_bare_weekday_window("I sat in the waiting room for 2 hours") is None
+
+
 def test_build_tools_forces_the_resolved_weekday_window_regardless_of_model_args(
     db, clinic, department, doctor, patient, ctx
 ):
@@ -1052,3 +1076,30 @@ def test_resolve_time_of_day_window_infers_am_for_a_bare_morning_hour():
 
 def test_resolve_time_of_day_window_prefers_after_before_over_at():
     assert resolve_time_of_day_window("after 12 pm") == (time(12, 0), None)
+
+
+# Reported live: "sat 1045", "sat 10.45", "sat 10:45" (a fragmented reply, no
+# "at"/"after"/"before" word at all) were all silently ignored — every clock
+# pattern above requires one of those trigger words first.
+
+
+def test_resolve_time_of_day_window_accepts_a_bare_colon_separated_time():
+    assert resolve_time_of_day_window("sat 10:45") == (time(10, 45), None)
+
+
+def test_resolve_time_of_day_window_accepts_a_bare_dot_separated_time():
+    assert resolve_time_of_day_window("sat 10.45") == (time(10, 45), None)
+
+
+def test_resolve_time_of_day_window_accepts_a_bare_no_separator_time():
+    assert resolve_time_of_day_window("sat 1045") == (time(10, 45), None)
+
+
+def test_resolve_time_of_day_window_accepts_a_bare_three_digit_no_separator_time():
+    assert resolve_time_of_day_window("945") == (time(9, 45), None)
+
+
+def test_resolve_time_of_day_window_rejects_an_implausible_bare_digit_time():
+    # "2024" (e.g. a year) splits as hour=20/minute=24 — not a plausible
+    # 12-hour clock time, so this must NOT be misread as a time at all.
+    assert resolve_time_of_day_window("in 2024 I had surgery") is None

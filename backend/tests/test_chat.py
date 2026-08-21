@@ -115,6 +115,147 @@ def test_general_info_intent_routes_to_general_info_agent(db, ctx, monkeypatch):
     assert result.reply == "We're open 9am-5pm."
 
 
+# --- compound intent: two distinct things in one message ---------------------------
+# Requested: a message stating a real symptom alongside an unrelated cancel/reschedule
+# request, or a symptom alongside a clinic-logistics question, used to have one of the
+# two silently dropped entirely — the router picks exactly one bucket, and whichever
+# specialist agent it hands off to has no idea the other thing was even said. Now asks
+# which one to help with first instead of guessing/dropping either.
+
+
+def test_compound_symptom_and_cancel_message_asks_which_one_first(db, ctx, monkeypatch):
+    for name in ("run_symptom_agent", "run_appointment_agent", "run_general_info_agent"):
+        monkeypatch.setattr(
+            f"app.services.chat.{name}",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError(f"{name} must not be called before a choice is made")),
+        )
+
+    result = handle_chat_message(
+        db, ctx, "my chest really hurts, please cancel my appointment tomorrow", None
+    )
+
+    assert "which would you like me to help with first" in result.reply.lower()
+    assert "symptom" in result.reply.lower()
+    assert "cancel" in result.reply.lower() or "reschedul" in result.reply.lower()
+
+
+def test_compound_symptom_and_logistics_message_asks_which_one_first(db, ctx, monkeypatch):
+    for name in ("run_symptom_agent", "run_appointment_agent", "run_general_info_agent"):
+        monkeypatch.setattr(
+            f"app.services.chat.{name}",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError(f"{name} must not be called before a choice is made")),
+        )
+
+    result = handle_chat_message(db, ctx, "i have a bad headache, also what are your clinic hours", None)
+
+    assert "which would you like me to help with first" in result.reply.lower()
+
+
+def test_compound_message_answered_with_symptom_choice_reruns_original_message(db, ctx, monkeypatch):
+    # Once the patient picks "symptom", the ORIGINAL compound message (not the
+    # bare "symptom first" answer, which has no real content of its own) must
+    # be what actually reaches the symptom agent.
+    seen = {}
+
+    def fake_symptom_agent(db, ctx, message, language, history):
+        seen["message"] = message
+        return "Let's figure out which department fits."
+
+    monkeypatch.setattr("app.services.chat.run_symptom_agent", fake_symptom_agent)
+    monkeypatch.setattr(
+        "app.services.chat.run_appointment_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("run_appointment_agent must not be called")),
+    )
+
+    original = "my chest really hurts, please cancel my appointment tomorrow"
+    first = handle_chat_message(db, ctx, original, None)
+    result = handle_chat_message(db, ctx, "symptom first please", first.session_id)
+
+    assert result.reply == "Let's figure out which department fits."
+    assert seen["message"] == original
+
+
+def test_compound_message_answered_with_cancel_choice_reruns_original_message(db, ctx, monkeypatch):
+    seen = {}
+
+    def fake_appointment_agent(db, ctx, message, language, history):
+        seen["message"] = message
+        return "Sure, let's cancel that."
+
+    monkeypatch.setattr("app.services.chat.run_appointment_agent", fake_appointment_agent)
+    monkeypatch.setattr(
+        "app.services.chat.run_symptom_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("run_symptom_agent must not be called")),
+    )
+
+    original = "my chest really hurts, please cancel my appointment tomorrow"
+    first = handle_chat_message(db, ctx, original, None)
+    result = handle_chat_message(db, ctx, "the cancellation please", first.session_id)
+
+    assert result.reply == "Sure, let's cancel that."
+    assert seen["message"] == original
+
+
+def test_compound_message_answered_with_an_unrelated_reply_falls_through_to_normal_routing(
+    db, ctx, monkeypatch
+):
+    # Requested: if the patient's next message DOESN'T answer the clarifying
+    # question at all (a genuinely unrelated message), it must be handled
+    # exactly like any other message — normal classification of THAT message,
+    # never forced into either track from the stale compound question.
+    _patch_general_info_reply(monkeypatch, "We're open 9am-5pm.")
+    monkeypatch.setattr(
+        "app.services.chat.run_symptom_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("run_symptom_agent must not be called")),
+    )
+    monkeypatch.setattr(
+        "app.services.chat.run_appointment_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("run_appointment_agent must not be called")),
+    )
+    _patch_intent(monkeypatch, GENERAL_INFO)
+
+    first = handle_chat_message(
+        db, ctx, "my chest really hurts, please cancel my appointment tomorrow", None
+    )
+    result = handle_chat_message(db, ctx, "where is this clinic located", first.session_id)
+
+    assert result.reply == "We're open 9am-5pm."
+
+
+def test_a_genuinely_coherent_single_ask_is_never_treated_as_compound(db, ctx, monkeypatch):
+    # "I have a headache, can you book me an appointment" is ONE coherent ask
+    # (a symptom leading to a booking), not two separate things — must go
+    # straight to the normally-routed agent, never the clarifying question.
+    _patch_intent(monkeypatch, SYMPTOM_GENERAL)
+    _patch_symptom_reply(monkeypatch, "Let's figure out which department fits.")
+    monkeypatch.setattr(
+        "app.services.chat.run_appointment_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("run_appointment_agent must not be called")),
+    )
+
+    result = handle_chat_message(db, ctx, "I have a headache, can you book me an appointment", None)
+
+    assert result.reply == "Let's figure out which department fits."
+
+
+def test_a_real_emergency_bypasses_the_compound_intent_question_entirely(db, ctx, monkeypatch):
+    # A genuine emergency signal must short-circuit BEFORE the compound-intent
+    # check ever runs — never offered as "would you like help with the
+    # emergency or the cancellation first?".
+    for name in ("run_symptom_agent", "run_appointment_agent", "run_general_info_agent"):
+        monkeypatch.setattr(
+            f"app.services.chat.{name}",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError(f"{name} must not be called for a real emergency")),
+        )
+
+    result = handle_chat_message(
+        db, ctx, "i am having severe chest pain and shortness of breath, please cancel my appointment", None
+    )
+
+    assert result.red_flag is True
+    assert "which would you like me to help with first" not in result.reply.lower()
+
+
 # --- cross-session memory -------------------------------------------------------------
 
 
