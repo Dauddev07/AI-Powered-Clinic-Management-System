@@ -4676,6 +4676,31 @@ def test_run_appointment_agent_asks_confirmation_before_cancelling_when_exactly_
     assert payload["candidate"]["appointment_id"] == str(appt.id)
 
 
+def test_run_appointment_agent_asks_which_action_when_message_names_both_cancel_and_reschedule(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    # Reported live: "cancel my appointment or reschedule" silently ALWAYS
+    # resolved to cancel — _detect_action_intent checks every token for a
+    # cancel keyword before ever considering reschedule, so the "or
+    # reschedule" alternative was dropped entirely with zero disambiguation,
+    # regardless of which action the patient named first in the sentence.
+    _future_appointment(db, clinic, patient, doctor)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called while the action is still ambiguous")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    for message in [
+        "cancel my appointment or reschedule",
+        "reschedule or cancel my appointment",
+        "should i cancel or reschedule my appointment?",
+    ]:
+        result = appointment_agent.run_appointment_agent(db, ctx, message, "en", [])
+        assert "cancel" in result.lower() and "reschedule" in result.lower()
+        assert not result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+
+
 def test_run_appointment_agent_phrases_confirmation_as_an_answer_to_a_capability_question(
     monkeypatch, db, ctx, clinic, doctor, patient
 ):

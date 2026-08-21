@@ -767,6 +767,29 @@ def _detect_action_intent(message: str) -> str | None:
     return None
 
 
+def _message_names_both_cancel_and_reschedule(message: str) -> bool:
+    """True when a single message names BOTH actions ("cancel my appointment or
+    reschedule", "should I cancel or reschedule?") with neither negated.
+    Reported live: _detect_action_intent's two separate passes (cancel keywords
+    checked across every token before reschedule is even considered) meant a
+    message like this silently always resolved to "cancel", no matter which
+    action the patient actually said first or how the sentence was phrased —
+    the "or reschedule"/"or cancel" alternative was dropped entirely with no
+    disambiguation. Checked once, separately, so run_appointment_agent can ask
+    which one instead of ever letting _detect_action_intent's ordering silently
+    decide for the patient."""
+    tokens = re.findall(r"[a-z0-9']+", message.lower())
+    has_cancel = any(
+        _fuzzy_word_in(token, _CANCEL_KEYWORDS) and not _action_word_is_negated(tokens, index)
+        for index, token in enumerate(tokens)
+    )
+    has_reschedule = any(
+        _fuzzy_word_in(token, _RESCHEDULE_KEYWORDS) and not _action_word_is_negated(tokens, index)
+        for index, token in enumerate(tokens)
+    )
+    return has_cancel and has_reschedule
+
+
 _ACTION_INTENT_LOOKBACK_TURNS = 6
 
 # _detect_action_intent's CANCEL_KEYWORDS/RESCHEDULE_KEYWORDS fuzzy-match the past-
@@ -1479,6 +1502,17 @@ def run_appointment_agent(
             )
             if not superseded:
                 return _appointment_disambiguation_reply(pending["action"], pending["candidates"])
+
+    # A single message naming BOTH actions ("cancel my appointment or
+    # reschedule") is genuinely ambiguous — never let _detect_action_intent's
+    # own cancel-checked-first ordering silently decide for the patient. Placed
+    # after the pending-disambiguation block above: if a candidate already
+    # matched a stale disambiguation there, disambiguation_handled is already
+    # True and this message is clearly answering that question, not raising a
+    # fresh either/or — this check only applies to messages that reach here
+    # still undecided.
+    if not disambiguation_handled and _message_names_both_cancel_and_reschedule(message):
+        return "Did you want to cancel your appointment, or reschedule it instead?"
 
     if not disambiguation_handled:
         action = _detect_action_intent(message)
