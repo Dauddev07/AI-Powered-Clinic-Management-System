@@ -4361,6 +4361,186 @@ def test_run_appointment_agent_who_is_a_made_up_doctor_says_it_doesnt_know(monke
     assert DOCTOR_OPTIONS_MARKER not in result
 
 
+def test_run_appointment_agent_asks_which_doctor_for_a_bare_time_after_a_two_doctor_card(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # Requested: a 2-doctor card shown, then a fragment naming a time but no
+    # doctor at all ("at 10:45") is ambiguous — which of the two doctors does
+    # it apply to? Must ask deterministically instead of leaving that decision
+    # to the LLM's own free judgment.
+    from app.models.doctor import Doctor
+
+    doctor_b = Doctor(
+        clinic_id=clinic.id, department_id=department.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Bilal Khan", is_active=True,
+    )
+    db.add(doctor_b)
+    db.flush()
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM once a 2-doctor card is showing")),
+    )
+    history = [
+        _row("user", "show me available slots for cardiology"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + json.dumps({
+            "department_name": "Cardiology",
+            "doctors": [
+                {"doctor_id": str(doctor.id), "doctor_name": doctor.full_name, "slots": []},
+                {"doctor_id": str(doctor_b.id), "doctor_name": doctor_b.full_name, "slots": []},
+            ],
+        })),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "at 10:45", "en", history)
+
+    assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "which_doctor_for_slot"
+    candidate_ids = {c["doctor_id"] for c in payload["candidates"]}
+    assert candidate_ids == {str(doctor.id), str(doctor_b.id)}
+    assert payload["earliest_time"] == "10:45:00"
+
+
+def test_run_appointment_agent_merges_a_later_named_doctor_with_an_earlier_resolved_time(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # Requested: patient says "at 10:45" (asked which doctor), THEN names one
+    # of the two — must combine that doctor with the time from the EARLIER
+    # message, not just show that doctor's entire unfiltered slot list.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    doctor_b = Doctor(
+        clinic_id=clinic.id, department_id=department.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Bilal Khan", is_active=True,
+    )
+    db.add(doctor_b)
+    db.flush()
+
+    target_start = (datetime.now(timezone.utc) + timedelta(days=2)).replace(
+        hour=10, minute=45, second=0, microsecond=0
+    )
+    matching_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id, start_utc=target_start, end_utc=target_start + timedelta(minutes=30),
+        status="open",
+    )
+    # A decoy slot for the SAME doctor BEFORE 10:45 — "at 10:45" resolves to
+    # "at or after 10:45" (same semantics as everywhere else in this file), so
+    # this earlier slot must be correctly excluded, proving the time filter
+    # from the earlier message is actually being applied, not just "show this
+    # doctor's first/only slot".
+    decoy_start = target_start - timedelta(hours=2)
+    decoy_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=decoy_start, end_utc=decoy_start + timedelta(minutes=30),
+        status="open",
+    )
+    db.add_all([matching_slot, decoy_slot])
+    db.flush()
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM once the doctor+time are both known")),
+    )
+    history = [
+        _row("user", "show me available slots for cardiology"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + json.dumps({
+            "department_name": "Cardiology",
+            "doctors": [
+                {"doctor_id": str(doctor.id), "doctor_name": doctor.full_name, "slots": []},
+                {"doctor_id": str(doctor_b.id), "doctor_name": doctor_b.full_name, "slots": []},
+            ],
+        })),
+        _row("user", "at 10:45"),
+        _row("assistant", DOCTOR_DISAMBIGUATION_MARKER + json.dumps({
+            "kind": "which_doctor_for_slot",
+            "question": "Did you mean Dr. A or Dr. B?",
+            "candidates": [
+                {"doctor_id": str(doctor.id), "doctor_name": doctor.full_name, "department_name": "Cardiology"},
+                {"doctor_id": str(doctor_b.id), "doctor_name": doctor_b.full_name, "department_name": "Cardiology"},
+            ],
+            "earliest_date": None, "latest_date": None,
+            "earliest_time": "10:45:00", "latest_time": None,
+        })),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, f"with {doctor.full_name}", "en", history)
+
+    assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "book_confirm"
+    assert payload["candidate"]["slot_id"] == str(matching_slot.id)
+
+
+def test_run_appointment_agent_merge_survives_an_unrelated_question_in_between(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # Requested: an unrelated question ("what are your clinic hours?") asked
+    # BETWEEN the "which doctor" clarify question and the patient naming the
+    # doctor must not wipe out the earlier resolved time — it's answered on
+    # its own terms elsewhere and never touches this module's own markers.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    doctor_b = Doctor(
+        clinic_id=clinic.id, department_id=department.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Bilal Khan", is_active=True,
+    )
+    db.add(doctor_b)
+    db.flush()
+
+    target_start = (datetime.now(timezone.utc) + timedelta(days=2)).replace(
+        hour=10, minute=45, second=0, microsecond=0
+    )
+    matching_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id, start_utc=target_start, end_utc=target_start + timedelta(minutes=30),
+        status="open",
+    )
+    db.add(matching_slot)
+    db.flush()
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM once the doctor+time are both known")),
+    )
+    history = [
+        _row("user", "show me available slots for cardiology"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + json.dumps({
+            "department_name": "Cardiology",
+            "doctors": [
+                {"doctor_id": str(doctor.id), "doctor_name": doctor.full_name, "slots": []},
+                {"doctor_id": str(doctor_b.id), "doctor_name": doctor_b.full_name, "slots": []},
+            ],
+        })),
+        _row("user", "at 10:45"),
+        _row("assistant", DOCTOR_DISAMBIGUATION_MARKER + json.dumps({
+            "kind": "which_doctor_for_slot",
+            "question": "Did you mean Dr. A or Dr. B?",
+            "candidates": [
+                {"doctor_id": str(doctor.id), "doctor_name": doctor.full_name, "department_name": "Cardiology"},
+                {"doctor_id": str(doctor_b.id), "doctor_name": doctor_b.full_name, "department_name": "Cardiology"},
+            ],
+            "earliest_date": None, "latest_date": None,
+            "earliest_time": "10:45:00", "latest_time": None,
+        })),
+        # Intervening unrelated turn — a plain-text reply with no marker at all.
+        _row("user", "what are your clinic hours?"),
+        _row("assistant", "We're open Monday to Saturday, 9am to 5pm."),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, f"with {doctor.full_name}", "en", history)
+
+    assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "book_confirm"
+    assert payload["candidate"]["slot_id"] == str(matching_slot.id)
+
+
 def test_run_appointment_agent_narrows_after_resolving_a_name_disambiguation_reply(
     monkeypatch, db, ctx, clinic
 ):
