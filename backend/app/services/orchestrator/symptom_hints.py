@@ -349,6 +349,16 @@ _LOW_MOOD_PERSISTENCE_WORDS = frozenset({
     "chronically", "persistent", "persistently", "ongoing",
 })
 
+# Reported live: "ive lost my mind" got a crisis/safety reply from the red-flag
+# guard (a separate system, see red_flag.py) but was never recognized here as a
+# Psychiatry-shaped complaint at all — the later "show me available doctors acc
+# to my symptoms" turn found no hint and fell through to plain severity/duration
+# screening, eventually landing on General Medicine. Bare "mind" alone is too
+# generic to safely trigger on its own (e.g. "never mind", "keep that in mind",
+# "do you mind"), same "bare word needs corroboration" shape as low mood above —
+# but "mind" co-occurring with a losing/lost signal is unambiguous.
+_MIND_LOSS_SIGNAL_WORDS = frozenset({"lost", "losing", "lose"})
+
 # Reported live: "i am feeling numb... in the head... having weakness" got a
 # spurious General Medicine card for "head pain" — but the patient never
 # described a headache at all; "head" was their answer to "where exactly are you
@@ -435,6 +445,8 @@ def _matched_hint_groups(
                 groups.append((("general medicine", "internal medicine", "family medicine"), "limb/joint pain"))
     if words & _LOW_MOOD_PASSING_WORDS and words & _LOW_MOOD_PERSISTENCE_WORDS:
         groups.append((("psych",), "low mood"))
+    if "mind" in words and words & _MIND_LOSS_SIGNAL_WORDS:
+        groups.append((("psych",), "loss of mental control"))
     # "forehead" is its own single token (re.findall splits on word boundaries, not
     # substrings) — it never matched bare "head" here, so "forehead pain" produced
     # ZERO hints at all and was left entirely to the LLM's own free-form judgment,
