@@ -396,10 +396,21 @@ export default function BookAppointment() {
     loadSlots({ departmentId, doctorId, dateFilter, customDate, timeOfDay, page: newPage });
   };
 
-  const handleBook = async (slotId) => {
+  const openBookConfirmation = (slot) => {
+    setBookError(null);
+    setPendingSlot(slot);
+  };
+
+  const closeBookConfirmation = () => {
+    setPendingSlot(null);
+    setBookError(null);
+  };
+
+  const confirmBook = async () => {
+    if (!pendingSlot) return;
+    const slotId = pendingSlot.id;
     setBookingSlotId(slotId);
-    setMessage(null);
-    setError(null);
+    setBookError(null);
     try {
       await bookAppointment(slotId);
       // Booking succeeded — hand off to Upcoming Appointments with the
@@ -411,23 +422,26 @@ export default function BookAppointment() {
       return;
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        // Lost the race — refresh immediately so the patient sees fresh
-        // alternatives rather than a dead error sitting over a stale list.
+        // Lost the race — close the modal and refresh immediately so the
+        // patient sees fresh alternatives rather than a dead error sitting
+        // over a stale list.
+        closeBookConfirmation();
         setMessage({
           ok: false,
           text: `${err.detail || "That slot was just taken."}`,
         });
         await loadSlots({ departmentId, doctorId, dateFilter, customDate, timeOfDay, page });
+        window.scrollTo({ top: 0, behavior: "smooth" });
       } else {
-        setError(
+        // Kept inside the modal (not the page behind it) — same reasoning as
+        // UpcomingAppointments' own cancel-confirmation modal: the patient
+        // shouldn't lose the confirmation's context while reading why it failed.
+        setBookError(
           err instanceof ApiError
             ? err.detail || err.message
             : "Booking failed.",
         );
       }
-      // Unsuccessful booking — the message/error banner lives at the top of
-      // the page, above the slot table the patient may have scrolled past.
-      window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
       setBookingSlotId(null);
     }
@@ -623,7 +637,7 @@ export default function BookAppointment() {
                           <button
                             type="button"
                             className={styles.primaryBtn}
-                            onClick={() => handleBook(slot.id)}
+                            onClick={() => openBookConfirmation(slot)}
                             disabled={bookingSlotId === slot.id}
                           >
                             {bookingSlotId === slot.id ? "Booking…" : "Book"}
@@ -643,6 +657,36 @@ export default function BookAppointment() {
           <Pagination page={page} pageSize={PAGE_SIZE} total={slotData.total} onPageChange={handlePageChange} />
         </div>
       )}
+
+      <Modal open={!!pendingSlot} onClose={closeBookConfirmation} title="Confirm appointment">
+        <p className={styles.modalIntro}>
+          Book your appointment with <strong>{pendingSlot?.doctor_name}</strong> in{" "}
+          <strong>{pendingSlot?.department_name}</strong> on{" "}
+          <strong>
+            {pendingSlot && slotData ? formatDateTime(pendingSlot.start_utc, slotData.clinic_timezone) : ""}
+          </strong>
+          ?
+        </p>
+        {bookError && <p className={styles.errorText}>{bookError}</p>}
+        <div className={styles.modalActions}>
+          <button
+            type="button"
+            className={styles.modalCancelBtn}
+            onClick={closeBookConfirmation}
+            disabled={bookingSlotId === pendingSlot?.id}
+          >
+            Go back
+          </button>
+          <button
+            type="button"
+            className={styles.primaryBtn}
+            onClick={confirmBook}
+            disabled={bookingSlotId === pendingSlot?.id}
+          >
+            {bookingSlotId === pendingSlot?.id ? "Booking…" : "Confirm booking"}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }
