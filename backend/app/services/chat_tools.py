@@ -244,6 +244,56 @@ def resolve_bare_weekday_window(message: str) -> tuple[str, str] | None:
     return iso, iso
 
 
+_MONTH_NAME_TO_NUMBER = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+    "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+    "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9, "oct": 10, "october": 10,
+    "nov": 11, "november": 11, "dec": 12, "december": 12,
+}
+# Longest names first so e.g. "september" doesn't get cut short by "sep" matching
+# a prefix of it first in the alternation.
+_MONTH_NAME_ALTERNATION = "|".join(sorted(_MONTH_NAME_TO_NUMBER, key=len, reverse=True))
+_DAY_THEN_MONTH_RE = re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTH_NAME_ALTERNATION})\b", re.IGNORECASE)
+_MONTH_THEN_DAY_RE = re.compile(rf"\b({_MONTH_NAME_ALTERNATION})\s+(\d{{1,2}})(?:st|nd|rd|th)?\b", re.IGNORECASE)
+
+
+def resolve_explicit_calendar_date(message: str) -> str | None:
+    """Resolves an explicit "26 aug"/"aug 26"-style calendar date the patient
+    named directly in their own message to a real ISO date, or None if the
+    message names no such date (including an ambiguous case naming more than
+    one, which this deliberately doesn't try to resolve — same "leave an
+    unrelated/ambiguous turn completely untouched" principle as
+    resolve_bare_weekday_window above, which this is the day+month counterpart
+    to: a weekday name attached to an explicit date, e.g. "wed 26 aug", falls
+    entirely outside that function's own bare-weekday-only scope).
+
+    Assumes the current year, rolling forward to next year only when the
+    resulting date has already passed — mirrors resolve_bare_weekday_window's
+    own forward-roll for a bare weekday name.
+    """
+    # Both regexes' captures are normalized to (day_str, month_name) order here,
+    # regardless of which order the patient actually typed them in.
+    day_month_matches = _DAY_THEN_MONTH_RE.findall(message)
+    month_day_matches = [(day, month) for month, day in _MONTH_THEN_DAY_RE.findall(message)]
+    all_matches = day_month_matches + month_day_matches
+    if len(all_matches) != 1:
+        return None
+    day_str, month_name = all_matches[0]
+    month = _MONTH_NAME_TO_NUMBER[month_name.lower()]
+    day = int(day_str)
+    today = datetime.now(timezone.utc).date()
+    try:
+        candidate = date(today.year, month, day)
+    except ValueError:
+        return None
+    if candidate < today:
+        try:
+            candidate = date(today.year + 1, month, day)
+        except ValueError:
+            return None
+    return candidate.isoformat()
+
+
 # Reported live: "only show me available slots of dr farhan rehman after 12 pm
 # on monday" and its follow-up "show me his available slots after 12 pm" both
 # silently ignored the time-of-day request and returned the same top-5-

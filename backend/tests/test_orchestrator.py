@@ -3097,6 +3097,76 @@ def test_run_appointment_agent_refuses_a_reschedule_request_naming_a_different_d
     assert "cancel" in result.lower()
 
 
+def test_run_appointment_agent_refuses_a_reschedule_naming_an_explicit_different_date(
+    monkeypatch, db, ctx, clinic, department, doctor, patient
+):
+    # Same same-day-only rule, a genuinely different gap: resolve_bare_weekday_window
+    # only recognizes a bare WEEKDAY NAME — "reschedule to august 26th"/"wed 26 aug"
+    # (an explicit calendar date, no weekday word at all) fell through that check
+    # entirely and reached the general LLM/tool-calling path instead of the
+    # deterministic same-day-only refusal.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.appointment import Appointment
+    from app.models.slot import Slot
+
+    appt_start = datetime.now(timezone.utc) + timedelta(days=1)
+    slot = Slot(clinic_id=clinic.id, doctor_id=doctor.id, start_utc=appt_start, end_utc=appt_start + timedelta(minutes=30))
+    db.add(slot)
+    db.flush()
+    db.add(Appointment(clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id, status="confirmed"))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("get_department_availability must not be queried for a different day")
+
+    monkeypatch.setattr(appointment_agent, "get_department_availability", _fail_if_called)
+
+    # A date guaranteed different from the appointment's own day (a week later,
+    # never the same calendar day regardless of when the test runs).
+    different_date = appt_start + timedelta(days=7)
+    month_name = different_date.strftime("%B").lower()
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, f"reschedule my appointment to {different_date.day} {month_name}", "en", []
+    )
+
+    assert "same day" in result.lower()
+    assert "cancel" in result.lower()
+
+
+def test_run_appointment_agent_refuses_a_reschedule_naming_a_different_day_vaguely(
+    monkeypatch, db, ctx, clinic, department, doctor, patient
+):
+    # Third gap in the same-day-only check: "reschedule to a different day" names
+    # no specific date or weekday at all — must still refuse deterministically,
+    # since ANY different day violates the same-day-only rule regardless of which
+    # one, rather than falling through to the LLM with nothing telling it this.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.appointment import Appointment
+    from app.models.slot import Slot
+
+    appt_start = datetime.now(timezone.utc) + timedelta(days=1)
+    slot = Slot(clinic_id=clinic.id, doctor_id=doctor.id, start_utc=appt_start, end_utc=appt_start + timedelta(minutes=30))
+    db.add(slot)
+    db.flush()
+    db.add(Appointment(clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id, status="confirmed"))
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("get_department_availability must not be queried for a vague different-day request")
+
+    monkeypatch.setattr(appointment_agent, "get_department_availability", _fail_if_called)
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "can i reschedule it to a different day instead", "en", []
+    )
+
+    assert "same day" in result.lower()
+    assert "cancel" in result.lower()
+
+
 def test_run_appointment_agent_generic_doctor_availability_question_falls_through_normally(
     monkeypatch, db, ctx, doctor
 ):
@@ -4350,6 +4420,33 @@ def test_run_appointment_agent_reschedule_with_zero_active_appointments_and_no_d
     result = appointment_agent.run_appointment_agent(db, ctx, "i want to reschedule my appointment", "en", history)
 
     assert result == "You don't have an upcoming appointment to reschedule."
+
+
+def test_run_appointment_agent_reschedule_slot_card_has_a_headline_note(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    # Instructed live: the reschedule slot-pick card used to render with no note
+    # at all — a bare list of times with nothing telling the patient what picking
+    # one of them actually does, unlike every symptom-triage card elsewhere in
+    # this module. Must now name the doctor and say to pick a time to reschedule.
+    from datetime import timedelta
+
+    from app.models.slot import Slot
+
+    appt = _future_appointment(db, clinic, patient, doctor, days_from_now=1)
+    old_slot = db.get(Slot, appt.slot_id)
+    # Reschedule only ever offers same-day times — shifted a couple hours,
+    # same calendar day as the appointment's own slot, never a different day.
+    shift = timedelta(hours=-2) if old_slot.start_utc.hour >= 20 else timedelta(hours=2)
+    new_start = old_slot.start_utc + shift
+    db.add(Slot(clinic_id=clinic.id, doctor_id=doctor.id, start_utc=new_start, end_utc=new_start + timedelta(minutes=30), status="open"))
+    db.flush()
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "i want to reschedule my appointment", "en", [])
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["note"] == f"Select a time below to reschedule your appointment with {doctor.full_name}."
 
 
 def test_run_appointment_agent_cancel_with_zero_active_appointments_and_no_doctor_named(

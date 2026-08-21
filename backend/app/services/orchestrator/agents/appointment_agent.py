@@ -91,6 +91,7 @@ from app.services.chat_tools import (
     list_upcoming_appointments,
     reschedule_appointment_now,
     resolve_bare_weekday_window,
+    resolve_explicit_calendar_date,
     resolve_time_of_day_window,
 )
 from app.services.department_availability import (
@@ -444,6 +445,24 @@ def _reschedule_different_day_reply(appointment: dict) -> str:
         f"{appointment['when']} can only be rescheduled to a different time on the SAME day. To move it "
         f"to a different day, please cancel this appointment and book a new one for that day instead."
     )
+
+
+# Instructed live: the same-day-only refusal above only ever fired for a message
+# naming an actual WEEKDAY NAME different from the appointment's own day
+# (resolve_bare_weekday_window) — "reschedule to a different day" (no specific day
+# named at all) and "reschedule to august 26th"/"wed 26 aug" (an explicit
+# calendar date, no weekday word) both fell through this check entirely and
+# reached the general LLM/tool-calling path instead of the deterministic refusal.
+# A patient explicitly asking for "a different day" needs no date resolved at
+# all to know the answer — same-day-only means ANY different day is refused,
+# regardless of which one.
+_VAGUE_DIFFERENT_DAY_RE = re.compile(
+    r"\b(?:a\s+|some\s+)?(?:different|another|other)\s+(?:day|date)\b", re.IGNORECASE
+)
+
+
+def _message_asks_for_a_different_day_vaguely(message: str) -> bool:
+    return bool(_VAGUE_DIFFERENT_DAY_RE.search(message))
 
 
 def _cancel_confirmation_reply(appointment: dict, phrased_as_capability_question: bool = False) -> str:
@@ -1528,6 +1547,20 @@ def run_appointment_agent(
             requested_end = date.fromisoformat(forced_window[1])
             if not (requested_start <= appointment_date <= requested_end):
                 return _reschedule_different_day_reply(resolved_appointment)
+        elif appointment_date is not None:
+            # forced_window covers a bare WEEKDAY NAME only — "reschedule to
+            # august 26th"/"wed 26 aug" (an explicit calendar date, no weekday
+            # word) and "reschedule to a different day" (no date at all) both
+            # fell through that check entirely. Checked as a separate elif (not
+            # folded into the block above) since forced_window and an explicit
+            # date are mutually exclusive ways of naming a day — never both at
+            # once for the same message.
+            explicit_date = resolve_explicit_calendar_date(message)
+            if explicit_date is not None:
+                if date.fromisoformat(explicit_date) != appointment_date:
+                    return _reschedule_different_day_reply(resolved_appointment)
+            elif _message_asks_for_a_different_day_vaguely(message):
+                return _reschedule_different_day_reply(resolved_appointment)
         # Reschedule only ever offers same-day times (see booking_engine.
         # reschedule_appointment's own hard rule) — whether or not the patient
         # named a day at all, the window is always pinned to the appointment's
@@ -1556,7 +1589,18 @@ def run_appointment_agent(
                     "reschedule to that instead, or check a different day?"
                 )
             return f"{resolved_appointment['doctor_name']} doesn't have any open slots right now. Please check back later."
-        return _doctor_options_payload(db, ctx.clinic_id, availability)
+        # Instructed live: this card used to render with no note at all, unlike
+        # every symptom-triage card elsewhere in this module — a bare slot list
+        # with no explanation of what picking one of them actually does. Naming
+        # the doctor explicitly (not just "your appointment") since a reschedule
+        # from a NAMED-doctor request can legitimately land here with the patient
+        # not having repeated the name in this exact message.
+        return _doctor_options_payload(
+            db,
+            ctx.clinic_id,
+            availability,
+            note=f"Select a time below to reschedule your appointment with {resolved_appointment['doctor_name']}.",
+        )
 
     # Instructed live: reschedule now gets the same code-enforced confirm-then-act
     # gate as cancel — the patient has already picked a specific new slot at this
