@@ -389,10 +389,13 @@ def _reschedule_cap_reached(db: Session, ctx: ClinicContext, appointment: dict) 
 
 
 def _reschedule_cap_reply(appointment: dict) -> str:
+    # The cap is keyed by the APPOINTMENT'S OWN day (see _reschedule_cap_reached
+    # above), not necessarily today's calendar date — "for this day" is accurate
+    # either way, "today" was misleading for an appointment further out.
     return (
         f"Your appointment with {appointment['doctor_name']} in {appointment['department_name']} has "
-        f"already been rescheduled {booking_engine.DAILY_DEPARTMENT_RESCHEDULE_CAP} times today for that "
-        f"department — please contact the clinic directly for any further changes to it today."
+        f"already been rescheduled {booking_engine.DAILY_DEPARTMENT_RESCHEDULE_CAP} times for that "
+        f"department for this day — please contact the clinic directly for any further changes to it."
     )
 
 
@@ -430,6 +433,65 @@ def _booking_cap_reply(department_name: str) -> str:
     return (
         f"You've reached the limit of {booking_engine.DAILY_DEPARTMENT_BOOKING_CAP} appointments "
         f"in {department_name} for this day."
+    )
+
+
+# Requested: a patient who was just told a cancel/reschedule cutoff or a
+# reschedule daily cap was hit, and follows up with "what can I do now?", was
+# getting no deterministic next-step guidance at all — this module's cutoff/cap
+# replies (_cancel_reschedule_cutoff_reply/_reschedule_cap_reply above) only
+# ever explain WHY the action failed, never what to do about it. Detected by
+# checking the assistant's own last reply for that fixed reply's distinctive
+# wording — these are plain-text deterministic replies with no marker of their
+# own (unlike the disambiguation payloads elsewhere in this module), so a
+# substring match on the exact fixed phrasing is a reliable, simple way to tell
+# which one was just shown.
+_WHAT_CAN_I_DO_NOW_RE = re.compile(
+    r"\bwhat (?:can|should|do) i do(?: now)?\b|\bwhat (?:are my options|else can i do)\b|\bwhat now\b",
+    re.IGNORECASE,
+)
+
+
+def _message_asks_what_can_i_do_now(message: str) -> bool:
+    return bool(_WHAT_CAN_I_DO_NOW_RE.search(message))
+
+
+def _most_recent_assistant_message(history: list[ConversationMemory]) -> str | None:
+    if not history:
+        return None
+    last = history[-1]
+    if getattr(last, "role", None) != "assistant":
+        return None
+    return getattr(last, "content", "") or ""
+
+
+def _next_steps_after_cancel_cutoff_reply() -> str:
+    return (
+        "That appointment can't be cancelled online this close to its start time. "
+        "You're welcome to browse availability for another day and book a separate "
+        "new appointment if you need one — this existing appointment will stay as is "
+        "unless you contact the clinic directly."
+    )
+
+
+def _next_steps_after_reschedule_cutoff_reply() -> str:
+    # The same 2-hour cutoff blocks cancelling too — so "cancel it instead" isn't
+    # a real option here, unlike the reschedule-CAP case below where cancelling
+    # is a genuinely different limit and still available.
+    return (
+        "That appointment can't be rescheduled online this close to its start time, "
+        "and cancelling it now would run into that same cutoff. Please contact the "
+        "clinic directly for last-minute changes, or browse availability for another "
+        "day to book a separate new appointment."
+    )
+
+
+def _next_steps_after_reschedule_cap_reply() -> str:
+    return (
+        "This appointment can't be rescheduled again for this day since that department's "
+        "reschedule limit for this day has already been reached. You can contact the clinic "
+        "directly, or cancel this appointment and book a new one instead — cancelling "
+        "isn't subject to that reschedule limit."
     )
 
 
@@ -1463,6 +1525,19 @@ def run_appointment_agent(
     # yet, and the message falls through to the normal LLM/tool-calling flow.
     if _message_asks_how_to_book(message) and _most_recent_availability_marker(history) is not None:
         return _HOW_TO_BOOK_REPLY
+
+    # "What can I do now?" right after a cancel/reschedule cutoff or reschedule
+    # daily-cap reply — see _WHAT_CAN_I_DO_NOW_RE's own comment for why this is
+    # checked as a substring match on the assistant's last fixed reply text.
+    if _message_asks_what_can_i_do_now(message):
+        last_reply = _most_recent_assistant_message(history)
+        if last_reply is not None:
+            if "can no longer be cancelled online" in last_reply:
+                return _next_steps_after_cancel_cutoff_reply()
+            if "can no longer be rescheduled online" in last_reply:
+                return _next_steps_after_reschedule_cutoff_reply()
+            if "already been rescheduled" in last_reply and "for that department" in last_reply:
+                return _next_steps_after_reschedule_cap_reply()
 
     # "What's my most recent cancelled/completed/missed appointment" is answered
     # entirely from the real DB — see _most_recent_appointment_by_status_reply's

@@ -3051,6 +3051,81 @@ def test_run_appointment_agent_reschedule_cap_reached_is_told_before_showing_new
     assert "already been rescheduled" in result.lower()
 
 
+def test_run_appointment_agent_suggests_booking_elsewhere_after_a_cancel_cutoff_reply(monkeypatch, db, ctx):
+    # Requested: a patient told an appointment "can no longer be cancelled
+    # online" (the 2-hour cutoff reply) who then asks "what can I do now?"
+    # should get real next-step guidance, not a generic/off-topic answer.
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM for this deterministic reply")),
+    )
+    history = [
+        _row("user", "cancel my appointment"),
+        _row(
+            "assistant",
+            "Your appointment with Dr. Ahmed in Cardiology on Mon, Aug 24 at 9:00 AM is coming up in "
+            "less than 2 hours, so it can no longer be cancelled online. Please contact the clinic "
+            "directly for last-minute changes.",
+        ),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "what can i do now", "en", history)
+
+    assert "browse" in result.lower()
+    assert "book" in result.lower()
+
+
+def test_run_appointment_agent_suggests_next_steps_after_a_reschedule_cutoff_reply(monkeypatch, db, ctx):
+    # Same cutoff reply, reschedule-worded — cancelling is ALSO blocked by the
+    # same 2-hour window here, so the guidance must not suggest cancel-and-
+    # rebook (unlike the reschedule-CAP case below, a genuinely different limit
+    # that doesn't block cancelling).
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM for this deterministic reply")),
+    )
+    history = [
+        _row("user", "reschedule my appointment"),
+        _row(
+            "assistant",
+            "Your appointment with Dr. Ahmed in Cardiology on Mon, Aug 24 at 9:00 AM is coming up in "
+            "less than 2 hours, so it can no longer be rescheduled online. Please contact the clinic "
+            "directly for last-minute changes.",
+        ),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "what should i do now?", "en", history)
+
+    assert "contact the clinic" in result.lower()
+    # Cancelling is explained as ALSO blocked by the same cutoff, never offered
+    # as an actionable alternative the way the reschedule-cap case does.
+    assert "cancel this appointment and book" not in result.lower()
+    assert "cancel it and book" not in result.lower()
+
+
+def test_run_appointment_agent_suggests_cancel_and_rebook_after_a_reschedule_cap_reply(monkeypatch, db, ctx):
+    # The reschedule daily-cap reply is a genuinely different limit than the
+    # cutoff above — cancelling is NOT subject to it, so "cancel and book new"
+    # is real, actionable advice here (unlike the cutoff case above).
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM for this deterministic reply")),
+    )
+    history = [
+        _row("user", "reschedule my appointment"),
+        _row(
+            "assistant",
+            "Your appointment with Dr. Ahmed in Cardiology has already been rescheduled 2 times "
+            "for that department for this day — please contact the clinic directly for any further changes to it.",
+        ),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "what can i do now", "en", history)
+
+    assert "cancel" in result.lower()
+    assert "contact the clinic" in result.lower()
+
+
 def test_run_appointment_agent_booking_cap_reached_is_told_before_confirmation(
     monkeypatch, db, ctx, clinic, department, doctor, patient
 ):
