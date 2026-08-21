@@ -393,8 +393,14 @@ _DEPT_WORD_ANY = r"(?:dept|department)s?"
 _DEPARTMENT_LIST_RE = re.compile(
     rf"\b("
     rf"(?:what|which)\s+(?:are\s+)?(?:the\s+)?(?:available\s+)?{_DEPT_WORD}\b"
-    rf"|show\s+(?:me\s+)?(?:the\s+)?(?:available\s+)?{_DEPT_WORD}\b"
-    rf"|list\s+(?:of\s+)?(?:the\s+)?(?:available\s+)?{_DEPT_WORD}\b"
+    # Reported live: "list the available dept in this clinic" used singular
+    # "dept" — "show"/"list" as verbs already mean "give me all of them"
+    # regardless of singular/plural wording (unlike bare "what department is
+    # Dr. Smith in", which stays plural-only above to avoid misreading a
+    # single-doctor question as a full-list request), so these two branches
+    # use _DEPT_WORD_ANY instead of the plural-only _DEPT_WORD.
+    rf"|show\s+(?:me\s+)?(?:the\s+)?(?:available\s+)?{_DEPT_WORD_ANY}\b"
+    rf"|list\s+(?:of\s+)?(?:the\s+)?(?:available\s+)?{_DEPT_WORD_ANY}\b"
     rf"|(?:all|every)\s+{_DEPT_WORD_ANY}\b"
     rf"|available\s+{_DEPT_WORD}\b"
     # Reported live: "how many total depts are there in this clinic?" matched none of

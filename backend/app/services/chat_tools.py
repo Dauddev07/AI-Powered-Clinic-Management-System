@@ -41,7 +41,7 @@ from app.models.doctor import Doctor
 from app.models.slot import Slot
 from app.services import booking_engine
 from app.services.chat_markers import BOOKING_MARKER, DEPARTMENT_LIST_MARKER, DOCTOR_OPTIONS_MARKER, NO_SLOTS_MARKER
-from app.services.department_availability import find_doctors_by_name, get_department_availability
+from app.services.department_availability import find_doctors_by_name, format_department_list, get_department_availability
 
 
 def _format_when(start_utc: datetime, clinic_tz: str) -> str:
@@ -152,8 +152,8 @@ def _no_slots_payload(department_name: str, message: str) -> str:
 
 def _department_not_found_message(availability) -> str:
     if availability.available_department_names:
-        names = ", ".join(availability.available_department_names)
-        return f"I couldn't find a department called that. The departments we have are: {names}."
+        names = format_department_list(availability.available_department_names)
+        return f"I couldn't find a department called that. The departments we have are:\n\n{names}"
     return "I couldn't find a matching department, and no departments are currently configured."
 
 

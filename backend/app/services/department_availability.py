@@ -159,6 +159,16 @@ def list_active_department_names(db: Session, clinic_id: uuid.UUID) -> list[str]
     return [name for (name,) in rows]
 
 
+# Requested: any reply that lists multiple departments should show them as a
+# structured numbered list ("1. X\n2. Y\n...") instead of a flat comma-separated
+# sentence — easier to scan, and consistent everywhere a department list is
+# shown (the general_info_agent full-list short-circuit, and chat_tools' "no
+# matching department, here's what we do have" fallback), not just wherever it
+# happened to be asked first.
+def format_department_list(names: list[str]) -> str:
+    return "\n".join(f"{i}. {name}" for i, name in enumerate(names, start=1))
+
+
 def get_department_availability(
     db: Session,
     clinic_id: uuid.UUID,

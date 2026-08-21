@@ -6052,7 +6052,7 @@ def test_run_general_info_agent_answers_department_list_request_deterministicall
 
     result = general_info_agent.run_general_info_agent(db, ctx, "what are the available depts", "en", [])
 
-    assert result == f"Here are the departments available at this clinic: {department.name}."
+    assert result == f"Here are the departments available at this clinic:\n\n1. {department.name}"
 
 
 def test_run_general_info_agent_department_list_request_says_so_when_none_configured(monkeypatch, db, ctx):
@@ -6110,7 +6110,7 @@ def test_run_general_info_agent_department_list_without_explanation_stays_bare(
 
     result = general_info_agent.run_general_info_agent(db, ctx, "show me list of depts", "en", [])
 
-    assert result == f"Here are the departments available at this clinic: {department.name}."
+    assert result == f"Here are the departments available at this clinic:\n\n1. {department.name}"
 
 
 def test_run_general_info_agent_answers_personal_recall_question_via_the_llm(monkeypatch, db, ctx):

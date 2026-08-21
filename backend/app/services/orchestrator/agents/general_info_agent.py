@@ -26,7 +26,7 @@ from app.core.tenancy import ClinicContext
 from app.models.conversation_memory import ConversationMemory
 from app.rag.retrieval import retrieve
 from app.services import llm
-from app.services.department_availability import list_active_department_names
+from app.services.department_availability import format_department_list, list_active_department_names
 from app.services.message_classifier import (
     CONVERSATIONAL,
     PERSONAL_RECALL,
@@ -96,7 +96,11 @@ def run_general_info_agent(
                 if language != "ur"
                 else "اس وقت اس کلینک میں کوئی شعبہ دستیاب نہیں ہے۔"
             )
-        names_text = ", ".join(department_names)
+        # Requested: shown as a structured numbered list ("1. X\n2. Y\n...")
+        # instead of a flat comma-separated sentence — see
+        # format_department_list's own comment for why this is shared with
+        # chat_tools' department-not-found fallback too, not just here.
+        names_text = format_department_list(department_names)
         # Reported live: "show me list of depts... and also explanation of each dept
         # that which symptoms does they treat in detail" got ONLY the bare list back
         # — the second half of the same message was silently dropped, since this
@@ -106,16 +110,16 @@ def run_general_info_agent(
         # never an LLM freehanding descriptions of departments it wasn't shown.
         if not is_department_list_explanation_request(message):
             return (
-                f"Here are the departments available at this clinic: {names_text}."
+                f"Here are the departments available at this clinic:\n\n{names_text}"
                 if language != "ur"
-                else f"اس کلینک میں دستیاب شعبے یہ ہیں: {names_text}۔"
+                else f"اس کلینک میں دستیاب شعبے یہ ہیں:\n\n{names_text}"
             )
         labels_by_department = department_symptom_labels(department_names)
         lines = [
-            f"- {name}: {', '.join(labels_by_department[name])}"
+            f"{i}. {name}: {', '.join(labels_by_department[name])}"
             if labels_by_department[name]
-            else f"- {name}: general consultations in this specialty"
-            for name in department_names
+            else f"{i}. {name}: general consultations in this specialty"
+            for i, name in enumerate(department_names, start=1)
         ]
         body = "\n".join(lines)
         intro = (
