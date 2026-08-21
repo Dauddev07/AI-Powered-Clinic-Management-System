@@ -543,7 +543,8 @@ _DEPARTMENT_SCOPE_RE = re.compile(
     r"(?:treats?|handles?|deals?\s+with|looks?\s+at|manages?|addresses?|covers?|sees?|specializes?\s+in)\b"
     r"|\bwhat(?:'s|\s+is)\s+(?:the\s+)?(?:role|purpose|job|function)\s+of\s+"
     r"(?:a\s+|an\s+|the\s+)?[a-z]+(?:\s+[a-z]+)?\b"
-    r"|\bwhat(?:'s|\s+is)\s+(?:a\s+|an\s+|the\s+)?[a-z]+(?:\s+[a-z]+)?\s+(?:department|dept)\s+for\b",
+    r"|\bwhat(?:'s|\s+is)\s+(?:a\s+|an\s+|the\s+)?[a-z]+(?:\s+[a-z]+)?\s+(?:department|dept)\s+for\b"
+    r"|\bwhat\s+(?:does|do)\s+(?:a\s+|an\s+|the\s+)?[a-z]+(?:\s+[a-z]+)?\s+do\b",
     re.IGNORECASE,
 )
 
