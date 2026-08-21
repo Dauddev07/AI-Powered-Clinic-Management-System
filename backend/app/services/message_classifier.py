@@ -526,24 +526,10 @@ def is_department_recommendation_request(message: str) -> bool:
 # asked. This is a general informational question about a specialty's SCOPE, not a
 # symptom description or a recommendation request, and belongs with general_info_agent
 # instead (real KB/DB-grounded answer, same as any other clinic-info question).
-#
-# Reported live again, a genuinely different phrasing of the same underlying
-# question: mid-way through a live "Just to confirm — book...?" question, "what is
-# the role of cardiology dept?" fell through this regex entirely (no "does/do/can"
-# + treats/handles/etc. verb) and was claimed by router.py's rule 1 (marker
-# continuity — the pending book-confirmation marker still counts, and this message
-# isn't itself a symptom), landing on appointment_agent, which has no KB access and
-# just produced its generic off-topic refusal. "what is the role/purpose of X" and
-# "what is X department for" are the same SCOPE question in different words —
-# added as their own alternatives rather than trying to force the original
-# does/do/can-based pattern to cover a construction it was never shaped for.
 _DEPARTMENT_SCOPE_RE = re.compile(
     r"\bwhat\s+(?:kind\s+of\s+|type\s+of\s+)?(?:symptoms?|conditions?|things|issues)?\s*"
     r"(?:does|do|can)\s+(?:a\s+|an\s+|the\s+)?[a-z]+(?:\s+[a-z]+)?\s+"
-    r"(?:treats?|handles?|deals?\s+with|looks?\s+at|manages?|addresses?|covers?|sees?|specializes?\s+in)\b"
-    r"|\bwhat(?:'s|\s+is)\s+(?:the\s+)?(?:role|purpose|job|function)\s+of\s+"
-    r"(?:a\s+|an\s+|the\s+)?[a-z]+(?:\s+[a-z]+)?\b"
-    r"|\bwhat(?:'s|\s+is)\s+(?:a\s+|an\s+|the\s+)?[a-z]+(?:\s+[a-z]+)?\s+(?:department|dept)\s+for\b",
+    r"(?:treats?|handles?|deals?\s+with|looks?\s+at|manages?|addresses?|covers?|sees?|specializes?\s+in)\b",
     re.IGNORECASE,
 )
 
