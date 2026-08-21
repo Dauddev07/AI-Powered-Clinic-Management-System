@@ -435,7 +435,16 @@ def _matched_hint_groups(
                 groups.append((("general medicine", "internal medicine", "family medicine"), "limb/joint pain"))
     if words & _LOW_MOOD_PASSING_WORDS and words & _LOW_MOOD_PERSISTENCE_WORDS:
         groups.append((("psych",), "low mood"))
-    if "head" in words and words & _GENERIC_PAIN_WORDS:
+    # "forehead" is its own single token (re.findall splits on word boundaries, not
+    # substrings) — it never matched bare "head" here, so "forehead pain" produced
+    # ZERO hints at all and was left entirely to the LLM's own free-form judgment,
+    # unlike "headache"/"migraine" above (deterministically General Medicine) or
+    # "head" + a pain word just below. Confirmed live: General Medicine is the
+    # clinically correct default for isolated forehead pain with no other
+    # symptoms (same reasoning as bare "head" + pain — no red-flag/neuro signs
+    # here means this isn't Neurology's territory) — this just makes that outcome
+    # reliable instead of accidental.
+    if words & {"head", "forehead"} and words & _GENERIC_PAIN_WORDS:
         groups.append((("general medicine", "internal medicine", "family medicine"), "head pain"))
     if words & {"neck", "necks"} and not (words & _NECK_NEUROLOGICAL_SIGNAL_WORDS):
         groups.append((("ortho",), "neck/joint pain"))

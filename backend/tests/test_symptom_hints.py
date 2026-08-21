@@ -392,6 +392,29 @@ def test_head_with_an_actual_pain_word_still_hints_general_medicine():
     assert "General Medicine" in hinted
 
 
+def test_forehead_pain_hints_general_medicine():
+    # Reported live: "forehead pain" with no other symptoms produced ZERO hints at
+    # all — "forehead" tokenizes as its own single word (re.findall splits on word
+    # boundaries, not substrings), so it never matched bare "head" here, unlike
+    # "headache"/"migraine" (their own unconditional table entry) or "head" + a
+    # pain word just above. Confirmed as the correct target: plain, isolated
+    # forehead pain with no red-flag/neuro signs is standard General Medicine
+    # territory, same reasoning as bare "head" + pain — this makes that outcome
+    # reliable instead of left entirely to the LLM's own free-form judgment.
+    hinted = departments_hinted_by_patient_symptom_words("i have forehead pain", [], DEPARTMENTS, set())
+    assert "General Medicine" in hinted
+
+
+def test_bare_forehead_as_a_body_location_does_not_hint_general_medicine():
+    # Same corroboration requirement as bare "head" above — a bare "forehead"
+    # mention with no actual pain word must not imply a pain complaint either.
+    hinted = departments_hinted_by_patient_symptom_words(
+        "i am feeling numb in the forehead and having weakness", [], DEPARTMENTS, set()
+    )
+    assert "General Medicine" not in hinted
+    assert hinted == {"Neurology": "neurological symptoms"}
+
+
 def test_dizziness_alone_hints_ent_only_not_neurology():
     # Reported live: "i am feeling very sad today and dizzy as well... mild... also
     # have nausea" produced FOUR cards (General Medicine, ENT, Neurology,
