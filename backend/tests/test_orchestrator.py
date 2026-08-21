@@ -277,6 +277,45 @@ def test_router_rule0_6_department_scope_question_overrides_screening_continuity
     assert _heuristic_classify("so what symptoms does dermatologist treats?", history) == GENERAL_INFO
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "what is the role of cardiology dept?",
+        "what is the role of cardiology department",
+        "what's the role of ENT?",
+        "what is the purpose of dermatology",
+        "what is cardiology department for?",
+    ],
+)
+def test_router_rule0_6_covers_role_purpose_phrasing_not_just_does_treat(message):
+    # Reported live: mid-way through a LIVE "Just to confirm — book your
+    # appointment with Dr. Farhan Malik in Cardiology on Sun, Aug 23 at 11:00 AM?"
+    # confirmation, "what is the role of cardiology dept?" fell through
+    # _DEPARTMENT_SCOPE_RE entirely (it only matched "what does/do/can X
+    # treat/handle/..." phrasing, not "what is the role/purpose of X") and was
+    # claimed by rule 1 (marker continuity — the pending book-confirmation marker
+    # still counts, and the message isn't itself a symptom), landing on
+    # appointment_agent, which has no KB access and just produced its generic
+    # off-topic refusal to a plain informational question. Same underlying SCOPE
+    # question as "what does X treat", just phrased differently — must win over
+    # marker continuity the exact same way.
+    book_confirm = DOCTOR_DISAMBIGUATION_MARKER + json.dumps({
+        "kind": "book_confirm",
+        "question": "Just to confirm — book your appointment with Dr. Farhan Malik in Cardiology on Sun, Aug 23 at 11:00 AM?",
+        "candidate": {
+            "slot_id": "11111111-1111-1111-1111-111111111111",
+            "doctor_name": "Dr. Farhan Malik",
+            "department_name": "Cardiology",
+            "when": "Sun, Aug 23 at 11:00 AM",
+        },
+    })
+    history = [
+        _row("user", "Book with Dr. Farhan Malik at Sun, Aug 23 at 11:00 AM"),
+        _row("assistant", book_confirm),
+    ]
+    assert _heuristic_classify(message, history) == GENERAL_INFO
+
+
 def test_router_rule0_7_clinic_logistics_question_overrides_screening_continuity():
     # Reported live: "i have headache" -> "how severe, how long?" -> "mild" ->
     # "are you experiencing nausea, visual changes, fever?" -> "where is this
