@@ -641,6 +641,45 @@ def test_is_department_scope_question_false_for_unrelated_messages(message):
     assert is_department_scope_question(message) is False
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "whats cardiologist's role?",
+        "what's cardiologist's role?",
+        "what is cardiologist role",
+        "whats dermatology's purpose",
+    ],
+)
+def test_is_department_scope_question_true_for_possessive_role_phrasing(message):
+    # Reported live: "whats cardiologist's role?" fell through entirely — the
+    # existing "role OF X" pattern never covered the possessive/no-"of"
+    # construction ("X's role", "X role"), and separately "whats" (no
+    # apostrophe, unlike "what's"/"what is") wasn't recognized as a "what" form
+    # at all — landing on the generic diagnosis_guard dead end instead of the
+    # department-scope redirect.
+    assert is_department_scope_question(message) is True
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "what is the role of u",
+        "what is the role of you",
+        "what's your role",
+        "what is your purpose",
+        "whats ur job",
+    ],
+)
+def test_is_department_scope_question_false_when_asking_about_the_bot_itself(message):
+    # Reported live: "what is the role of u" (the patient asking what the
+    # CHATBOT does, right after a "what's cardiologist's role?" exchange)
+    # wrongly matched the department-scope redirect ("I can't tell you a
+    # department's role...") — the "role of X" pattern had no concept of X
+    # being a pronoun/self-reference to the assistant rather than an actual
+    # department name.
+    assert is_department_scope_question(message) is False
+
+
 # --- fuzzy action-word matching (typo tolerance for cancel/reschedule) --------------
 
 

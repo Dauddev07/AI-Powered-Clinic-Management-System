@@ -545,13 +545,35 @@ def is_department_recommendation_request(message: str) -> bool:
 # "what is X department for" are the same SCOPE question in different words —
 # added as their own alternatives rather than trying to force the original
 # does/do/can-based pattern to cover a construction it was never shaped for.
+# Words that can follow "role/purpose/job/function of ___" or "___'s role" but
+# name the ASSISTANT itself, not a medical department — "what is the role of
+# u/you/ya" is the patient asking what the chatbot does, a completely different,
+# legitimate question the redirect must never swallow (never fires the "I can't
+# tell you a department's role" line at a patient asking about the bot itself).
+_NON_DEPARTMENT_REFERENTS = frozenset({
+    "u", "you", "ya", "your", "ur", "yourself", "urself", "it", "this", "that", "me", "us",
+    "him", "her", "them", "chatbot", "bot", "assistant", "ai",
+})
+
+
+def _department_scope_match_names_a_real_referent(match: "re.Match[str]") -> bool:
+    subject = (match.group("subject1") or match.group("subject2") or "").strip().lower()
+    return subject not in _NON_DEPARTMENT_REFERENTS
+
+
 _DEPARTMENT_SCOPE_RE = re.compile(
     r"\bwhat\s+(?:kind\s+of\s+|type\s+of\s+)?(?:symptoms?|conditions?|things|issues)?\s*"
     r"(?:does|do|can)\s+(?:a\s+|an\s+|the\s+)?[a-z]+(?:\s+[a-z]+)?\s+"
     r"(?:treats?|handles?|deals?\s+with|looks?\s+at|manages?|addresses?|covers?|sees?|specializes?\s+in)\b"
-    r"|\bwhat(?:'s|\s+is)\s+(?:the\s+)?(?:role|purpose|job|function)\s+of\s+"
-    r"(?:a\s+|an\s+|the\s+)?[a-z]+(?:\s+[a-z]+)?\b"
-    r"|\bwhat(?:'s|\s+is)\s+(?:a\s+|an\s+|the\s+)?[a-z]+(?:\s+[a-z]+)?\s+(?:department|dept)\s+for\b"
+    r"|\bwhat(?:'s|s| is)\s+(?:the\s+)?(?:role|purpose|job|function)\s+of\s+"
+    r"(?:a\s+|an\s+|the\s+)?(?P<subject1>[a-z]+(?:\s+[a-z]+)?)\b"
+    # Reported live: "whats cardiologist's role?" / "what is cardiologist role"
+    # used the possessive/no-"of" construction ("X's role", "X role"), which
+    # the "role OF X" pattern above never covered at all — fell through to the
+    # generic diagnosis_guard dead end instead of the department-scope redirect.
+    r"|\bwhat(?:'s|s| is)\s+(?:a\s+|an\s+|the\s+)?(?P<subject2>[a-z]+(?:\s+[a-z]+)?)(?:'s)?\s+"
+    r"(?:role|purpose|job|function)\b"
+    r"|\bwhat(?:'s|s| is)\s+(?:a\s+|an\s+|the\s+)?[a-z]+(?:\s+[a-z]+)?\s+(?:department|dept)\s+for\b"
     r"|\bwhat\s+(?:does|do)\s+(?:a\s+|an\s+|the\s+)?[a-z]+(?:\s+[a-z]+)?\s+do\b",
     re.IGNORECASE,
 )
@@ -561,8 +583,13 @@ def is_department_scope_question(message: str) -> bool:
     """True when the patient is asking what a specialty/department TREATS in
     general ("what symptoms does a dermatologist treat", "what does cardiology
     handle") — an informational question about scope, not a description of their
-    own symptoms and not a recommendation request."""
-    return bool(_DEPARTMENT_SCOPE_RE.search(message.strip()))
+    own symptoms and not a recommendation request. Also False for "what is the
+    role of u/you/it/..." style questions naming the chatbot itself rather than
+    a department — see _NON_DEPARTMENT_REFERENTS."""
+    match = _DEPARTMENT_SCOPE_RE.search(message.strip())
+    if match is None:
+        return False
+    return _department_scope_match_names_a_real_referent(match)
 
 
 # Professional-title synonyms patients use INSTEAD of a department's own real
