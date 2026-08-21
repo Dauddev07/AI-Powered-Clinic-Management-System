@@ -48,6 +48,12 @@ def test_plain_chest_pain_no_longer_auto_fires(message):
         "I can't breathe properly",
         "she is gasping for air",
         "he says he is suffocating",
+        # Reported live: "i am unable to breath properly" fell through entirely —
+        # "unable (to)" wasn't in the trigger-word alternation at all (distinct
+        # from "can't"/"cannot", which were already covered).
+        "i am unable to breath properly",
+        "i am unable to breathe properly",
+        "i am not able to breathe properly",
     ],
 )
 def test_breathing_difficulty_patterns_fire_including_shortness_of_breath(message):
@@ -67,6 +73,7 @@ def test_shortness_of_breath_specifically_fires():
         "there's no shortness of breath",
         "no trouble breathing",
         "it's not shortness of breath, just mild",
+        "no i am not unable to breathe",
     ],
 )
 def test_explicitly_denied_breathing_difficulty_does_not_false_fire(message):

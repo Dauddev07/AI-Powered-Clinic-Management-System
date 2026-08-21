@@ -111,7 +111,11 @@ _RED_FLAG_PATTERNS = [
     # The optional (?:\s+to)? closes exactly that gap without loosening the pattern
     # into a generic character-gap that would risk matching unrelated "difficulty ...
     # breathing" mentions many words apart.
-    _NEG + r"\b(can'?t|cannot|can not|difficulty|struggling to|trouble)(?:\s+to)?\s*breath",
+    # Reported live: "i am unable to breath properly" fell through entirely —
+    # "unable (to)" is an extremely common way patients phrase this (distinct
+    # from "can't"/"cannot", which are already covered), and wasn't in the
+    # trigger-word alternation at all.
+    _NEG + r"\b(can'?t|cannot|can not|unable|not able|difficulty|struggling to|trouble)(?:\s+to)?\s*breath",
     r"\bnot breathing\b",
     r"\bgasping\b",
     r"\bsuffocat",
@@ -604,7 +608,7 @@ RED_FLAG_MESSAGE_EN = (
 _BARE_DENIABLE_RE = re.compile(
     r"\bshortness of breath\b"
     r"|\bshort of breath\b"
-    r"|\b(can'?t|cannot|can not|difficulty|struggling to|trouble)(?:\s+to)?\s*breath"
+    r"|\b(can'?t|cannot|can not|unable|not able|difficulty|struggling to|trouble)(?:\s+to)?\s*breath"
     r"|\b(sever\w{0,4}ly|severe|heavy|heavily|uncontrolled|won'?t stop|not stopping|"
     r"a lot|badly|profusely|excessively)\s*bleed"
     r"|\bbleed\w*\s*(sever\w{0,4}ly|severe|heavy|heavily|a lot|a ton|so much|very much|"
