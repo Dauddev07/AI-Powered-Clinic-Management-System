@@ -1017,7 +1017,19 @@ _HOW_TO_BOOK_REPLY = (
 # own already-correct "sort by when the status change actually happened, not the
 # slot's original time" ordering (see that function's own comments) rather than
 # re-querying separately.
-_RECENCY_WORD_RE = re.compile(r"\b(most recent(?:ly)?|latest|last)\b", re.IGNORECASE)
+# Reported live: "whats my recently cancelled appointment" and "which appointment
+# do i have cancelled recently" both used bare "recently" with no "most" in front —
+# the original pattern only matched "most recent(ly)", "latest", or "last", so
+# neither matched, this function returned None, and the message fell through to
+# plain cancel-action detection instead (0 active appointments -> wrong "you don't
+# have an upcoming appointment to cancel" reply to what was actually a history
+# question). "recently" alone means the exact same thing here.
+_RECENCY_WORD_RE = re.compile(r"\b(most recent(?:ly)?|recently|latest|last)\b", re.IGNORECASE)
+# "earliest"/"first" ask for the OPPOSITE end of the same status history —
+# checked separately from _RECENCY_WORD_RE (never both at once in one message)
+# since it needs oldest_first=True passed through to _get_my_appointments_impl
+# rather than reusing the default "most recent" ordering.
+_EARLIEST_WORD_RE = re.compile(r"\b(earliest|first(?:\s+ever)?|oldest)\b", re.IGNORECASE)
 _CANCELLED_STATUS_WORD_RE = re.compile(r"\bcancel+(?:l?ed|lation)?\b", re.IGNORECASE)
 _COMPLETED_STATUS_WORD_RE = re.compile(r"\bcomplet+ed\b|\b(?:past|previous) (?:visit|appointment)\b", re.IGNORECASE)
 _MISSED_STATUS_WORD_RE = re.compile(
@@ -1026,33 +1038,43 @@ _MISSED_STATUS_WORD_RE = re.compile(
 _STATUS_FILTER_TO_LABEL = {"cancelled": "cancelled", "past": "completed", "missed": "missed"}
 
 
-def _message_asks_for_most_recent_appointment_by_status(message: str) -> str | None:
-    """Returns the get_my_appointments status_filter value ("cancelled", "past",
-    or "missed") if the message is asking for the single most recent appointment
-    of that status, else None. Requires an explicit recency word ("most recent",
-    "latest", "last") — a plain "show my cancelled appointments" (a real LIST
-    request, not a single most-recent one) is deliberately left to the normal
-    LLM/tool-calling flow below, which already handles that fine."""
-    if not _RECENCY_WORD_RE.search(message):
+def _message_asks_for_most_recent_appointment_by_status(message: str) -> tuple[str, bool] | None:
+    """Returns (get_my_appointments status_filter, oldest_first) if the message
+    is asking for the single most-recent-or-earliest appointment of that
+    status, else None. Requires an explicit recency word ("most recent",
+    "latest", "last", "recently") or earliest word ("earliest", "first",
+    "oldest") — a plain "show my cancelled appointments" (a real LIST request,
+    not a single most-recent/earliest one) is deliberately left to the normal
+    LLM/tool-calling flow below, which already handles that fine. If a message
+    somehow contains both a recency and an earliest word, recency wins (matches
+    the order these were reported live)."""
+    if _RECENCY_WORD_RE.search(message):
+        oldest_first = False
+    elif _EARLIEST_WORD_RE.search(message):
+        oldest_first = True
+    else:
         return None
     if _CANCELLED_STATUS_WORD_RE.search(message):
-        return "cancelled"
+        return ("cancelled", oldest_first)
     if _COMPLETED_STATUS_WORD_RE.search(message):
-        return "past"
+        return ("past", oldest_first)
     if _MISSED_STATUS_WORD_RE.search(message):
-        return "missed"
+        return ("missed", oldest_first)
     return None
 
 
-def _most_recent_appointment_by_status_reply(db: Session, ctx: ClinicContext, status_filter: str) -> str:
+def _most_recent_appointment_by_status_reply(
+    db: Session, ctx: ClinicContext, status_filter: str, oldest_first: bool = False
+) -> str:
     label = _STATUS_FILTER_TO_LABEL[status_filter]
-    parsed = json.loads(_get_my_appointments_impl(db, ctx, status_filter, 1))
+    parsed = json.loads(_get_my_appointments_impl(db, ctx, status_filter, 1, oldest_first))
     appointments = parsed.get("appointments") or []
     if not appointments:
         return f"You don't have any {label} appointments."
     appt = appointments[0]
+    recency_word = "earliest" if oldest_first else "most recent"
     sentence = (
-        f"Your most recent {label} appointment was with {appt['doctor_name']} in "
+        f"Your {recency_word} {label} appointment was with {appt['doctor_name']} in "
         f"{appt['department_name']}, scheduled for {appt['when']}."
     )
     if appt.get("cancelled_when"):
@@ -1422,9 +1444,10 @@ def run_appointment_agent(
     # "What's my most recent cancelled/completed/missed appointment" is answered
     # entirely from the real DB — see _most_recent_appointment_by_status_reply's
     # own comment for the reported hallucination this replaces.
-    most_recent_status_filter = _message_asks_for_most_recent_appointment_by_status(message)
-    if most_recent_status_filter is not None:
-        return _most_recent_appointment_by_status_reply(db, ctx, most_recent_status_filter)
+    most_recent_status_query = _message_asks_for_most_recent_appointment_by_status(message)
+    if most_recent_status_query is not None:
+        status_filter, oldest_first = most_recent_status_query
+        return _most_recent_appointment_by_status_reply(db, ctx, status_filter, oldest_first)
 
     # Reported live: "cancel both of my appointments" (2 active, same doctor) asked
     # "which one would you like to cancel: 9:00 AM, 9:30 AM?" — then "i want to book

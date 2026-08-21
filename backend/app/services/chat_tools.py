@@ -671,7 +671,9 @@ def list_upcoming_appointments(db: Session, ctx: ClinicContext) -> list[dict]:
 
 
 @traceable(name="get_my_appointments")
-def _get_my_appointments_impl(db: Session, ctx: ClinicContext, status_filter: str, limit: int) -> str:
+def _get_my_appointments_impl(
+    db: Session, ctx: ClinicContext, status_filter: str, limit: int, oldest_first: bool = False
+) -> str:
     from sqlalchemy import select
 
     from app.models.appointment import Appointment
@@ -682,6 +684,16 @@ def _get_my_appointments_impl(db: Session, ctx: ClinicContext, status_filter: st
         .join(Slot, Slot.id == Appointment.slot_id)
         .where(Appointment.clinic_id == ctx.clinic_id, Appointment.patient_id == ctx.user_id)
     )
+
+    # Reported live: "what's my EARLIEST cancelled appointment" needs the exact
+    # opposite ordering of the default "most recent" behavior every branch below
+    # is built for — same status filter, reversed direction. Rather than
+    # duplicating each branch's order_by, every `.desc()`/`.asc()` call below is
+    # written in matched pairs and this flag just picks which one applies,
+    # keeping the "sort by when the status change actually happened" reasoning
+    # (see each branch's own comment) identical either way.
+    def _dir(desc_col, asc_col):
+        return asc_col if oldest_first else desc_col
 
     normalized = (status_filter or "all").strip().lower()
     if normalized == "upcoming":
@@ -698,7 +710,8 @@ def _get_my_appointments_impl(db: Session, ctx: ClinicContext, status_filter: st
         # the real "most recent" signal here; falling back to slot time only
         # to break a tie between two rows updated in the same instant.
         stmt = stmt.where(Appointment.status == "completed").order_by(
-            Appointment.updated_at.desc(), Slot.start_utc.desc()
+            _dir(Appointment.updated_at.desc(), Appointment.updated_at.asc()),
+            _dir(Slot.start_utc.desc(), Slot.start_utc.asc()),
         )
     elif normalized == "cancelled":
         # Reported live: "what's my most recent cancelled appointment" was
@@ -710,7 +723,8 @@ def _get_my_appointments_impl(db: Session, ctx: ClinicContext, status_filter: st
         # for this filter; falling back to slot time only for the vanishingly
         # rare legacy row with no cancelled_at recorded.
         stmt = stmt.where(Appointment.status == "cancelled").order_by(
-            Appointment.cancelled_at.desc().nullslast(), Slot.start_utc.desc()
+            _dir(Appointment.cancelled_at.desc().nullslast(), Appointment.cancelled_at.asc().nullslast()),
+            _dir(Slot.start_utc.desc(), Slot.start_utc.asc()),
         )
     elif normalized == "missed":
         # Instructed live: "missed" appointments (booking_engine.confirm_visit's
@@ -723,10 +737,11 @@ def _get_my_appointments_impl(db: Session, ctx: ClinicContext, status_filter: st
         # via that same status assignment, so `updated_at` is the real
         # "most recent" signal here too.
         stmt = stmt.where(Appointment.status == "no_show").order_by(
-            Appointment.updated_at.desc(), Slot.start_utc.desc()
+            _dir(Appointment.updated_at.desc(), Appointment.updated_at.asc()),
+            _dir(Slot.start_utc.desc(), Slot.start_utc.asc()),
         )
     else:
-        stmt = stmt.order_by(Slot.start_utc.desc())
+        stmt = stmt.order_by(_dir(Slot.start_utc.desc(), Slot.start_utc.asc()))
 
     stmt = stmt.limit(max(1, min(limit, 50)))
     appointments = db.execute(stmt).scalars().all()
@@ -1030,6 +1045,14 @@ def build_tools(
 
     def _get_my_appointments(status: str = "all", limit: int = 10) -> str:
         return _get_my_appointments_impl(db, ctx, status, limit)
+
+    # oldest_first is deliberately NOT exposed on the LLM-facing tool above —
+    # only appointment_agent's own deterministic "earliest status" short-circuit
+    # calls _get_my_appointments_impl directly with it (see that module's
+    # _message_asks_for_most_recent_appointment_by_status/_RECENCY_DIRECTION
+    # handling), same reasoning as every other deterministic reply in this file:
+    # never let the model freehand which direction "earliest" vs "most recent"
+    # sorts real DB rows.
 
     def _get_department_availability(
         department_name: str,

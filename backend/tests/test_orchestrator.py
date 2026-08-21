@@ -2831,6 +2831,62 @@ def test_run_appointment_agent_answers_most_recent_cancelled_appointment_from_re
     assert _format_when(sooner_slot.start_utc, tz) not in result
 
 
+def test_run_appointment_agent_answers_earliest_cancelled_appointment_from_real_db(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    # Reported live as a follow-up to the "most recent" fix above: "earliest"
+    # asks for the OPPOSITE end of the same history — same two appointments/
+    # timestamps as the test above, but "earliest" must surface sooner_appt
+    # (cancelled FIRST), not later_appt (cancelled most recently).
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.appointment import Appointment
+    from app.models.slot import Slot
+
+    sooner_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="booked",
+    )
+    later_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=10),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=10, minutes=30),
+        status="booked",
+    )
+    db.add_all([sooner_slot, later_slot])
+    db.flush()
+    sooner_appt = Appointment(
+        clinic_id=clinic.id, slot_id=sooner_slot.id, patient_id=patient.id, doctor_id=doctor.id, status="cancelled",
+    )
+    later_appt = Appointment(
+        clinic_id=clinic.id, slot_id=later_slot.id, patient_id=patient.id, doctor_id=doctor.id, status="cancelled",
+    )
+    db.add_all([sooner_appt, later_appt])
+    db.flush()
+    sooner_appt.cancelled_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    later_appt.cancelled_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for a deterministic recency reply")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "what's my earliest cancelled appointment", "en", []
+    )
+
+    assert doctor.full_name in result
+    assert "cancelled" in result.lower()
+    from app.services.chat_tools import _format_when
+
+    tz = appointment_agent._clinic_timezone(db, ctx.clinic_id)
+    assert _format_when(sooner_slot.start_utc, tz) in result
+    assert _format_when(later_slot.start_utc, tz) not in result
+
+
 def test_run_appointment_agent_most_recent_cancelled_reply_handles_no_cancelled_appointments(
     monkeypatch, db, ctx
 ):

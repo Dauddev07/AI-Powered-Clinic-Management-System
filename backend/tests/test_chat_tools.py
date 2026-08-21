@@ -584,6 +584,29 @@ def test_get_my_appointments_cancelled_filter_orders_by_when_it_was_cancelled_no
     ]
 
 
+def test_get_my_appointments_oldest_first_reverses_the_cancelled_ordering(db, clinic, doctor, patient, ctx):
+    # Reported live: "what's my EARLIEST cancelled appointment" needs the exact
+    # opposite of "most recent" — same two appointments/timestamps as the test
+    # above, but oldest_first=True must put sooner_appt (cancelled first) ahead
+    # of later_appt (cancelled more recently).
+    sooner_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=1))
+    later_slot = _slot(db, clinic, doctor, datetime.now(timezone.utc) + timedelta(days=10))
+    sooner_appt = _appointment(db, clinic, patient, doctor, sooner_slot, status="cancelled")
+    later_appt = _appointment(db, clinic, patient, doctor, later_slot, status="cancelled")
+
+    sooner_appt.cancelled_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    later_appt.cancelled_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    db.flush()
+
+    result = _get_my_appointments_impl(db, ctx, "cancelled", 10, oldest_first=True)
+
+    parsed = json.loads(result)
+    assert [a["appointment_id"] for a in parsed["appointments"]] == [
+        str(sooner_appt.id),
+        str(later_appt.id),
+    ]
+
+
 def test_get_my_appointments_past_filter_orders_by_when_it_was_completed_not_slot_time(
     db, clinic, doctor, patient, ctx
 ):
