@@ -352,6 +352,39 @@ def resolve_date_window(message: str) -> tuple[str, str] | None:
     return resolve_bare_weekday_window(message)
 
 
+# Requested: move this out of the system prompt (a standing token cost on every
+# turn) into a deterministic post-processing check instead — same "never trust
+# the LLM to reliably follow a wording rule, verify/fix the actual output"
+# principle as every other backstop in this codebase. Reported live: a reply
+# correctly listed real slots each with a full date ("Mon, Aug 24 at 9:00 AM")
+# but then closed with "reply with the exact slot (e.g., '9:30 AM')" — a bare
+# time with no date, ambiguous once the same clock time recurs across several
+# different dates in one list.
+_BARE_TIME_EXAMPLE_RE = re.compile(
+    r"(\(e\.g\.,?\s*)([\"']?)(\d{1,2}(?::\d{2})?\s*(?:am|pm))\2(\))", re.IGNORECASE
+)
+# The first real "<Weekday>, <Month> <Day>" pair already listed earlier in the
+# same reply — reused verbatim rather than re-deriving/guessing a date, so this
+# can never disagree with what the patient was actually shown.
+_FIRST_LISTED_SLOT_DATE_RE = re.compile(r"\b[A-Za-z]{3},\s*([A-Za-z]{3}\s+\d{1,2})\b")
+
+
+def ensure_slot_pick_example_has_a_date(reply: str) -> str:
+    """No-op unless the reply both (a) prompts the patient with a bare-time-only
+    example and (b) already lists at least one real dated slot earlier in the
+    same text to pull the date from — an example that already includes its own
+    date is left untouched (the bare-time regex simply won't match it)."""
+    time_match = _BARE_TIME_EXAMPLE_RE.search(reply)
+    if time_match is None:
+        return reply
+    date_match = _FIRST_LISTED_SLOT_DATE_RE.search(reply[: time_match.start()])
+    if date_match is None:
+        return reply
+    prefix, quote, time_str, closing = time_match.groups()
+    replacement = f"{prefix}{quote}{date_match.group(1)} at {time_str}{quote}{closing}"
+    return reply[: time_match.start()] + replacement + reply[time_match.end() :]
+
+
 # Reported live: "only show me available slots of dr farhan rehman after 12 pm
 # on monday" and its follow-up "show me his available slots after 12 pm" both
 # silently ignored the time-of-day request and returned the same top-5-

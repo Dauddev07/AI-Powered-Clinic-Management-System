@@ -947,6 +947,106 @@ def test_run_symptom_agent_instructs_the_model_to_accept_a_severity_downgrade(mo
     assert "seek emergency care immediately" in result
 
 
+def test_run_symptom_agent_maps_a_bare_pain_scale_number_answering_a_scale_question(monkeypatch, db, ctx, clinic):
+    # Requested: move the "map a 0-10 number to mild/moderate/severe" behavior
+    # out of the system prompt and into a code-level check — a bare "6" only
+    # counts as a pain-scale answer when the preceding turn actually asked a
+    # scale-shaped question.
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["system_prompt"] = system_prompt
+        return "Got it — how long have you had this?"
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    _make_dept_with_slot(db, clinic, "General Medicine")
+    history = [
+        _row("user", "i have chest pain"),
+        _row("assistant", "On a scale of 0 to 10, how would you rate the pain?"),
+    ]
+
+    result = symptom_agent.run_symptom_agent(db, ctx, "6", "en", history)
+
+    assert "STATED PAIN-SCALE NUMBER" in captured["system_prompt"]
+    assert "6/10" in captured["system_prompt"]
+    assert '"moderate"' in captured["system_prompt"]
+    assert result == "Got it — how long have you had this?"
+
+
+def test_run_symptom_agent_does_not_misread_a_bare_number_with_no_scale_question(monkeypatch, db, ctx, clinic):
+    # Guard against being too broad: a bare number with NO preceding scale
+    # question must not be misread as a pain-scale answer at all.
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["system_prompt"] = system_prompt
+        return "Could you tell me how severe this is (mild, moderate, or severe)?"
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    _make_dept_with_slot(db, clinic, "General Medicine")
+    history = [
+        _row("user", "i have chest pain since 5 days"),
+        _row("assistant", "Are you experiencing any nausea, sweating, or shortness of breath?"),
+    ]
+
+    symptom_agent.run_symptom_agent(db, ctx, "6", "en", history)
+
+    assert "STATED PAIN-SCALE NUMBER" not in captured["system_prompt"]
+
+
+@pytest.mark.parametrize("message", ["7/10", "8 out of 10"])
+def test_run_symptom_agent_trusts_an_explicit_pain_scale_fraction_regardless_of_context(
+    monkeypatch, db, ctx, clinic, message
+):
+    # An explicit "X/10"/"X out of 10" is unambiguous on its own, trusted even
+    # with no preceding scale question.
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["system_prompt"] = system_prompt
+        return "This sounds like an emergency. Call 1122 or go to the nearest ER right away."
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    _make_dept_with_slot(db, clinic, "General Medicine")
+    history = [_row("user", "i have chest pain"), _row("assistant", "How long have you had this?")]
+
+    symptom_agent.run_symptom_agent(db, ctx, message, "en", history)
+
+    assert "STATED PAIN-SCALE NUMBER" in captured["system_prompt"]
+    assert '"severe"' in captured["system_prompt"]
+
+
+def test_run_symptom_agent_accepts_a_pain_scale_correction_instead_of_repeating_the_emergency_reply(
+    monkeypatch, db, ctx
+):
+    # Reported live: "6" (a real emergency-triggering severity) -> "not 6 but 5"
+    # -> "not 5 but 4" all got the identical PATH 1 emergency reply repeated
+    # verbatim instead of accepting the correction — the model has no reliable
+    # way to remap a bare number correction to a severity word on its own.
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["system_prompt"] = system_prompt
+        return "Could you tell me how long you've had this and if you've noticed any other symptoms?"
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    history = [
+        _row("user", "i have chest pain"),
+        _row("assistant", "On a scale of 0 to 10, how would you rate the pain?"),
+        _row("user", "6"),
+        _row("assistant", "This sounds like an emergency. Call 1122 or go to the nearest ER right away."),
+    ]
+
+    result = symptom_agent.run_symptom_agent(db, ctx, "not 6 but 5", "en", history)
+
+    assert "THE PATIENT JUST CORRECTED THEIR OWN EARLIER SEVERITY CLAIM" in captured["system_prompt"]
+    # The emergency-downgrade safety note (a separate fix) also correctly
+    # attaches here, since history still has a genuine emergency reply earlier
+    # this session — the two fixes compose correctly together.
+    assert result.startswith("Could you tell me how long you've had this and if you've noticed any other symptoms?")
+    assert "seek emergency care immediately" in result
+
+
 @pytest.mark.parametrize("message", ["fever with 103", "my fever is 103", "temperature is 101", "fever of 99.5"])
 def test_run_symptom_agent_instructs_the_model_that_a_safe_range_fever_reading_is_not_automatically_an_emergency(
     monkeypatch, db, ctx, clinic, message
@@ -3445,6 +3545,26 @@ def test_run_appointment_agent_unambiguous_doctor_name_proceeds_to_the_llm(monke
 
     assert captured.get("called") is True
     assert result == "some reply"
+
+
+def test_run_appointment_agent_fixes_a_bare_time_slot_pick_example_in_the_llms_own_reply(
+    monkeypatch, db, ctx, doctor
+):
+    # Confirms the fix is wired all the way through run_appointment_agent's
+    # public entry point (refactored into a thin wrapper + _run_appointment_
+    # agent_body specifically so this post-processing step covers every return
+    # path, not just one branch).
+    freehand_reply = (
+        "Here are the available slots for Dr. Ahmed Khan (Cardiology):\n\n"
+        "- Mon, Aug 24 at 9:00 AM\n"
+        "- Mon, Aug 24 at 9:30 AM\n\n"
+        'Please reply with the exact slot (e.g., "9:30 AM").'
+    )
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", lambda *a, **k: freehand_reply)
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "book me with Dr Ahmed at 4pm", "en", [])
+
+    assert '(e.g., "Aug 24 at 9:30 AM")' in result
 
 
 def test_run_appointment_agent_answering_an_action_free_name_disambiguation_does_not_resurrect_a_stale_cancel(

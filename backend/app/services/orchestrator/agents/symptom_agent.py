@@ -41,6 +41,7 @@ from app.services.chat_tools import (
     _get_department_availability_impl,
     build_tools,
     combine_department_availability_results,
+    ensure_slot_pick_example_has_a_date,
     resolve_date_window,
     resolve_time_of_day_window,
 )
@@ -85,10 +86,16 @@ _SEVERITY_HINT_RE = re.compile(
 )
 
 
-def _message_already_gives_duration_and_severity(message: str) -> bool:
+def _message_already_gives_duration_and_severity(
+    message: str, history: list[ConversationMemory] | None = None
+) -> bool:
     return bool(
         _DURATION_HINT_RE.search(message)
-        and (_SEVERITY_HINT_RE.search(message) or _message_states_a_numeric_vital_reading(message))
+        and (
+            _SEVERITY_HINT_RE.search(message)
+            or _message_states_a_numeric_vital_reading(message)
+            or _extract_stated_pain_scale_number(message, history or []) is not None
+        )
     )
 
 
@@ -364,8 +371,83 @@ _SEVERITY_DOWNGRADE_RE = re.compile(
 )
 
 
+# Requested: move the "map a 0-10 pain-scale number to mild/moderate/severe,
+# never re-ask, never repeat the same emergency reply on a downward correction"
+# behavior out of the system prompt and into a code-level check, same "never
+# trust the LLM to reason about a numeric threshold on its own, hand it the
+# real mapping" principle as the fever/BP/blood-sugar fixes above. The prompt
+# still tells the model never to GENERATE a 0-10 scale question in the first
+# place (that's a generation-time wording choice with no code-level
+# equivalent) — this only covers the reactive half: the patient answering with
+# a number anyway.
+_PAIN_SCALE_QUESTION_RE = re.compile(
+    r"scale of\s*0\s*to\s*10|rate\b.{0,25}\bpain\b|\bout of 10\b", re.IGNORECASE
+)
+
+
+def _preceding_assistant_turn_asked_a_numeric_pain_scale_question(history: list[ConversationMemory]) -> bool:
+    if not history:
+        return False
+    last = history[-1]
+    if getattr(last, "role", None) != "assistant":
+        return False
+    return bool(_PAIN_SCALE_QUESTION_RE.search(getattr(last, "content", "") or ""))
+
+
+# An explicit "6/10"/"6 out of 10" is unambiguous on its own, trusted regardless
+# of what the preceding turn asked. A BARE number ("6", "a 6") is only trusted
+# as a pain-scale answer when the preceding turn actually asked a scale-shaped
+# question — otherwise a bare "6" could mean anything (a date, a quantity) and
+# must not be misread as severity.
+_EXPLICIT_PAIN_SCALE_RE = re.compile(r"\b(\d{1,2})\s*(?:/\s*10|out of\s*10)\b", re.IGNORECASE)
+_BARE_NUMBER_ONLY_RE = re.compile(r"^\s*(?:it'?s\s+|its\s+|a\s+)*(\d{1,2})\s*\.?\s*$", re.IGNORECASE)
+# "not 6 but 5", "make that a 4" — a correction to a previously-stated pain-scale
+# number. Checked independently of the preceding-question gate above since the
+# correction phrasing itself is unambiguous regardless of what was asked.
+_PAIN_SCALE_CORRECTION_RE = re.compile(
+    r"\bnot\s+\d{1,2}\b.{0,15}\bbut\s+(\d{1,2})\b|\bmake\s+(?:that|it)\s+a\s+(\d{1,2})\b", re.IGNORECASE
+)
+
+
+def _extract_stated_pain_scale_number(message: str, history: list[ConversationMemory]) -> int | None:
+    match = _EXPLICIT_PAIN_SCALE_RE.search(message)
+    if match is None and _preceding_assistant_turn_asked_a_numeric_pain_scale_question(history):
+        match = _BARE_NUMBER_ONLY_RE.match(message)
+    if match is None:
+        return None
+    value = int(match.group(1))
+    return value if 0 <= value <= 10 else None
+
+
+def _extract_pain_scale_correction(message: str) -> int | None:
+    match = _PAIN_SCALE_CORRECTION_RE.search(message)
+    if match is None:
+        return None
+    value = int(match.group(1) or match.group(2))
+    return value if 0 <= value <= 10 else None
+
+
+def _pain_scale_number_to_severity_word(value: int) -> str:
+    if value <= 3:
+        return "mild"
+    if value <= 6:
+        return "moderate"
+    return "severe"
+
+
+_PAIN_SCALE_SEVERITY_INSTRUCTION_TEMPLATE = (
+    "\n\nIMPORTANT — STATED PAIN-SCALE NUMBER: the patient's message states a pain level "
+    "of {value}/10. Map this yourself: 0-3 = mild, 4-6 = moderate, 7-10 = severe. Treat it "
+    "exactly as if the patient had said \"{word}\" — do not ask \"is it mild, moderate, or "
+    "severe\" again for this; proceed with screening/routing from that word."
+)
+
+
 def _message_downgrades_severity(message: str) -> bool:
-    return bool(_SEVERITY_DOWNGRADE_RE.search(message))
+    if _SEVERITY_DOWNGRADE_RE.search(message):
+        return True
+    corrected = _extract_pain_scale_correction(message)
+    return corrected is not None and _pain_scale_number_to_severity_word(corrected) != "severe"
 
 
 def _last_reply_was_an_emergency_reply(history: list[ConversationMemory]) -> bool:
@@ -733,9 +815,10 @@ def run_symptom_agent(
     history: list[ConversationMemory],
 ) -> str:
     department_names = list_active_department_names(db, ctx.clinic_id)
-    return _append_emergency_downgrade_safety_note(
+    reply = _append_emergency_downgrade_safety_note(
         _run_symptom_agent_body(db, ctx, message, language, history), message, history, department_names
     )
+    return ensure_slot_pick_example_has_a_date(reply)
 
 
 def _run_symptom_agent_body(
@@ -877,7 +960,7 @@ def _run_symptom_agent_body(
     no_symptom_yet = _no_symptom_described_yet(history)
     if (
         not is_department_recommendation_request(message)
-        and not _message_already_gives_duration_and_severity(message)
+        and not _message_already_gives_duration_and_severity(message, history)
         and not _is_self_diagnosis_claim(message)
         and (
             (not include_path2 and no_symptom_yet)
@@ -901,7 +984,11 @@ def _run_symptom_agent_body(
         # severity per the clinic's own guidance tables (see
         # _message_states_a_numeric_vital_reading's own comment), so this must
         # never re-ask "how severe" for it either.
-        gives_severity = bool(_SEVERITY_HINT_RE.search(message)) or _message_states_a_numeric_vital_reading(message)
+        gives_severity = (
+            bool(_SEVERITY_HINT_RE.search(message))
+            or _message_states_a_numeric_vital_reading(message)
+            or _extract_stated_pain_scale_number(message, history) is not None
+        )
         gives_duration = bool(_DURATION_HINT_RE.search(message))
         if gives_severity and not gives_duration:
             return "Got it — and how long have you had it?"
@@ -925,6 +1012,11 @@ def _run_symptom_agent_body(
     stated_blood_sugar = _extract_stated_blood_sugar(message)
     if stated_blood_sugar is not None:
         system_prompt += _BLOOD_SUGAR_SEVERITY_INSTRUCTION
+    stated_pain_scale = _extract_stated_pain_scale_number(message, history)
+    if stated_pain_scale is not None:
+        system_prompt += _PAIN_SCALE_SEVERITY_INSTRUCTION_TEMPLATE.format(
+            value=stated_pain_scale, word=_pain_scale_number_to_severity_word(stated_pain_scale)
+        )
 
     forced_date_window = resolve_date_window(message)
     forced_time_window = resolve_time_of_day_window(message)

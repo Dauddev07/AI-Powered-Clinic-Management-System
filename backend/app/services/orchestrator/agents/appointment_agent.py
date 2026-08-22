@@ -87,6 +87,7 @@ from app.services.chat_tools import (
     book_appointment_now,
     build_tools,
     cancel_appointment_now,
+    ensure_slot_pick_example_has_a_date,
     get_slot_summary,
     list_upcoming_appointments,
     reschedule_appointment_now,
@@ -1780,6 +1781,18 @@ def _build_system_prompt(
 
 
 def run_appointment_agent(
+    db: Session,
+    ctx: ClinicContext,
+    message: str,
+    language: str,
+    history: list[ConversationMemory],
+) -> str:
+    return ensure_slot_pick_example_has_a_date(
+        _run_appointment_agent_body(db, ctx, message, language, history)
+    )
+
+
+def _run_appointment_agent_body(
     db: Session,
     ctx: ClinicContext,
     message: str,

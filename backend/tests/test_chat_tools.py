@@ -21,6 +21,7 @@ from app.services.chat_tools import (
     _reschedule_appointment_impl,
     build_tools,
     combine_department_availability_results,
+    ensure_slot_pick_example_has_a_date,
     resolve_bare_weekday_window,
     resolve_date_window,
     resolve_time_of_day_window,
@@ -830,6 +831,42 @@ def test_resolve_date_window_falls_back_to_bare_weekday_when_no_explicit_date_na
 
 def test_resolve_date_window_none_when_neither_a_weekday_nor_an_explicit_date_is_named():
     assert resolve_date_window("book a slot for cardiology") is None
+
+
+# --- ensure_slot_pick_example_has_a_date (moved out of the system prompt to cut tokens) --
+
+
+def test_ensure_slot_pick_example_has_a_date_fixes_a_bare_time_example():
+    # Reported live: a reply correctly listed real slots each with a full date
+    # but then closed with a bare-time-only example.
+    reply = (
+        "Here are the available slots for Dr. Ali Raza (General Medicine):\n\n"
+        "- Mon, Aug 24 at 9:00 AM\n"
+        "- Mon, Aug 24 at 9:30 AM\n\n"
+        'Please let me know which time you\'d like to book by replying with the exact slot (e.g., "9:30 AM").'
+    )
+
+    result = ensure_slot_pick_example_has_a_date(reply)
+
+    assert '(e.g., "Aug 24 at 9:30 AM")' in result
+
+
+def test_ensure_slot_pick_example_has_a_date_leaves_an_already_dated_example_untouched():
+    reply = 'Please reply with the exact slot (e.g., "Aug 24 at 9:30 AM").'
+
+    assert ensure_slot_pick_example_has_a_date(reply) == reply
+
+
+def test_ensure_slot_pick_example_has_a_date_is_a_noop_with_no_slot_list_to_borrow_a_date_from():
+    reply = 'Please reply with the exact slot (e.g., "9:30 AM").'
+
+    assert ensure_slot_pick_example_has_a_date(reply) == reply
+
+
+def test_ensure_slot_pick_example_has_a_date_is_a_noop_with_no_example_at_all():
+    reply = "Here are the available slots:\n\n- Mon, Aug 24 at 9:00 AM\n\nWhich one would you like?"
+
+    assert ensure_slot_pick_example_has_a_date(reply) == reply
 
 
 def test_build_tools_forces_the_resolved_weekday_window_regardless_of_model_args(
