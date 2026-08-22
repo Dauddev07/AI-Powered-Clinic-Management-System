@@ -86,7 +86,10 @@ _SEVERITY_HINT_RE = re.compile(
 
 
 def _message_already_gives_duration_and_severity(message: str) -> bool:
-    return bool(_DURATION_HINT_RE.search(message) and _SEVERITY_HINT_RE.search(message))
+    return bool(
+        _DURATION_HINT_RE.search(message)
+        and (_SEVERITY_HINT_RE.search(message) or _message_states_a_numeric_vital_reading(message))
+    )
 
 
 # Self-diagnosis claims ("i have brain tumor", "i think i have cancer") are
@@ -445,6 +448,127 @@ _FEVER_SAFE_RANGE_INSTRUCTION = (
 )
 
 
+# Requested: a stated blood pressure or blood sugar READING is itself the severity —
+# the clinic's own guidance tables classify it directly from the numbers, so the
+# patient should never be asked "is it mild, moderate, or severe" for these; only
+# duration is still worth asking if it isn't already given. Same "never trust the
+# LLM to reason about a clinical threshold on its own, always hand it the real
+# table" principle as the fever fix above.
+_BP_READING_RE = re.compile(r"\b(\d{2,3})\s*(?:/|over)\s*(\d{2,3})\b", re.IGNORECASE)
+
+
+def _extract_stated_blood_pressure(message: str) -> tuple[int, int] | None:
+    match = _BP_READING_RE.search(message)
+    if match is None:
+        return None
+    try:
+        systolic, diastolic = int(match.group(1)), int(match.group(2))
+    except ValueError:
+        return None
+    # Sanity bounds to plausible human BP readings — rejects an unrelated ratio-
+    # shaped fragment (a date, a fraction) from being misread as a BP reading.
+    if not (60 <= systolic <= 260 and 30 <= diastolic <= 200):
+        return None
+    return systolic, diastolic
+
+
+def _blood_pressure_category(systolic: int, diastolic: int) -> str:
+    if systolic >= 180 or diastolic >= 120:
+        return "hypertensive crisis"
+    if systolic >= 140 or diastolic >= 90:
+        return "very high"
+    if systolic >= 130 or diastolic >= 80:
+        return "high"
+    if systolic >= 120:
+        return "elevated"
+    if systolic < 90 or diastolic < 60:
+        return "low"
+    return "normal"
+
+
+_BLOOD_PRESSURE_SEVERITY_INSTRUCTION = (
+    "\n\nIMPORTANT — STATED BLOOD PRESSURE READING, CLINIC GUIDANCE TABLE: the patient's "
+    "message states a specific blood pressure reading (systolic/diastolic). This clinic's "
+    "own guidance table is: below 90/60 = low; below 120/80 = normal; 120-129 systolic "
+    "(diastolic still below 80) = elevated; 130-139 systolic or 80-89 diastolic = high; "
+    "140+ systolic or 90+ diastolic = very high; 180+ systolic and/or 120+ diastolic = "
+    "hypertensive crisis. The reading itself IS the severity — do NOT ask the patient 'is "
+    "it mild, moderate, or severe' for this; work out the category yourself from the "
+    "numbers using this table instead. Only ask about duration if it isn't already stated."
+)
+
+_BLOOD_SUGAR_NUMBER_BEFORE_RE = re.compile(
+    r"\b(\d{2,3})\s*(?:mg\s*/?\s*dl)?\s*(?:blood\s*)?(?:sugar|glucose)\b", re.IGNORECASE
+)
+_BLOOD_SUGAR_NUMBER_AFTER_RE = re.compile(
+    r"\b(?:blood\s*)?(?:sugar|glucose)\b(?:\s+\w+){0,3}?\s*(\d{2,3})\s*(?:mg\s*/?\s*dl)?", re.IGNORECASE
+)
+
+
+def _extract_stated_blood_sugar(message: str) -> int | None:
+    match = _BLOOD_SUGAR_NUMBER_BEFORE_RE.search(message) or _BLOOD_SUGAR_NUMBER_AFTER_RE.search(message)
+    if match is None:
+        return None
+    try:
+        value = int(match.group(1))
+    except ValueError:
+        return None
+    # Sanity bound to plausible human blood-sugar readings in mg/dL.
+    if not (30 <= value <= 600):
+        return None
+    return value
+
+
+_POSTPRANDIAL_CONTEXT_RE = re.compile(
+    r"\bafter\s+(?:a\s+)?(?:meal|eating|food)\b|\bpost[\s-]?(?:meal|prandial)\b|\b2\s*hours?\s*after\b",
+    re.IGNORECASE,
+)
+_FASTING_CONTEXT_RE = re.compile(
+    r"\bfasting\b|\bbefore\s+(?:a\s+)?(?:meal|eating|food)\b|\bempty\s+stomach\b", re.IGNORECASE
+)
+
+
+def _blood_sugar_category(value: int, message: str) -> str:
+    # Ambiguous readings (no fasting/post-meal context stated) default to the
+    # fasting thresholds — the more conservative of the two tables (a lower bar
+    # for "diabetes range"), rather than assuming the more permissive one.
+    is_postprandial = bool(_POSTPRANDIAL_CONTEXT_RE.search(message)) and not _FASTING_CONTEXT_RE.search(message)
+    if is_postprandial:
+        if value < 70:
+            return "low"
+        if value < 140:
+            return "normal"
+        if value < 200:
+            return "high/prediabetes"
+        return "diabetes range"
+    if value < 70:
+        return "low"
+    if value < 100:
+        return "normal"
+    if value < 126:
+        return "high/prediabetes"
+    return "diabetes range"
+
+
+_BLOOD_SUGAR_SEVERITY_INSTRUCTION = (
+    "\n\nIMPORTANT — STATED BLOOD SUGAR READING, CLINIC GUIDANCE TABLE: the patient's "
+    "message states a specific blood sugar/glucose reading. This clinic's own guidance "
+    "table is: FASTING (8+ hrs) — below 70 = low, 70-99 = normal, 100-125 = high/"
+    "prediabetes, 126+ = diabetes range. 2 HOURS AFTER A MEAL — below 70 = low, below "
+    "140 = normal, 140-199 = high/prediabetes, 200+ = diabetes range. If the patient "
+    "didn't say whether this was fasting or after a meal, use the fasting thresholds as "
+    "the default read. The reading itself IS the severity — do NOT ask the patient 'is it "
+    "mild, moderate, or severe' for this; work out the category yourself from the number "
+    "using this table instead. Only ask about duration if it isn't already stated. "
+    "Abnormal results still need confirmation by a healthcare professional — state the "
+    "category plainly, don't assert a diagnosis."
+)
+
+
+def _message_states_a_numeric_vital_reading(message: str) -> bool:
+    return _extract_stated_blood_pressure(message) is not None or _extract_stated_blood_sugar(message) is not None
+
+
 def _patient_named_this_department(department_name: str, message: str, history: list[ConversationMemory]) -> bool:
     """True when the patient themselves (never the assistant) said this
     department's name somewhere in the conversation — used to tell "the patient
@@ -772,7 +896,12 @@ def _run_symptom_agent_body(
         # re-asking something already answered. `_message_already_gives_duration_and_severity`
         # above only gates the case where BOTH are present (and skips this whole block
         # then); this narrows the question itself to whichever piece is still missing.
-        gives_severity = bool(_SEVERITY_HINT_RE.search(message))
+        # A stated blood pressure/blood sugar reading counts as severity already
+        # given the same way "mild"/"frequent"/etc. do — the reading itself IS the
+        # severity per the clinic's own guidance tables (see
+        # _message_states_a_numeric_vital_reading's own comment), so this must
+        # never re-ask "how severe" for it either.
+        gives_severity = bool(_SEVERITY_HINT_RE.search(message)) or _message_states_a_numeric_vital_reading(message)
         gives_duration = bool(_DURATION_HINT_RE.search(message))
         if gives_severity and not gives_duration:
             return "Got it — and how long have you had it?"
@@ -790,6 +919,12 @@ def _run_symptom_agent_body(
     stated_fever_temp = _extract_stated_fever_temperature(message)
     if stated_fever_temp is not None and _fever_temperature_is_within_the_clinic_safe_range(stated_fever_temp):
         system_prompt += _FEVER_SAFE_RANGE_INSTRUCTION
+    stated_bp = _extract_stated_blood_pressure(message)
+    if stated_bp is not None:
+        system_prompt += _BLOOD_PRESSURE_SEVERITY_INSTRUCTION
+    stated_blood_sugar = _extract_stated_blood_sugar(message)
+    if stated_blood_sugar is not None:
+        system_prompt += _BLOOD_SUGAR_SEVERITY_INSTRUCTION
 
     forced_date_window = resolve_bare_weekday_window(message)
     forced_time_window = resolve_time_of_day_window(message)

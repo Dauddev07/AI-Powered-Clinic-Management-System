@@ -955,6 +955,100 @@ def test_run_symptom_agent_does_not_add_the_fever_safe_range_note_outside_the_sa
     assert "97°F and 103°F" not in captured["system_prompt"]
 
 
+@pytest.mark.parametrize(
+    "message", ["my bp is 150/95", "blood pressure 130/85", "bp 180/120 since yesterday", "my bp is 85/55"]
+)
+def test_run_symptom_agent_instructs_the_model_to_classify_a_stated_blood_pressure_reading_itself(
+    monkeypatch, db, ctx, clinic, message
+):
+    # Requested: a stated BP reading IS the severity per the clinic's own guidance
+    # table — the model must classify it itself from the numbers, never ask the
+    # patient "is it mild, moderate, or severe" for it.
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["system_prompt"] = system_prompt
+        return "Got it — how long have you had this?"
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    _make_dept_with_slot(db, clinic, "General Medicine")
+    history = [
+        _row("user", "i have high blood pressure"),
+        _row(
+            "assistant",
+            "Could you tell me how severe this is (mild, moderate, or severe) and how long you've had it?",
+        ),
+    ]
+
+    result = symptom_agent.run_symptom_agent(db, ctx, message, "en", history)
+
+    assert "STATED BLOOD PRESSURE READING" in captured["system_prompt"]
+    assert "do NOT ask the patient" in captured["system_prompt"]
+    assert result == "Got it — how long have you had this?"
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["my sugar level is 210", "fasting sugar 105", "blood sugar 220 after meal", "glucose is 65"],
+)
+def test_run_symptom_agent_instructs_the_model_to_classify_a_stated_blood_sugar_reading_itself(
+    monkeypatch, db, ctx, clinic, message
+):
+    # Same requested behavior for a stated blood sugar/glucose reading.
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["system_prompt"] = system_prompt
+        return "Got it — how long have you had this?"
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    _make_dept_with_slot(db, clinic, "General Medicine")
+    history = [
+        _row("user", "my sugar levels feel off"),
+        _row(
+            "assistant",
+            "Could you tell me how severe this is (mild, moderate, or severe) and how long you've had it?",
+        ),
+    ]
+
+    result = symptom_agent.run_symptom_agent(db, ctx, message, "en", history)
+
+    assert "STATED BLOOD SUGAR READING" in captured["system_prompt"]
+    assert "do NOT ask the patient" in captured["system_prompt"]
+    assert result == "Got it — how long have you had this?"
+
+
+def test_run_symptom_agent_first_message_backstop_asks_only_duration_for_a_bare_bp_reading(
+    monkeypatch, db, ctx, clinic
+):
+    # A stated BP reading with no duration word, as the session's first symptom,
+    # must only be asked about duration — never re-asked for severity, since the
+    # reading itself is the severity.
+    _make_dept_with_slot(db, clinic, "General Medicine")
+
+    monkeypatch.setattr(
+        symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Let me check availability for you."
+    )
+
+    result = symptom_agent.run_symptom_agent(db, ctx, "my bp is 150/95", "en", [])
+
+    assert result == "Got it — and how long have you had it?"
+
+
+def test_run_symptom_agent_first_message_backstop_asks_only_duration_for_a_bare_blood_sugar_reading(
+    monkeypatch, db, ctx, clinic
+):
+    _make_dept_with_slot(db, clinic, "General Medicine")
+
+    monkeypatch.setattr(
+        symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Let me check availability for you."
+    )
+
+    result = symptom_agent.run_symptom_agent(db, ctx, "my sugar level is 210", "en", [])
+
+    assert result == "Got it — and how long have you had it?"
+
+
 def test_run_symptom_agent_refusal_to_go_does_not_trigger_the_downgrade_instruction(monkeypatch, db, ctx):
     # "i dont wanna goto er" is a REFUSAL of the action, not a correction of
     # the stated severity — must NOT be misread as a downgrade (it has no
