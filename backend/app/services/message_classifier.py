@@ -325,6 +325,16 @@ _PATH2_SYMPTOM_PHRASES = (
     "irregular heart", "racing heartbeat", "irregular heartbeat",
 )
 
+# Requested: "frequent urination" (and "excessive" as an equivalent word) is a
+# possible diabetes-triad sign — it must always get PATH 2's own differentiator
+# question (increased hunger, weight loss, blurred vision) before any department
+# card, never shortcut straight to one just because a duration was named in the
+# same message. Order-independent (frequent/excessive + urination/thirst in either
+# order), same technique as _PATH2_PAIN_BODY_PARTS below for "pain in stomach" vs.
+# "stomach pain".
+_PATH2_FREQUENCY_WORDS = frozenset({"frequent", "frequently", "excessive", "excessively"})
+_PATH2_URINATION_THIRST_WORDS = frozenset({"urination", "urinate", "urinating", "urine", "thirst", "thirsty"})
+
 # Reported live: "i am having pain in stomach" did NOT trigger PATH 2 screening and
 # routed straight to General Medicine with slots shown — _PATH2_SYMPTOM_PHRASES only
 # matches the fixed word order "stomach pain", not "pain in stomach", which is
@@ -361,6 +371,8 @@ def needs_path2_screening(message: str, history=None) -> bool:
     if any(phrase in lowered for phrase in _PATH2_SYMPTOM_PHRASES):
         return True
     if "pain" in words and words & _PATH2_PAIN_BODY_PARTS:
+        return True
+    if words & _PATH2_FREQUENCY_WORDS and words & _PATH2_URINATION_THIRST_WORDS:
         return True
     if _preceding_assistant_turn_looks_like_a_question(history):
         return True

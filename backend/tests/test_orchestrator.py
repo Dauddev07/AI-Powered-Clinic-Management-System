@@ -1949,17 +1949,19 @@ def test_run_symptom_agent_first_message_backstop_asks_only_severity_when_durati
         "frequent jaw pain",
         "i get frequent jaw pain",
         "frequently occurring jaw pain",
+        "excessive jaw pain",
+        "excessively painful jaw",
     ],
 )
 def test_run_symptom_agent_first_message_backstop_treats_frequent_as_severity_given(
     monkeypatch, db, ctx, clinic, message
 ):
-    # "frequent"/"frequently" is a real severity signal in its own right — a
-    # message already describing it as frequent, with no duration word, must
-    # only be asked about duration, not re-asked for severity too. Scoped
-    # narrowly to just this one word family, not every frequency-adjacent word
-    # (constant/persistent/occasional/intermittent/"comes and goes" are
-    # deliberately NOT covered).
+    # "frequent"/"frequently"/"excessive"/"excessively" are real severity signals
+    # in their own right — a message already describing it this way, with no
+    # duration word, must only be asked about duration, not re-asked for severity
+    # too. Scoped narrowly to just these two word families, not every frequency-
+    # adjacent word (constant/persistent/occasional/intermittent/"comes and goes"
+    # are deliberately NOT covered).
     _make_dept_with_slot(db, clinic, "Dentistry")
 
     monkeypatch.setattr(

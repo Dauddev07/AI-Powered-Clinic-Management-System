@@ -580,6 +580,31 @@ def test_needs_path2_screening_false_for_a_minor_non_major_bone_mention():
     assert needs_path2_screening("I think I fractured my finger") is True
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        # Requested: "frequent urination" is a possible diabetes-triad sign and must
+        # always get PATH 2's differentiator question, never shortcut straight to a
+        # card just because a duration was named in the same message.
+        "i am facing issue of frequent urination from 5 days",
+        "frequent urination",
+        "i have frequent urination",
+        "urination is frequent",
+        "excessive urination",
+        "excessive thirst",
+        "i have excessive thirst and it wont stop",
+    ],
+)
+def test_needs_path2_screening_true_for_frequent_or_excessive_urination_or_thirst(message):
+    assert needs_path2_screening(message) is True
+
+
+def test_needs_path2_screening_false_for_bare_urination_with_no_frequency_word():
+    # Guard against being too broad: plain urination-related wording with no
+    # frequent/excessive qualifier at all must not force PATH 2 on its own.
+    assert needs_path2_screening("i have some pain when i urinate") is False
+
+
 def test_needs_path2_screening_defaults_true_for_genuine_ambiguity():
     # An unfamiliar/ambiguous symptom phrasing that isn't confidently routine and
     # isn't confidently on PATH 2's list either — the safe default keeps PATH 2.

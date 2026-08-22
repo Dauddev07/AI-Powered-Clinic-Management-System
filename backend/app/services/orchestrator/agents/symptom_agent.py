@@ -72,14 +72,15 @@ _INTRO = (
 _DURATION_HINT_RE = re.compile(
     r"\b(day|days|week|weeks|month|months|hour|hours|year|years|since)\b", re.IGNORECASE
 )
-# "frequent"/"frequently" added alongside the mild/moderate/severe words above — how
-# OFTEN a symptom occurs is a real severity signal in its own right (e.g. "frequent
-# urination"), so a message already describing it as frequent should skip the
-# severity question the same way one already saying "mild"/"severe" does. Scoped
-# narrowly to just this one word family, not every frequency-adjacent word.
+# "frequent"/"frequently"/"excessive"/"excessively" added alongside the mild/
+# moderate/severe words above — how OFTEN or how MUCH a symptom occurs is a real
+# severity signal in its own right (e.g. "frequent urination", "excessive
+# thirst"), so a message already describing it this way should skip the severity
+# question the same way one already saying "mild"/"severe" does. Scoped narrowly
+# to just these two word families, not every frequency-adjacent word.
 _SEVERITY_HINT_RE = re.compile(
     r"\b(mild|moderate|severe|bearable|unbearable|sharp|dull|intense|excruciating|slight"
-    r"|frequent|frequently)\b",
+    r"|frequent|frequently|excessive|excessively)\b",
     re.IGNORECASE,
 )
 
