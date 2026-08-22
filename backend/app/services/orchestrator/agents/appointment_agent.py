@@ -989,7 +989,23 @@ def _detect_new_booking_supersede_intent(message: str) -> bool:
 # and their entire purpose is "the patient said no, stop." Checked as its own scan
 # stop-signal, the same way _detect_new_booking_supersede_intent already stops the
 # scan below for an explicit new-booking retraction.
-_DECLINED_CONFIRMATION_REPLY_RE = re.compile(r"\bwas not (?:booked|cancelled|rescheduled)\b", re.IGNORECASE)
+#
+# Reported live (2nd instance, no book/cancel confirmation even pending this time):
+# "i wanna see dr iqra raza" -> slots shown -> a bare "cancel" (zero real
+# appointments, nothing pending at all) correctly got the OTHER deterministic
+# dead-end reply — "You don't have an upcoming appointment to cancel." (see
+# run_appointment_agent's own "You don't have an upcoming appointment...to {verb}"
+# returns) — then several unrelated booking turns later, "whos dr ali babar" still
+# resurrected that "cancel" because THIS reply shape didn't match
+# _DECLINED_CONFIRMATION_REPLY_RE either (different wording, no confirmation was
+# ever pending to decline). Same underlying principle: a deterministic,
+# code-composed dead-end reply — never model-freehanded — is just as safe a
+# stop-signal as an explicit decline.
+_DECLINED_CONFIRMATION_REPLY_RE = re.compile(
+    r"\bwas not (?:booked|cancelled|rescheduled)\b"
+    r"|\bdon'?t have an upcoming appointment\b.{0,40}?\bto (?:cancel|reschedule)\b",
+    re.IGNORECASE,
+)
 
 
 def _most_recent_action_intent(history: list[ConversationMemory]) -> str | None:

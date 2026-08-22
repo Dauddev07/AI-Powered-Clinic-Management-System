@@ -6175,6 +6175,84 @@ def test_run_appointment_agent_declined_booking_does_not_leave_a_stale_action_fo
     assert "Dr. Ahmed Khan" in result
 
 
+def test_run_appointment_agent_no_pending_confirmation_cancel_dead_end_does_not_leak_into_later_turns(
+    monkeypatch, db, ctx, clinic, doctor
+):
+    # Reported live, second variant: no book/cancel confirmation was even pending
+    # this time — "i wanna see dr iqra raza" -> slots shown -> a bare "cancel"
+    # (zero real appointments) correctly got the OTHER deterministic dead-end
+    # reply, "You don't have an upcoming appointment to cancel." (not "was not
+    # booked" — no confirmation existed to decline). Several unrelated booking
+    # turns happen next (picking a slot, naming a day, reaching a fresh book
+    # confirmation), then "whos dr ali babar" — a totally unrelated doctor
+    # identity question — must not resurrect that dead "cancel" either.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.doctor import Doctor
+    from app.models.slot import Slot
+
+    slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    )
+    db.add(slot)
+    # A real, distinct doctor for the identity question at the end — otherwise
+    # find_doctors_by_name has nothing to resolve to exactly one match against.
+    babar_ali = Doctor(
+        clinic_id=clinic.id, department_id=doctor.department_id,
+        external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}", full_name="Dr. Babar Ali", is_active=True,
+    )
+    db.add(babar_ali)
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be reached for a plain doctor-identity question")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row("user", "i wanna see dr ahmed khan"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + json.dumps({
+            "department_name": "Cardiology",
+            "doctors": [{
+                "doctor_id": str(doctor.id), "doctor_name": doctor.full_name, "specialization": None,
+                "slots": [{"slot_id": str(slot.id), "when": "Sun, Aug 23 at 9:00 AM"}],
+            }],
+        })),
+        _row("user", "cancel"),
+        _row("assistant", "You don't have an upcoming appointment to cancel."),
+        _row("user", "book"),
+        _row(
+            "assistant",
+            f"Please let me know which of the available slots you'd like to book with {doctor.full_name}:\n\n"
+            "- Sun, Aug 23 at 9:00 AM\n\nJust tell me the time you prefer.",
+        ),
+        _row("user", "9am"),
+        _row(
+            "assistant",
+            appointment_agent.DOCTOR_DISAMBIGUATION_MARKER
+            + json.dumps(
+                {
+                    "kind": "book_confirm",
+                    "question": f"Just to confirm — book your appointment with {doctor.full_name} in "
+                    "Cardiology on Sun, Aug 23 at 9:00 AM?",
+                    "candidate": {
+                        "slot_id": str(slot.id), "doctor_name": doctor.full_name,
+                        "department_name": "Cardiology", "when": "Sun, Aug 23 at 9:00 AM",
+                    },
+                }
+            ),
+        ),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "who is dr babar ali", "en", history)
+
+    assert "don't have an upcoming appointment" not in result
+    assert "Dr. Babar Ali" in result
+
+
 # --- _is_short_negative_reply ---------------------------------------------------
 # Reported live: "no,book me with dr waqas on mon aug 24 at 3.30 instead" — a
 # decline plus a real new request in one message — matched the plain "no" prefix
