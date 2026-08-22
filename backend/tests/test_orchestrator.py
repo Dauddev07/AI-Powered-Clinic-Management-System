@@ -6086,6 +6086,95 @@ def test_run_appointment_agent_declining_book_confirmation_leaves_slot_open(
     assert "not booked" in result
 
 
+def test_run_appointment_agent_bare_cancel_declines_a_pending_book_confirmation(
+    monkeypatch, db, ctx, clinic, doctor
+):
+    # Reported live: "book with dr ali raza" -> confirmation shown -> a bare
+    # "cancel" (no "that", no other words) used to fall through the book_pending
+    # check entirely (only "cancel that" was recognized as a decline), get
+    # re-classified from scratch as a FRESH cancel request, and — with zero real
+    # appointments yet — reply "You don't have an upcoming appointment to
+    # cancel" for what was plainly meant as declining the booking.
+    slot = _future_slot(db, clinic, doctor)
+    db.commit()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be called when the patient declines the booking")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    candidate = {
+        "slot_id": str(slot.id),
+        "doctor_name": "Dr. Ahmed Khan",
+        "department_name": "Cardiology",
+        "when": "Mon, Aug 10 at 9:00 AM",
+    }
+    pending = appointment_agent.DOCTOR_DISAMBIGUATION_MARKER + json.dumps(
+        {"kind": "book_confirm", "question": "confirm?", "candidate": candidate}
+    )
+    history = [_row("assistant", pending)]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "cancel", "en", history)
+
+    assert "not booked" in result
+    assert "don't have an upcoming appointment" not in result
+    db.refresh(slot)
+    assert slot.status == "open"
+
+
+def test_run_appointment_agent_declined_booking_does_not_leave_a_stale_action_for_a_later_doctor_question(
+    monkeypatch, db, ctx, doctor, other_doctor
+):
+    # Full reported transcript, second half: after the bare "cancel" above
+    # correctly declines the pending booking (a plain, TERMINAL reply — nothing
+    # left open), the literal word "cancel" is still sitting in that user turn's
+    # history. A later, entirely unrelated message naming exactly one real
+    # doctor ("whos doctor babar ali" here modeled as "khan", since `doctor` is
+    # Dr. Ahmed Khan) must not have _most_recent_action_intent's backward scan
+    # resurrect that already-resolved "cancel" — the assistant's own last reply
+    # is a closed statement, not an open question, so the fallback must not
+    # fire at all.
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be reached for a doctor with zero open slots")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row(
+            "assistant",
+            appointment_agent.DOCTOR_DISAMBIGUATION_MARKER
+            + json.dumps(
+                {
+                    "kind": "book_confirm",
+                    "question": "Just to confirm — book your appointment with Dr. Ahmed Khan in "
+                    "Cardiology on Mon, Aug 24 at 9:00 AM?",
+                    "candidate": {
+                        "slot_id": str(uuid.uuid4()),
+                        "doctor_name": "Dr. Ahmed Khan",
+                        "department_name": "Cardiology",
+                        "when": "Mon, Aug 24 at 9:00 AM",
+                    },
+                }
+            ),
+        ),
+        _row("user", "cancel"),
+        _row(
+            "assistant",
+            "No problem — the appointment with Dr. Ahmed Khan in Cardiology on Mon, Aug 24 at "
+            "9:00 AM was not booked.",
+        ),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "whos doctor khan", "en", history)
+
+    # Falls through to the real, deterministic no-slots reply (no slot fixture
+    # seeded for this test) — the key assertion is what it must NOT be: a bogus
+    # "you don't have an upcoming appointment...to cancel" resurrecting the
+    # already-declined, already-closed "cancel" from the turn before.
+    assert "don't have an upcoming appointment" not in result
+    assert "Dr. Ahmed Khan" in result
+
+
 # --- _is_short_negative_reply ---------------------------------------------------
 # Reported live: "no,book me with dr waqas on mon aug 24 at 3.30 instead" — a
 # decline plus a real new request in one message — matched the plain "no" prefix
@@ -6103,6 +6192,7 @@ def test_run_appointment_agent_declining_book_confirmation_leaves_slot_open(
         "do not book that",
         "don't book it",
         "cancel that",
+        "cancel",
     ],
 )
 def test_is_short_negative_reply_true_for_pure_declines(message):

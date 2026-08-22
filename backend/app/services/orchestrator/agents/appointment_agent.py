@@ -260,8 +260,23 @@ def _extract_slot_id(message: str) -> str | None:
 # slot from a shown list) — so it gets an explicit, code-enforced confirm-then-act
 # gate instead, same "the LLM never freehands a mutating action" principle as
 # reschedule/cancel redirect ids in chat_tools.build_tools.
+#
+# Reported live: "cancel" alone (no "that", no other words) sent in reply to a
+# pending "Just to confirm — book your appointment...?" question didn't match
+# this regex at all (only "cancel that" did) — so _is_short_negative_reply
+# returned False, the book_pending check fell all the way through with no
+# return, and the bare word got re-classified from scratch as a FRESH cancel
+# request instead of a decline of the pending booking. With zero real
+# appointments yet, that produced "You don't have an upcoming appointment to
+# cancel" for what was plainly meant as "no, don't book that" — and then
+# persisted as stale context for an unrelated later message too (see
+# _most_recent_action_intent's own docstring/tests). A bare "cancel" is
+# unambiguous as a decline whenever one of these three confirmations is
+# actually pending (the only context _is_short_negative_reply is ever called
+# in) — added as its own alternative alongside "cancel that", not a
+# replacement for it.
 _NEGATIVE_RE = re.compile(
-    r"^\s*(?:no|nope|nah|don'?t|do ?not|never ?mind|forget it|cancel that)\b",
+    r"^\s*(?:no|nope|nah|don'?t|do ?not|never ?mind|forget it|cancel(?: that)?)\b",
     re.IGNORECASE,
 )
 
@@ -946,6 +961,37 @@ def _detect_new_booking_supersede_intent(message: str) -> bool:
     return bool(words & _BOOKING_VERB_WORDS) and bool(words & _NEW_BOOKING_SUPERSEDE_WORDS)
 
 
+# Reported live: "book with dr ali raza" -> confirmation shown ("Just to confirm —
+# book...9:00 AM?") -> "cancel" (meant to decline that pending booking, now handled
+# by _NEGATIVE_RE recognizing a bare "cancel" — see its own comment) -> the decline
+# reply ("No problem — ... was not booked.") is a deterministic, code-composed
+# statement that unambiguously closes the topic — nothing left pending, nothing to
+# continue. The NEXT message, "whos doctor babar ali", names exactly one real
+# doctor with no action word of its own — _most_recent_action_intent's backward
+# scan (below) used to have no way to tell "an action word still awaiting a doctor
+# name" apart from "an action word whose confirmation was already explicitly
+# declined a turn ago," and resurrected the latter as if it were still live,
+# producing "You don't have an upcoming appointment with Dr. Babar Ali to cancel"
+# for what was only ever an identity question.
+#
+# An initial attempt gated this on whether the assistant's OWN last reply "looked
+# open" (ended in "?") before allowing the scan at all — too broad in the other
+# direction: it broke two established, already-tested continuations where the last
+# assistant turn is a plain statement or a DOCTOR_OPTIONS_MARKER slot-list card
+# (never phrased as a literal "?" question) and repeating/continuing the doctor
+# context there is correct and expected (see
+# test_run_appointment_agent_named_doctor_with_no_active_appointment_never_falls_back_to_another_one
+# and test_run_appointment_agent_asks_to_confirm_before_rescheduling_to_a_picked_slot).
+# The one thing that's actually SAFE to treat as unconditionally closing an action
+# is one of these three DECLINE replies themselves — they're deterministic,
+# code-composed (see _pending_cancel_confirmation/_pending_book_confirmation/
+# _pending_reschedule_confirmation's own negative branches), never model-freehanded,
+# and their entire purpose is "the patient said no, stop." Checked as its own scan
+# stop-signal, the same way _detect_new_booking_supersede_intent already stops the
+# scan below for an explicit new-booking retraction.
+_DECLINED_CONFIRMATION_REPLY_RE = re.compile(r"\bwas not (?:booked|cancelled|rescheduled)\b", re.IGNORECASE)
+
+
 def _most_recent_action_intent(history: list[ConversationMemory]) -> str | None:
     """Recovers a cancel/reschedule action stated a turn or two ago, for when the
     patient's very next message just repeats a doctor name without restating the
@@ -958,21 +1004,33 @@ def _most_recent_action_intent(history: list[ConversationMemory]) -> str | None:
     _detect_new_booking_supersede_intent above) stops the scan outright and reports
     no active action at all, rather than being skipped over like an ordinary
     non-matching turn — see this function's own module comment above for the live
-    report this closes. Deliberately NOT built on the shared
-    _scan_recent_user_messages helper (unlike _most_recently_named_doctor above):
-    that helper only supports "skip and keep scanning" or "stop and return a
+    report this closes. An assistant reply explicitly declining a pending book/
+    cancel/reschedule confirmation (see _DECLINED_CONFIRMATION_REPLY_RE's own
+    comment) stops the scan the same way — the patient said no, so nothing further
+    back should be resurrected as if it were still live. Deliberately NOT built on
+    the shared _scan_recent_user_messages helper (unlike _most_recently_named_doctor
+    above): that helper only supports "skip and keep scanning" or "stop and return a
     result," with no way to express "stop and return NOTHING," which is exactly
-    what a superseding turn needs to do here.
+    what a superseding turn or a declined confirmation needs to do here.
     """
-    user_messages = [
-        getattr(row, "content", "") or "" for row in history if getattr(row, "role", None) == "user"
-    ][-_ACTION_INTENT_LOOKBACK_TURNS:]
-    for content in reversed(user_messages):
+    user_turns_scanned = 0
+    for row in reversed(history):
+        role = getattr(row, "role", None)
+        content = getattr(row, "content", "") or ""
+        if role == "assistant":
+            if _DECLINED_CONFIRMATION_REPLY_RE.search(content):
+                return None
+            continue
+        if role != "user":
+            continue
         if _detect_new_booking_supersede_intent(content):
             return None
         action = _detect_action_intent(content)
         if action is not None:
             return action
+        user_turns_scanned += 1
+        if user_turns_scanned >= _ACTION_INTENT_LOOKBACK_TURNS:
+            break
     return None
 
 
