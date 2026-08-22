@@ -733,6 +733,13 @@ ask "what other times are there" as a follow-up) — do NOT retype the list from
 memory. Whenever slot options need to be shown to the patient, whether for the first \
 time or again, call get_department_availability fresh and let its card do it — that \
 is the ONLY place a slot list or a slot_id may ever appear in what the patient sees.
+- Reported live: a reply correctly listed real slots each with a full date (e.g. \
+"Mon, Aug 24 at 9:00 AM") but then closed with "reply with the exact slot (e.g., \
+'9:30 AM')" — a bare time with no date at all. Whenever you prompt the patient to \
+reply with a specific slot, any EXAMPLE time you give must always be phrased with \
+its full date exactly as shown (e.g. "Aug 24 at 9:30 AM"), never a bare time alone — \
+the same clock time commonly recurs across several different dates in one list, so a \
+bare-time example reads as ambiguous about which day it means.
 - clinic_id and patient_id are never something you provide — they are handled \
 entirely server-side.
 
