@@ -894,6 +894,67 @@ def test_run_symptom_agent_instructs_the_model_to_accept_a_severity_downgrade(mo
     assert "seek emergency care immediately" in result
 
 
+@pytest.mark.parametrize("message", ["fever with 103", "my fever is 103", "temperature is 101", "fever of 99.5"])
+def test_run_symptom_agent_instructs_the_model_that_a_safe_range_fever_reading_is_not_automatically_an_emergency(
+    monkeypatch, db, ctx, clinic, message
+):
+    # Reported live: "fever with 103" got treated as an emergency, but per the clinic's
+    # own fever guidance table 103°F is still "high fever," not an emergency on its
+    # own — only below 97°F or above 103°F should read as fever emergency severity by
+    # itself. History already establishes the fever episode so the deterministic
+    # first-message backstop (asking severity/duration) doesn't short-circuit before
+    # ever reaching the LLM call this test is inspecting.
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["system_prompt"] = system_prompt
+        return "Got it — how long have you had this fever, and any stiff neck, rash, or confusion?"
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    _make_dept_with_slot(db, clinic, "General Medicine")
+    history = [
+        _row("user", "i have a fever"),
+        _row(
+            "assistant",
+            "Could you tell me how severe this is (mild, moderate, or severe) and how long you've had it?",
+        ),
+    ]
+
+    result = symptom_agent.run_symptom_agent(db, ctx, message, "en", history)
+
+    assert "97°F and 103°F" in captured["system_prompt"]
+    assert "NOT an emergency by itself" in captured["system_prompt"]
+    assert result == "Got it — how long have you had this fever, and any stiff neck, rash, or confusion?"
+
+
+@pytest.mark.parametrize("message", ["temperature is 104", "fever is 96", "fever of 105"])
+def test_run_symptom_agent_does_not_add_the_fever_safe_range_note_outside_the_safe_range(
+    monkeypatch, db, ctx, clinic, message
+):
+    # Guard against being too broad: a genuinely abnormal reading (below 97°F or
+    # above 103°F) must NOT get the "not an emergency" instruction — those readings
+    # are still meant to read as emergency-level per the clinic's own table.
+    captured = {}
+
+    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
+        captured["system_prompt"] = system_prompt
+        return "This sounds like an emergency. Call 1122 or go to the nearest ER right away."
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    _make_dept_with_slot(db, clinic, "General Medicine")
+    history = [
+        _row("user", "i have a fever"),
+        _row(
+            "assistant",
+            "Could you tell me how severe this is (mild, moderate, or severe) and how long you've had it?",
+        ),
+    ]
+
+    symptom_agent.run_symptom_agent(db, ctx, message, "en", history)
+
+    assert "97°F and 103°F" not in captured["system_prompt"]
+
+
 def test_run_symptom_agent_refusal_to_go_does_not_trigger_the_downgrade_instruction(monkeypatch, db, ctx):
     # "i dont wanna goto er" is a REFUSAL of the action, not a correction of
     # the stated severity — must NOT be misread as a downgrade (it has no

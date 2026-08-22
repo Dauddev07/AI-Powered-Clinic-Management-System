@@ -382,6 +382,61 @@ _SEVERITY_DOWNGRADE_INSTRUCTION = (
 )
 
 
+# Reported live: "fever with 103" got treated as an emergency (PATH 1), but per the
+# clinic's own fever guidance table a reading of 103°F is still "high fever," not an
+# emergency on its own — only below 97°F (hypothermia-range) or above 103°F ("very
+# high") should read as fever-related emergency severity by itself. Nothing in the
+# prompt gave the model an actual numeric table to reason from, so it fell back to
+# its own general-knowledge judgment call, which skewed too conservative for a stated
+# number. Scoped to a NUMBER actually stated alongside "fever"/"temperature" in the
+# CURRENT message — a bare "i have high fever" with no number is unaffected and still
+# goes through PATH 2's normal fever screening as before.
+_FEVER_NUMBER_BEFORE_RE = re.compile(
+    r"\b(\d{2,3}(?:\.\d)?)\s*(?:°\s*f\.?|deg(?:rees?)?\s*f\.?|f\.?)?\s*(?:degrees?\s*)?"
+    r"(?:fever|temp(?:erature)?)\b",
+    re.IGNORECASE,
+)
+_FEVER_NUMBER_AFTER_RE = re.compile(
+    r"\b(?:fever|temp(?:erature)?)\b(?:\s+\w+){0,2}?\s*"
+    r"(\d{2,3}(?:\.\d)?)\s*(?:°\s*f\.?|deg(?:rees?)?\s*f\.?|f\b)?",
+    re.IGNORECASE,
+)
+
+
+def _extract_stated_fever_temperature(message: str) -> float | None:
+    match = _FEVER_NUMBER_BEFORE_RE.search(message) or _FEVER_NUMBER_AFTER_RE.search(message)
+    if match is None:
+        return None
+    try:
+        value = float(match.group(1))
+    except ValueError:
+        return None
+    # Sanity bound to plausible human body-temperature readings in Fahrenheit —
+    # rejects an unrelated number ("fever for 3 days" has no digit here anyway,
+    # but this guards against something like "temp 5" from a different context).
+    if not (90.0 <= value <= 112.0):
+        return None
+    return value
+
+
+def _fever_temperature_is_within_the_clinic_safe_range(temp: float) -> bool:
+    return 97.0 <= temp <= 103.0
+
+
+_FEVER_SAFE_RANGE_INSTRUCTION = (
+    "\n\nIMPORTANT — STATED FEVER TEMPERATURE, CLINIC GUIDANCE TABLE: the patient's message "
+    "states a specific fever/temperature reading. This clinic's own guidance table is: "
+    "below 97°F = emergency-level low; 97-99°F = normal; 99-100.9°F = mild fever; "
+    "101-103°F = high fever; above 103°F = emergency-level very high. A reading between "
+    "97°F and 103°F (inclusive) — mild OR high fever — is NOT an emergency by itself, no "
+    "matter how high it feels to the patient. Do NOT go to PATH 1 for this reading alone. "
+    "Screen it normally per PATH 2 (how long, and any stiff neck/rash/confusion/"
+    "breathlessness/persistent vomiting alongside it) and only escalate to PATH 1 if a "
+    "genuine red-flag symptom is present alongside the fever, never purely because of the "
+    "number itself."
+)
+
+
 def _patient_named_this_department(department_name: str, message: str, history: list[ConversationMemory]) -> bool:
     """True when the patient themselves (never the assistant) said this
     department's name somewhere in the conversation — used to tell "the patient
@@ -689,6 +744,9 @@ def _run_symptom_agent_body(
     system_prompt = _build_system_prompt(language_name, department_names, include_path2)
     if _last_reply_was_an_emergency_reply(history) and _message_downgrades_severity(message):
         system_prompt += _SEVERITY_DOWNGRADE_INSTRUCTION
+    stated_fever_temp = _extract_stated_fever_temperature(message)
+    if stated_fever_temp is not None and _fever_temperature_is_within_the_clinic_safe_range(stated_fever_temp):
+        system_prompt += _FEVER_SAFE_RANGE_INSTRUCTION
 
     forced_date_window = resolve_bare_weekday_window(message)
     forced_time_window = resolve_time_of_day_window(message)
