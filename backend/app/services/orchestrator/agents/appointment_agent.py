@@ -90,6 +90,7 @@ from app.services.chat_tools import (
     ensure_slot_pick_example_has_a_date,
     get_slot_summary,
     list_upcoming_appointments,
+    most_recent_appointment_with_doctor,
     most_recently_cancelled_appointment,
     reschedule_appointment_now,
     resolve_bare_weekday_reply,
@@ -1331,48 +1332,99 @@ def _message_asks_to_rebook_a_cancelled_appointment(message: str) -> bool:
     return bool(_MISTAKEN_CANCELLATION_RE.search(message) and re.search(r"\bbook\b", message, re.IGNORECASE))
 
 
-def _rebook_cancelled_appointment_reply(db: Session, ctx: ClinicContext, message: str) -> str:
+def _most_recently_booked_appointment_in_chat(history: list[ConversationMemory]) -> dict | None:
+    """A booking CONFIRMED earlier in THIS SAME conversation (a BOOKING_MARKER
+    assistant turn) — checked before falling back to the DB's globally-last-
+    cancelled row, since "book it again" almost always refers to the specific
+    appointment just discussed in front of the patient, not whatever else was
+    cancelled at some unrelated earlier time (reported live: a patient who had
+    never actually cancelled their in-chat Dr. Ali Raza booking said "I
+    cancelled my appointment with Dr. Ali Raza by mistake, book it again" and
+    got a completely unrelated doctor's old cancelled slot instead). The
+    payload only carries doctor_name/department_name/when (see
+    _booking_card_payload) — the caller re-resolves the real, current DB row
+    for that doctor via most_recent_appointment_with_doctor rather than
+    trusting this stale snapshot for status or slot_id."""
+    for row in reversed(history):
+        if getattr(row, "role", None) != "assistant":
+            continue
+        content = getattr(row, "content", "") or ""
+        if not content.startswith(BOOKING_MARKER):
+            continue
+        try:
+            return json.loads(content[len(BOOKING_MARKER):])
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
+def _rebook_cancelled_appointment_reply(
+    db: Session, ctx: ClinicContext, message: str, history: list[ConversationMemory]
+) -> str:
     """Deterministic, DB-grounded handling for "book my cancelled appointment
     again" — never left to the model to freehand a doctor/time from history
-    (see this module's own recurring principle). Three real outcomes, matching
-    the request this closes:
-    1. No cancelled appointment on record at all -> say so plainly and ask who
-       to book with instead, never inventing one.
-    2. The patient already has a real, active (confirmed, upcoming) appointment
-       with that same doctor — maybe from rebooking separately already, or the
-       cancellation itself was superseded — say it's already there rather than
-       booking a duplicate.
-    3. Otherwise, check the ORIGINAL slot's real current status (cancelling
-       reopens it — see booking_engine.cancel_appointment — but it may since
-       have been taken by someone else, or simply passed): still open and
-       still in the future -> ask to confirm rebooking that exact slot, same
-       code-enforced confirm-then-act gate as every other mutating action here
+    (see this module's own recurring principle).
+
+    Looks at the CURRENT CHAT first: if this same conversation already shows a
+    confirmed booking (a BOOKING_MARKER turn), that appointment is almost
+    certainly what the patient means — its real, current DB status is checked
+    fresh rather than assumed cancelled just because the patient said so.
+    Only when the chat itself has no such booking does this fall back to the
+    DB's most-recently-cancelled appointment overall.
+
+    Real outcomes, matching the request this closes:
+    1. No candidate appointment at all (neither in chat nor in DB) -> say so
+       plainly and ask who to book with instead, never inventing one.
+    2. The candidate is still actually confirmed/active (the patient's
+       "cancelled by mistake" claim doesn't match reality) -> say it's still
+       there rather than treating it as cancelled.
+    3. The candidate is genuinely cancelled -> check the ORIGINAL slot's real
+       current status (cancelling reopens it — see
+       booking_engine.cancel_appointment — but it may since have been taken by
+       someone else, or simply passed): still open and still in the future ->
+       ask to confirm rebooking that exact slot, same code-enforced confirm-
+       then-act gate as every other mutating action here
        (_pending_book_confirmation picks this up on an explicit "yes"). No
        longer available -> say so plainly and offer to check that doctor's
        current availability instead, never silently booking a different time.
     """
-    cancelled = most_recently_cancelled_appointment(db, ctx)
-    if cancelled is None:
+    from_chat = _most_recently_booked_appointment_in_chat(history)
+    candidate = None
+    if from_chat is not None:
+        candidate = most_recent_appointment_with_doctor(db, ctx, from_chat["doctor_name"])
+
+    if candidate is None:
+        candidate = most_recently_cancelled_appointment(db, ctx)
+        if candidate is not None:
+            candidate["status"] = "cancelled"
+
+    if candidate is None:
         return "I don't see a recently cancelled appointment on your account. Who would you like to book with instead?"
 
+    if candidate["status"] != "cancelled":
+        return (
+            f"Your appointment with {candidate['doctor_name']} in {candidate['department_name']} on "
+            f"{candidate['when']} is still there — it hasn't been cancelled."
+        )
+
     active = list_upcoming_appointments(db, ctx)
-    already_active = next((a for a in active if a["doctor_name"] == cancelled["doctor_name"]), None)
+    already_active = next((a for a in active if a["doctor_name"] == candidate["doctor_name"]), None)
     if already_active is not None:
         return (
             f"You already have an upcoming appointment with {already_active['doctor_name']} in "
             f"{already_active['department_name']} on {already_active['when']} — no need to rebook."
         )
 
-    slot = db.get(Slot, uuid.UUID(cancelled["slot_id"]))
+    slot = db.get(Slot, uuid.UUID(candidate["slot_id"]))
     still_bookable = (
         slot is not None and slot.status == "open" and slot.start_utc > datetime.now(timezone.utc)
     )
     if still_bookable:
-        fresh_slot = get_slot_summary(db, ctx.clinic_id, cancelled["slot_id"])
+        fresh_slot = get_slot_summary(db, ctx.clinic_id, candidate["slot_id"])
         return _book_confirmation_reply(fresh_slot)
 
     return (
-        f"That slot — {cancelled['doctor_name']} in {cancelled['department_name']} on {cancelled['when']} — "
+        f"That slot — {candidate['doctor_name']} in {candidate['department_name']} on {candidate['when']} — "
         "isn't available anymore. Would you like me to show their current availability instead?"
     )
 
@@ -1963,7 +2015,7 @@ def _run_appointment_agent_body(
     # otherwise misread the past-tense "cancelled" mention as a fresh cancel
     # request (see _message_asks_to_rebook_a_cancelled_appointment's own comment).
     if _message_asks_to_rebook_a_cancelled_appointment(message):
-        return _rebook_cancelled_appointment_reply(db, ctx, message)
+        return _rebook_cancelled_appointment_reply(db, ctx, message, history)
 
     # Reported live: "cancel both of my appointments" (2 active, same doctor) asked
     # "which one would you like to cancel: 9:00 AM, 9:30 AM?" — then "i want to book

@@ -857,6 +857,47 @@ def most_recently_cancelled_appointment(db: Session, ctx: ClinicContext) -> dict
     }
 
 
+def most_recent_appointment_with_doctor(db: Session, ctx: ClinicContext, doctor_name: str) -> dict | None:
+    """The patient's most recent appointment (any status) with one exactly-named
+    doctor — used to re-check the CURRENT real status of an appointment the chat
+    itself just confirmed (see _most_recently_booked_appointment_in_chat in
+    appointment_agent.py), rather than trusting the in-chat confirmation card,
+    which reflects the status at booking time and goes stale the moment the
+    appointment is later cancelled or superseded. doctor_name is matched exactly
+    since it always comes from a DB-emitted string (a prior serialize_appointment
+    call), never typed freehand by the patient — no fuzzy matching needed."""
+    from sqlalchemy import select
+
+    from app.models.appointment import Appointment
+
+    stmt = (
+        select(Appointment)
+        .join(Doctor, Doctor.id == Appointment.doctor_id)
+        .where(
+            Appointment.clinic_id == ctx.clinic_id,
+            Appointment.patient_id == ctx.user_id,
+            Doctor.full_name == doctor_name,
+        )
+        .order_by(Appointment.created_at.desc())
+        .limit(1)
+    )
+    appointment = db.execute(stmt).scalars().first()
+    if appointment is None:
+        return None
+    out = booking_engine.serialize_appointment(db, appointment)
+    tz = _clinic_timezone(db, ctx.clinic_id)
+    return {
+        "appointment_id": str(out.id),
+        "slot_id": str(out.slot_id),
+        "doctor_id": str(out.doctor_id),
+        "doctor_name": out.doctor_name,
+        "department_name": out.department_name,
+        "when": _format_when(out.start_utc, tz),
+        "start_utc": out.start_utc.isoformat(),
+        "status": appointment.status,
+    }
+
+
 @traceable(name="get_my_appointments")
 def _get_my_appointments_impl(
     db: Session, ctx: ClinicContext, status_filter: str, limit: int, oldest_first: bool = False
