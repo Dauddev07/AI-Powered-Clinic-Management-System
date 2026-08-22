@@ -1344,6 +1344,138 @@ def test_run_symptom_agent_fetches_a_second_department_named_in_the_note_but_nev
     assert neuro_entry["note"] == "This could be evaluated by Cardiology for the chest pain and Neurology for the dizziness."
 
 
+def test_run_symptom_agent_strips_a_second_department_not_grounded_in_anything_the_patient_said(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # Reported live: a patient describing ONLY chest pain and sweating got a
+    # SECOND department (General Medicine) with a note reading "Based on the
+    # fever/body aches described" — neither fever nor body aches was ever
+    # mentioned. The model itself called get_department_availability twice this
+    # turn (llm._finalize_reply already combines that into a DEPARTMENT_LIST::
+    # reply before symptom_agent ever sees it) — the ungrounded second
+    # department must be stripped, leaving only the grounded primary one
+    # (Cardiology, chest pain), rebuilt as a plain single-department card.
+    _make_dept_with_slot(db, clinic, "General Medicine")
+
+    cardiology_card = {
+        "department_name": "Cardiology",
+        "note": "Based on the chest pain described, Cardiology would be appropriate.",
+        "doctors": [{"doctor_id": "d1", "doctor_name": doctor.full_name, "specialization": None, "slots": []}],
+    }
+    general_medicine_card = {
+        "department_name": "General Medicine",
+        "note": "Based on the fever/body aches described, this could also be evaluated by General Medicine.",
+        "doctors": [{"doctor_id": "d2", "doctor_name": "Dr. General Medicine", "specialization": None, "slots": []}],
+    }
+    hallucinated_reply = DEPARTMENT_LIST_MARKER + json.dumps(
+        {"departments": [cardiology_card, general_medicine_card], "unavailable": []}
+    )
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: hallucinated_reply)
+
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "i am having pain in my chest, mild, since 5 days", "en", []
+    )
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "Cardiology"
+
+
+def test_run_symptom_agent_keeps_a_second_department_genuinely_grounded_in_a_distinct_symptom(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # Guard against being too broad: a SECOND department genuinely grounded in a
+    # real, separate symptom the patient actually described (itchy skin ->
+    # Dermatology, alongside chest pain -> Cardiology) must still be kept.
+    _make_dept_with_slot(db, clinic, "Dermatology")
+
+    cardiology_card = {
+        "department_name": "Cardiology",
+        "note": "Based on the chest pain described, Cardiology would be appropriate.",
+        "doctors": [{"doctor_id": "d1", "doctor_name": doctor.full_name, "specialization": None, "slots": []}],
+    }
+    dermatology_card = {
+        "department_name": "Dermatology",
+        "note": "Separately, for the itchy skin you described, you could also see Dermatology.",
+        "doctors": [{"doctor_id": "d2", "doctor_name": "Dr. Dermatology", "specialization": None, "slots": []}],
+    }
+    grounded_reply = DEPARTMENT_LIST_MARKER + json.dumps(
+        {"departments": [cardiology_card, dermatology_card], "unavailable": []}
+    )
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: grounded_reply)
+
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "i am having chest pain and also itchy skin, mild, since 5 days", "en", []
+    )
+
+    assert result.startswith(DEPARTMENT_LIST_MARKER)
+    payload = json.loads(result[len(DEPARTMENT_LIST_MARKER):])
+    names = {d["department_name"] for d in payload["departments"]}
+    assert names == {"Cardiology", "Dermatology"}
+
+
+def test_run_symptom_agent_does_not_add_a_second_department_for_a_differentiator_answer(
+    monkeypatch, db, ctx, clinic
+):
+    # Requested: "sore throat" -> "is it accompanied by fever or chills?" -> "yes
+    # fever and chills" got BOTH ENT (sore throat) AND General Medicine (fever/
+    # chills) shown — but "fever and chills" here is a DIFFERENTIATOR ANSWER
+    # about the sore throat complaint, not an independent new complaint. The
+    # keyword-hint backstop must not add General Medicine just because the
+    # patient's answer to a screening question happened to contain those words.
+    _make_dept_with_slot(db, clinic, "ENT")
+    _make_dept_with_slot(db, clinic, "General Medicine")
+
+    ent_card = DOCTOR_OPTIONS_MARKER + json.dumps(
+        {
+            "department_name": "ENT",
+            "note": "Based on the sore throat described, ENT would be appropriate.",
+            "doctors": [{"doctor_id": "d1", "doctor_name": "Dr. ENT", "specialization": None, "slots": []}],
+        }
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: ent_card)
+
+    history = [
+        _row("user", "i have a sore throat"),
+        _row("assistant", "Is it accompanied by fever or chills?"),
+    ]
+    result = symptom_agent.run_symptom_agent(db, ctx, "yes fever and chills", "en", history)
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "ENT"
+
+
+def test_run_symptom_agent_still_adds_a_department_for_fever_raised_as_its_own_complaint(
+    monkeypatch, db, ctx, clinic
+):
+    # Guard against being too broad: fever/chills raised as a genuinely NEW,
+    # unprompted complaint (not answering a screening question about something
+    # else) must still correctly add General Medicine.
+    _make_dept_with_slot(db, clinic, "ENT")
+    _make_dept_with_slot(db, clinic, "General Medicine")
+
+    ent_card = DOCTOR_OPTIONS_MARKER + json.dumps(
+        {
+            "department_name": "ENT",
+            "note": "Based on the sore throat described, ENT would be appropriate.",
+            "doctors": [{"doctor_id": "d1", "doctor_name": "Dr. ENT", "specialization": None, "slots": []}],
+        }
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: ent_card)
+
+    result = symptom_agent.run_symptom_agent(
+        db, ctx, "i have a mild sore throat since 2 days and i am also having fever and chills", "en", []
+    )
+
+    assert result.startswith(DEPARTMENT_LIST_MARKER)
+    payload = json.loads(result[len(DEPARTMENT_LIST_MARKER):])
+    names = {d["department_name"] for d in payload["departments"]}
+    assert names == {"ENT", "General Medicine"}
+
+
 def test_run_symptom_agent_fetches_a_department_hinted_by_symptom_words_even_when_the_note_never_names_it(
     monkeypatch, db, ctx, clinic, department, doctor
 ):

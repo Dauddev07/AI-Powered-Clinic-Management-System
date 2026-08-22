@@ -994,6 +994,25 @@ def _run_symptom_agent_body(
             ]
             reply = results[0] if len(results) == 1 else combine_department_availability_results(results)
 
+    # Requested: "sore throat" -> "is it accompanied by fever or chills?" -> "yes
+    # fever" (or "fever and chills") got BOTH ENT (for the sore throat) AND
+    # General Medicine (for "fever"/"chills") shown as separate departments — but
+    # "fever"/"chills" here is a DIFFERENTIATOR ANSWER about the sore throat
+    # complaint, not an independent new complaint of its own. The same word,
+    # raised as its OWN standalone complaint ("i have fever and chills"), still
+    # correctly hints General Medicine as a real, separate thing. The
+    # distinguishing signal is exactly the one _introduces_a_new_symptom_category
+    # already uses for the identical "answering vs volunteering" question:
+    # whether the immediately preceding assistant turn was a plain screening
+    # question. When it was, the CURRENT message's own words are excluded from
+    # this hint scan entirely (falls back to history only) — a confirmatory
+    # differentiator answer must never, by itself, justify an additional
+    # department beyond whatever's already being screened.
+    def _hinted_departments_excluding_a_screening_answer(already_covered: set[str]) -> dict[str, str]:
+        if _preceding_assistant_turn_asked_a_screening_question(history):
+            return departments_hinted_by_patient_symptom_words("", history, department_names, already_covered)
+        return departments_hinted_by_patient_symptom_words(message, history, department_names, already_covered)
+
     if reply.startswith(DOCTOR_OPTIONS_MARKER):
         payload = json.loads(reply[len(DOCTOR_OPTIONS_MARKER):])
         covered_department = payload.get("department_name")
@@ -1052,9 +1071,7 @@ def _run_symptom_agent_body(
         # Medicine's note named the symptom (model-composed) but Cardiology's
         # generic fallback note didn't, reading as an inconsistent, half-explained
         # reply between the two cards.
-        for name, label in departments_hinted_by_patient_symptom_words(
-            message, history, department_names, already_covered
-        ).items():
+        for name, label in _hinted_departments_excluding_a_screening_answer(already_covered).items():
             if name not in missing:
                 missing.append(name)
                 extra_notes[name] = f"Based on the {label} described, this could also be evaluated by {name}."
@@ -1063,5 +1080,46 @@ def _run_symptom_agent_body(
                 _get_department_availability_impl(db, ctx, name, note=extra_notes[name]) for name in missing
             ]
             reply = combine_department_availability_results([reply, *extra_results])
+
+    # Requested: a code-level check (not a prompt instruction, to avoid the extra
+    # prompt tokens) for when the model's OWN tool-calling loop already called
+    # get_department_availability more than once THIS turn — that's combined into a
+    # DEPARTMENT_LIST_MARKER reply before this function ever sees it (see
+    # llm._finalize_reply), so the single-department correction block above never
+    # runs at all for this shape. Reported live: a patient describing ONLY chest
+    # pain and sweating got a SECOND department (General Medicine) with a note
+    # reading "Based on the fever/body aches described" — neither was ever
+    # mentioned; the second department and its whole justification were
+    # fabricated. The first/primary department is always kept as-is (same
+    # "primary is whatever the model concluded first" convention as the
+    # single-department correction above); every ADDITIONAL department must be
+    # grounded in a real symptom hint from the patient's own words (or directly
+    # named by the patient) or it's dropped — never shown on the strength of the
+    # model's own freehand reasoning alone.
+    elif reply.startswith(DEPARTMENT_LIST_MARKER):
+        payload = json.loads(reply[len(DEPARTMENT_LIST_MARKER):])
+        departments = payload.get("departments") or []
+        if len(departments) > 1:
+            hinted = _hinted_departments_excluding_a_screening_answer(set())
+            kept = [departments[0]]
+            for entry in departments[1:]:
+                name = entry.get("department_name")
+                if name in hinted or _patient_named_this_department(name, message, history):
+                    kept.append(entry)
+            if len(kept) < len(departments):
+                if len(kept) == 1:
+                    sole = kept[0]
+                    reply = DOCTOR_OPTIONS_MARKER + json.dumps(
+                        {
+                            "department_name": sole["department_name"],
+                            "note": sole.get("note"),
+                            "doctors": sole["doctors"],
+                        },
+                        default=str,
+                    )
+                else:
+                    reply = DEPARTMENT_LIST_MARKER + json.dumps(
+                        {"departments": kept, "unavailable": payload.get("unavailable", [])}, default=str
+                    )
 
     return reply
