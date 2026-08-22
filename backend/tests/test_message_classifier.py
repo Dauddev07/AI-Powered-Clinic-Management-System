@@ -788,6 +788,15 @@ def test_fuzzy_words_intersect_excludes_cancer_from_cancel_match(word):
     assert not _fuzzy_words_intersect({word}, _CANCEL_ACTION_WORDS)
 
 
+@pytest.mark.parametrize("word", ["schedule", "schedules", "scheduled", "scheduling"])
+def test_fuzzy_words_intersect_excludes_schedule_from_reschedule_match(word):
+    # Reported live: "whats his schedule?" got the bogus "You don't have an
+    # upcoming appointment to reschedule" reply — "schedule" sits within 2 edits
+    # of "reschedule" (drop the "re" prefix), same false-positive shape as
+    # cancer/cancel above, just for the other action word.
+    assert not _fuzzy_words_intersect({word}, _RESCHEDULE_ACTION_WORDS)
+
+
 @pytest.mark.parametrize(
     "word",
     ["appointment", "book", "the", "weather", "available", "hello"],

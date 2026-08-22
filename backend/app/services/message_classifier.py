@@ -841,7 +841,15 @@ _ACTION_WORD_FUZZY_MAX_DIST = 2
 # the exact-match check above, which "cancer" could never satisfy anyway) rather than
 # tightening the distance threshold generally, which would just as easily reopen the
 # original typo gap this fuzzy matching exists to close.
-_FUZZY_MATCH_EXCLUDE = frozenset({"cancer", "cancers", "cancerous"})
+# Reported live: "whats his schedule?" — a plain informational question, no
+# booking action at all — got the bogus reply "You don't have an upcoming
+# appointment to reschedule": "schedule" sits within 2 edits of "reschedule"
+# (drop the "re" prefix), so _detect_action_intent's fuzzy check misread it as a
+# real reschedule request. Same "cancer"/"cancel" false-positive shape above,
+# just for the other action word — "schedule" is a real, common, unrelated
+# English word, never a typo'd "reschedule", so it's excluded from fuzzy
+# matching here too.
+_FUZZY_MATCH_EXCLUDE = frozenset({"cancer", "cancers", "cancerous", "schedule", "schedules", "scheduled", "scheduling"})
 
 
 def _fuzzy_word_in(word: str, vocabulary: frozenset[str]) -> bool:

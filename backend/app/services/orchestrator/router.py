@@ -245,6 +245,51 @@ def _rule_0_7_clinic_logistics_question(message, history, last_role, last_conten
     return None
 
 
+# Requested: a general, informational question about a doctor's schedule/working
+# days ("whats his schedule?", "on what days is dr ali raza available?") kept
+# routing to appointment_agent instead of general_info_agent — mid-conversation,
+# needs_booking_action_tools() defaults to True the moment ANY doctor/department
+# card has been shown earlier in the session (its own "availability/booking
+# already shown this session" trigger), so this class of question stayed stuck on
+# appointment_agent long after the booking flow that first showed a card. Two
+# concrete live symptoms this caused: (1) "whats his schedule?" — "schedule" is
+# within _fuzzy_word_in's edit-distance-2 tolerance of "reschedule", so
+# appointment_agent's own _detect_action_intent misread it as a reschedule
+# request and replied "You don't have an upcoming appointment to reschedule" for
+# a doctor never even booked; (2) "on what days he is available?" just re-showed
+# the exact same slot card again instead of a natural schedule answer grounded in
+# the clinic's real KB text (the same kind of answer general_info_agent already
+# gives for "hook me up with dr X" — "Dr. X sees patients ... Monday through
+# Thursday from 2pm to 8pm..."). Scoped narrowly to "schedule" and an open-ended
+# "what/which days ... available" phrasing (never a SPECIFIC day/date, e.g. "is
+# he available on monday"/"on mon aug 31" — those stay exactly as they are,
+# since asking about one specific day is unambiguously a slot-availability
+# request) — and never overridden when the message also asks for actual slots or
+# a booking action outright, so "show me his available slots"/"book with him"
+# are completely unaffected.
+_DOCTOR_SCHEDULE_QUESTION_RE = re.compile(
+    r"\bschedule\b"
+    r"|\b(?:what|which)\s+days?\b(?:\s+\w+){0,4}?\s*\bavailable\b"
+    r"|\bavailable\b(?:\s+\w+){0,4}?\s*\b(?:what|which)\s+days?\b"
+    r"|\bworking\s+(?:hours|days|timings?)\b"
+    r"|\b(?:his|her|their)\s+timings?\b",
+    re.IGNORECASE,
+)
+_SLOT_OR_BOOKING_ACTION_OVERRIDE_RE = re.compile(r"\bslots?\b|\bbook\w*\b|\bappointment\b", re.IGNORECASE)
+
+
+def _message_asks_a_general_doctor_schedule_question(message: str) -> bool:
+    if not _DOCTOR_SCHEDULE_QUESTION_RE.search(message):
+        return False
+    return not _SLOT_OR_BOOKING_ACTION_OVERRIDE_RE.search(message)
+
+
+def _rule_0_75_doctor_schedule_or_availability_days_question(message, history, last_role, last_content):
+    if _message_asks_a_general_doctor_schedule_question(message) and not is_symptom_message(message):
+        return GENERAL_INFO
+    return None
+
+
 def _message_states_a_cancel_or_reschedule_action(message: str) -> bool:
     """The same shared vocabulary appointment_agent's own _detect_action_intent
     scans (_CANCEL_ACTION_WORDS/_RESCHEDULE_ACTION_WORDS) — NOT
@@ -533,6 +578,7 @@ _RULE_CASCADE = (
     ("0.5", _rule_0_5_department_recommendation),
     ("0.6", _rule_0_6_department_scope_question),
     ("0.7", _rule_0_7_clinic_logistics_question),
+    ("0.75", _rule_0_75_doctor_schedule_or_availability_days_question),
     ("0.8", _rule_0_8_cancel_reschedule_action_overrides_screening_continuity),
     ("0.9", _rule_0_9_appointment_status_history_query_overrides_screening_continuity),
     ("1.5", _rule_1_5_department_list_request),

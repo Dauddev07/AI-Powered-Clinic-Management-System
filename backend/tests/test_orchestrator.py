@@ -358,6 +358,59 @@ def test_router_rule0_7_clinic_identity_question_does_not_misfire_on_booking_men
     assert _heuristic_classify("i want to reschedule my clinic appointment") != GENERAL_INFO
 
 
+# --- rule 0.75: general doctor schedule/availability-days question -----------------
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # Reported live: "whats his schedule?" got the bogus "You don't have an
+        # upcoming appointment to reschedule" reply (a fuzzy "schedule"~
+        # "reschedule" false match) instead of a natural, KB-grounded schedule
+        # answer — must route to general_info, never appointment.
+        "whats his schedule?",
+        "what is his schedule",
+        "what's her schedule",
+        # Reported live: repeated after a doctor was already shown — kept
+        # re-showing the exact same slot card instead of a natural schedule
+        # answer.
+        "on what days is dr ali raza available?",
+        "on what days he is available?",
+        "what are his working hours",
+        "what are her working days",
+    ],
+)
+def test_router_rule0_75_routes_general_doctor_schedule_questions_to_general_info(message):
+    history = [
+        _row("user", "i wanna see doctors in ent dept"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + '{"doctors": [{"doctor_name": "Dr. X"}]}'),
+    ]
+    assert _heuristic_classify(message, history) == GENERAL_INFO
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # Guard against being too broad: real slot/booking requests must be
+        # completely unaffected, even though a doctor was already shown.
+        "show me his available slots",
+        "book with him",
+        "book an appointment for tomorrow",
+        # A SPECIFIC day/date named is a slot-availability request, not a
+        # general schedule question — must stay on appointment, same
+        # established behavior as the "mon aug 31st" date-resolution fix.
+        "is he available on monday",
+        "is dr ali raza available on mon aug 31",
+    ],
+)
+def test_router_rule0_75_does_not_misfire_on_slot_or_booking_requests(message):
+    history = [
+        _row("user", "i wanna see doctors in ent dept"),
+        _row("assistant", DOCTOR_OPTIONS_MARKER + '{"doctors": [{"doctor_name": "Dr. X"}]}'),
+    ]
+    assert _heuristic_classify(message, history) != GENERAL_INFO
+
+
 def test_router_rule0_7_does_not_override_a_genuine_symptom_message():
     # Guard against the new rule being too broad: a message that plainly states a
     # NEW symptom must still route to SYMPTOM_GENERAL even if it happens to also
@@ -5717,6 +5770,15 @@ def test_run_appointment_agent_narrows_after_resolving_a_name_disambiguation_rep
 )
 def test_detect_action_intent_respects_local_negation(message, expected):
     assert appointment_agent._detect_action_intent(message) == expected
+
+
+@pytest.mark.parametrize("message", ["whats his schedule?", "what is her schedule", "i scheduled it already"])
+def test_detect_action_intent_does_not_misread_schedule_as_reschedule(message):
+    # Reported live: "whats his schedule?" fuzzy-matched "reschedule" (within 2
+    # edits, dropping the "re" prefix) and produced a bogus "you don't have an
+    # upcoming appointment to reschedule" reply for a plain informational
+    # question with no booking action at all.
+    assert appointment_agent._detect_action_intent(message) is None
 
 
 # --- new-booking intent supersedes a stale reschedule/cancel (_most_recent_action_intent) --
