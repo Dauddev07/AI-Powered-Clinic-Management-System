@@ -668,6 +668,18 @@ def _run_symptom_agent_body(
             or (not no_symptom_yet and _introduces_a_new_symptom_category(message, history, department_names))
         )
     ):
+        # Reported live: this backstop always asked BOTH severity and duration, even
+        # when the patient's own message already volunteered one of the two — e.g.
+        # "it's been going on for 3 days" got asked "how severe...and how long" again,
+        # re-asking something already answered. `_message_already_gives_duration_and_severity`
+        # above only gates the case where BOTH are present (and skips this whole block
+        # then); this narrows the question itself to whichever piece is still missing.
+        gives_severity = bool(_SEVERITY_HINT_RE.search(message))
+        gives_duration = bool(_DURATION_HINT_RE.search(message))
+        if gives_severity and not gives_duration:
+            return "Got it — and how long have you had it?"
+        if gives_duration and not gives_severity:
+            return "Got it — and how severe is it (mild, moderate, or severe)?"
         return (
             "Could you tell me how severe this is (mild, moderate, or severe) and how "
             "long you've had it?"

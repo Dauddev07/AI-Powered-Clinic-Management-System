@@ -1792,6 +1792,38 @@ def test_run_symptom_agent_first_message_backstop_skips_when_duration_and_severi
     assert result == "Let me check availability for you."
 
 
+def test_run_symptom_agent_first_message_backstop_asks_only_duration_when_severity_already_given(
+    monkeypatch, db, ctx, clinic
+):
+    # Only severity was volunteered ("mild jaw pain") with no duration hint —
+    # the backstop must not re-ask severity, only the still-missing duration.
+    _make_dept_with_slot(db, clinic, "Dentistry")
+
+    monkeypatch.setattr(
+        symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Let me check availability for you."
+    )
+
+    result = symptom_agent.run_symptom_agent(db, ctx, "mild jaw pain", "en", [])
+
+    assert result == "Got it — and how long have you had it?"
+
+
+def test_run_symptom_agent_first_message_backstop_asks_only_severity_when_duration_already_given(
+    monkeypatch, db, ctx, clinic
+):
+    # Only duration was volunteered ("for the past 2 days") with no severity hint —
+    # the backstop must not re-ask duration, only the still-missing severity.
+    _make_dept_with_slot(db, clinic, "Dentistry")
+
+    monkeypatch.setattr(
+        symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Let me check availability for you."
+    )
+
+    result = symptom_agent.run_symptom_agent(db, ctx, "jaw pain for the past 2 days", "en", [])
+
+    assert result == "Got it — and how severe is it (mild, moderate, or severe)?"
+
+
 @pytest.mark.parametrize("message", ["i have diabetes", "i think i have diabetes"])
 def test_run_symptom_agent_first_message_backstop_skips_self_diagnosis_claims(monkeypatch, db, ctx, clinic, message):
     # Self-diagnosis claims are deliberately excluded from the backstop — asking
