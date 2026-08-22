@@ -239,8 +239,16 @@ _SYMPTOM_KEYWORDS = frozenset({
 # over-trigger toward symptom" bias is unchanged for all of them, this is a
 # narrowly-scoped exception for the handful of words where that bias produces a
 # clearly wrong routing.
+#
+# "hit"/"hit"-past-tense added the same way: "a car hit a football" or "the car
+# crashed into a pole" have zero connection to an injury, but "i hit my head
+# against the wall" is a real, plausible self-reported injury that went
+# completely undetected before this — "hit" wasn't in ANY keyword set at all
+# (not even gated), so it fell through to general_info_agent instead of
+# triage. Same corroboration gate as cut/burn/bite/sting: only counts once a
+# body part or injury-severity word is also in the same message.
 _AMBIGUOUS_ACTION_SYMPTOM_WORDS = frozenset({
-    "cut", "burn", "burned", "burning", "bite", "bitten", "sting", "stung",
+    "cut", "burn", "burned", "burning", "bite", "bitten", "sting", "stung", "hit",
 })
 
 # Corroboration vocabulary for _AMBIGUOUS_ACTION_SYMPTOM_WORDS — deliberately

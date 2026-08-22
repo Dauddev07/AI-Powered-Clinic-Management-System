@@ -386,6 +386,11 @@ def test_bare_reply_after_a_user_turn_not_assistant_still_behaves_as_small_talk(
         "i am having pain in my joints",
         "i am having issue in chewing any solid thing",
         "i am having pain in my jaw",
+        # "hit" is dual-meaning the same way cut/burn/bite/sting already are —
+        # only counts once corroborated by a body part or injury-severity word
+        # in the same message (see _AMBIGUOUS_ACTION_SYMPTOM_WORDS' own comment).
+        "i hit my head against the wall while adjusting a shelf",
+        "i got hit and now my arm is bleeding",
     ],
 )
 def test_symptom_messages_detected(message):
@@ -401,6 +406,13 @@ def test_symptom_messages_detected(message):
         "What's the parking situation like?",
         "thanks a lot",
         "who's available in cardiology",
+        # Reported live: "hit" has zero connection to an injury in these — must
+        # stay excluded the same way a bare "cut"/"burn" does without a body
+        # part or injury word alongside it.
+        "a car hit a football and it burst",
+        "the car crashed into a pole",
+        "i hit the gym today",
+        "that song is a hit",
     ],
 )
 def test_non_symptom_messages_not_detected(message):
