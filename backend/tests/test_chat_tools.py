@@ -22,6 +22,7 @@ from app.services.chat_tools import (
     build_tools,
     combine_department_availability_results,
     resolve_bare_weekday_window,
+    resolve_date_window,
     resolve_time_of_day_window,
 )
 from app.services.department_availability import MAX_SLOTS_PER_DOCTOR
@@ -800,6 +801,35 @@ def test_resolve_bare_weekday_window_still_none_for_a_word_with_unrelated_nearby
     # trusted (see the test above) — but this must not regress the existing
     # "sat"/"sun" collision guard for messages with NO digits nearby at all.
     assert resolve_bare_weekday_window("I sat in the waiting room for 2 hours") is None
+
+
+# --- resolve_date_window (explicit calendar date takes priority over a bare weekday) --
+
+
+def test_resolve_date_window_prefers_the_explicit_date_when_a_weekday_name_is_also_present():
+    # Reported live: "mon aug 31st" got resolved to the nearest upcoming Monday
+    # from TODAY, silently ignoring "aug 31" — resolve_bare_weekday_window has no
+    # awareness of a following month/day at all, so it matched "mon" on its own.
+    # resolve_date_window must always resolve the real named date instead.
+    from datetime import date, timedelta
+
+    today = date.today()
+    future_year = today.year if date(today.year, 8, 31) >= today else today.year + 1
+    expected = date(future_year, 8, 31).isoformat()
+
+    assert resolve_date_window("mon aug 31st") == (expected, expected)
+    assert resolve_date_window("mon aug 31") == (expected, expected)
+    assert resolve_date_window("on mon aug 31") == (expected, expected)
+    assert resolve_date_window("monday aug 31") == (expected, expected)
+    assert resolve_date_window("i want to see the doctor on mon aug 31st") == (expected, expected)
+
+
+def test_resolve_date_window_falls_back_to_bare_weekday_when_no_explicit_date_named():
+    assert resolve_date_window("show me his slots on mon") == resolve_bare_weekday_window("show me his slots on mon")
+
+
+def test_resolve_date_window_none_when_neither_a_weekday_nor_an_explicit_date_is_named():
+    assert resolve_date_window("book a slot for cardiology") is None
 
 
 def test_build_tools_forces_the_resolved_weekday_window_regardless_of_model_args(

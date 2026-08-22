@@ -92,6 +92,7 @@ from app.services.chat_tools import (
     reschedule_appointment_now,
     resolve_bare_weekday_reply,
     resolve_bare_weekday_window,
+    resolve_date_window,
     resolve_explicit_calendar_date,
     resolve_time_of_day_window,
 )
@@ -2024,24 +2025,27 @@ def run_appointment_agent(
             return _cancel_reschedule_cutoff_reply(resolved_appointment, "reschedule")
         if _reschedule_cap_reached(db, ctx, resolved_appointment):
             return _reschedule_cap_reply(resolved_appointment)
-        forced_window = resolve_bare_weekday_window(message)
+        # Reported live: "mon aug 31st" (a weekday name attached to an explicit
+        # calendar date) used to hit the bare-weekday branch first — the old
+        # code assumed forced_window (bare weekday) and an explicit date were
+        # "mutually exclusive ways of naming a day," but resolve_bare_weekday_
+        # window has no awareness of a following month/day at all, so it
+        # matched "mon" and produced the nearest upcoming Monday from TODAY
+        # regardless of "aug 31" sitting right next to it — wrongly refusing
+        # (or wrongly allowing) the reschedule based on the WRONG Monday.
+        # Explicit date is now checked first, unconditionally, exactly like
+        # resolve_date_window's own priority ordering.
         appointment_date = _appointment_local_date(db, ctx, resolved_appointment)
-        if forced_window is not None and appointment_date is not None:
-            requested_start = date.fromisoformat(forced_window[0])
-            requested_end = date.fromisoformat(forced_window[1])
-            if not (requested_start <= appointment_date <= requested_end):
+        explicit_date = resolve_explicit_calendar_date(message)
+        if explicit_date is not None and appointment_date is not None:
+            if date.fromisoformat(explicit_date) != appointment_date:
                 return _reschedule_different_day_reply(resolved_appointment)
         elif appointment_date is not None:
-            # forced_window covers a bare WEEKDAY NAME only — "reschedule to
-            # august 26th"/"wed 26 aug" (an explicit calendar date, no weekday
-            # word) and "reschedule to a different day" (no date at all) both
-            # fell through that check entirely. Checked as a separate elif (not
-            # folded into the block above) since forced_window and an explicit
-            # date are mutually exclusive ways of naming a day — never both at
-            # once for the same message.
-            explicit_date = resolve_explicit_calendar_date(message)
-            if explicit_date is not None:
-                if date.fromisoformat(explicit_date) != appointment_date:
+            forced_window = resolve_bare_weekday_window(message)
+            if forced_window is not None:
+                requested_start = date.fromisoformat(forced_window[0])
+                requested_end = date.fromisoformat(forced_window[1])
+                if not (requested_start <= appointment_date <= requested_end):
                     return _reschedule_different_day_reply(resolved_appointment)
             elif _message_asks_for_a_different_day_vaguely(message):
                 return _reschedule_different_day_reply(resolved_appointment)
@@ -2479,11 +2483,12 @@ def run_appointment_agent(
             or confirmed_via_affirmative
         )
     ):
-        # Reuses the same bare-weekday resolution the LLM tool path relies on
-        # (see resolve_bare_weekday_window's own docstring) — "is he available
-        # on mon?" must be checked against Monday specifically, not just
-        # whatever slots happen to be earliest.
-        forced_window = resolve_bare_weekday_window(message)
+        # Reuses the same date resolution the LLM tool path relies on (see
+        # resolve_date_window's own docstring) — "is he available on mon?" must
+        # be checked against Monday specifically, not just whatever slots
+        # happen to be earliest, and "is he available on mon aug 31" must
+        # resolve the real Aug 31 rather than the nearest upcoming Monday.
+        forced_window = resolve_date_window(message)
         earliest_date = date.fromisoformat(forced_window[0]) if forced_window else None
         latest_date = date.fromisoformat(forced_window[1]) if forced_window else None
         # Reported live: "only show me available slots of dr farhan rehman
@@ -2559,7 +2564,7 @@ def run_appointment_agent(
         else None
     )
 
-    forced_date_window = resolve_bare_weekday_window(message)
+    forced_date_window = resolve_date_window(message)
     forced_time_window = resolve_time_of_day_window(message)
 
     # Reported live (twice): "book with Dr. X at 3pm" -> confirm question -> an

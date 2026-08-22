@@ -41,7 +41,7 @@ from app.services.chat_tools import (
     _get_department_availability_impl,
     build_tools,
     combine_department_availability_results,
-    resolve_bare_weekday_window,
+    resolve_date_window,
     resolve_time_of_day_window,
 )
 from app.services.department_availability import list_active_department_names
@@ -926,7 +926,7 @@ def _run_symptom_agent_body(
     if stated_blood_sugar is not None:
         system_prompt += _BLOOD_SUGAR_SEVERITY_INSTRUCTION
 
-    forced_date_window = resolve_bare_weekday_window(message)
+    forced_date_window = resolve_date_window(message)
     forced_time_window = resolve_time_of_day_window(message)
     tools = [
         t

@@ -333,6 +333,25 @@ def resolve_explicit_calendar_date(message: str) -> str | None:
     return candidate.isoformat()
 
 
+# Reported live: "mon aug 31st" (a weekday name attached to an explicit calendar
+# date) got resolved to the nearest upcoming Monday from TODAY, silently ignoring
+# "aug 31" entirely — several call sites called resolve_bare_weekday_window
+# directly on its own, on the assumption (stated in that function's own docstring
+# and _resolve_date_and_time_window's below) that a bare weekday name and an
+# explicit date are "mutually exclusive phrasings" for the same message. That
+# assumption is false: resolve_bare_weekday_window has no awareness of a
+# following month/day at all, so it happily matches "mon" even when "aug 31"
+# is sitting right next to it. This is the single shared, correctly-ordered
+# resolver every date-resolving call site should use instead of calling
+# resolve_bare_weekday_window on its own — an explicit calendar date always
+# wins over a bare weekday name when a message somehow contains both.
+def resolve_date_window(message: str) -> tuple[str, str] | None:
+    explicit_date = resolve_explicit_calendar_date(message)
+    if explicit_date is not None:
+        return explicit_date, explicit_date
+    return resolve_bare_weekday_window(message)
+
+
 # Reported live: "only show me available slots of dr farhan rehman after 12 pm
 # on monday" and its follow-up "show me his available slots after 12 pm" both
 # silently ignored the time-of-day request and returned the same top-5-

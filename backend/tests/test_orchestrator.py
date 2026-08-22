@@ -3958,6 +3958,47 @@ def test_run_appointment_agent_refuses_a_reschedule_naming_an_explicit_different
     assert "cancel" in result.lower()
 
 
+def test_run_appointment_agent_reschedule_uses_the_explicit_date_not_a_wrong_weekday_guess(
+    monkeypatch, db, ctx, clinic, department, doctor, patient
+):
+    # Reported live: "mon aug 31st" (a weekday name attached to an explicit
+    # calendar date) got resolved to the nearest upcoming Monday from TODAY,
+    # completely ignoring "aug 31" — if the appointment's own real day happens
+    # to be a DIFFERENT weekday than whatever "mon" resolves to on its own, the
+    # reschedule request gets wrongly REFUSED as "a different day" even though
+    # the explicit date named is the appointment's own real day. Deliberately
+    # names a weekday word that does NOT match the appointment's real weekday
+    # (so the old bare-weekday-only check would have picked the wrong date),
+    # paired with the appointment's own correct day+month — the reschedule must
+    # go through, not get refused.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.appointment import Appointment
+    from app.models.slot import Slot
+
+    appt_start = datetime.now(timezone.utc) + timedelta(days=10)
+    slot = Slot(clinic_id=clinic.id, doctor_id=doctor.id, start_utc=appt_start, end_utc=appt_start + timedelta(minutes=30))
+    db.add(slot)
+    db.flush()
+    db.add(Appointment(clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id, status="confirmed"))
+    db.flush()
+
+    weekday_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    wrong_weekday_name = weekday_names[(appt_start.weekday() + 1) % 7]
+    month_name = appt_start.strftime("%B").lower()
+
+    def fake_get_department_availability(*args, **kwargs):
+        return SimpleNamespace(doctors=[], next_available_when=None)
+
+    monkeypatch.setattr(appointment_agent, "get_department_availability", fake_get_department_availability)
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, f"reschedule my appointment to {wrong_weekday_name} {appt_start.day} {month_name}", "en", []
+    )
+
+    assert "same day" not in result.lower()
+
+
 def test_run_appointment_agent_refuses_a_reschedule_naming_a_different_day_vaguely(
     monkeypatch, db, ctx, clinic, department, doctor, patient
 ):
