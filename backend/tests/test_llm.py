@@ -874,8 +874,18 @@ def test_agent_prompt_instructs_a_separate_symptom_specific_note_per_department(
     # as if one ambiguous symptom was being hedged across two departments instead of
     # two different symptoms each being explained on their own terms.
     prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
-    assert "Each call gets its OWN `note` naming the SPECIFIC symptom it's for" in prompt
-    assert "never the TIE phrasing" in prompt
+    assert "Frame this as PRIMARY vs SEPARATE" in prompt
+    assert "never the identical TIE phrasing" in prompt
+
+
+def test_agent_prompt_forbids_inventing_a_symptom_not_actually_described():
+    # Reported live: a patient describing ONLY chest pain and sweating got a
+    # second department (General Medicine) with a note reading "Based on the
+    # fever/body aches described" — neither was ever mentioned; the second
+    # department and its justification were entirely fabricated.
+    prompt = llm._AGENT_SYSTEM_PROMPT + llm._TRIAGE_SECTION
+    assert "NEVER INVENT A SYMPTOM THE PATIENT DIDN'T ACTUALLY DESCRIBE" in prompt
+    assert "fever/body aches" in prompt
 
 
 # current-date injection into an agent's system prompt is now tested via
