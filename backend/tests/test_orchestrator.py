@@ -5212,6 +5212,82 @@ def test_run_appointment_agent_who_is_a_real_doctor_mid_conversation_answers_ide
     assert DOCTOR_OPTIONS_MARKER not in result
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        # Reported live: neither of these matched the old "who's"/"who is"-only
+        # regex, so both fell through to the availability short-circuit and
+        # showed a slot card for what was plainly an identity question.
+        "whos dr ahmed farooq",
+        "tell me something about dr ahmed farooq",
+        "tell me about dr ahmed farooq",
+    ],
+)
+def test_run_appointment_agent_recognizes_whos_and_tell_me_about_as_an_identity_question(
+    monkeypatch, db, ctx, clinic, department, message
+):
+    from app.models.doctor import Doctor
+
+    doc = Doctor(
+        clinic_id=clinic.id, department_id=department.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Ahmed Farooq", specialization="Interventional Cardiology", is_active=True,
+    )
+    db.add(doc)
+    db.flush()
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM for a real-doctor identity answer")),
+    )
+    monkeypatch.setattr(
+        appointment_agent, "get_department_availability",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not fetch availability for a plain identity question")),
+    )
+
+    result = appointment_agent.run_appointment_agent(db, ctx, message, "en", [])
+
+    assert "Ahmed Farooq" in result
+    assert "Cardiology" in result
+    assert DOCTOR_OPTIONS_MARKER not in result
+
+
+def test_run_appointment_agent_confirming_a_doctor_via_yes_still_answers_the_originally_asked_identity_question(
+    monkeypatch, db, ctx, clinic, department
+):
+    # Reported live: "tell me something about dr iqra raza" -> "Did you mean Dr.
+    # Iqra Raza in ENT?" -> "yes" — confirmed_via_affirmative correctly recovers
+    # the DOCTOR from that first message, but the IDENTITY-QUESTION intent named
+    # in that same first message was dropped: _message_asks_who_is_a_doctor("yes")
+    # is naturally False, so the old code fell through to the availability
+    # short-circuit and showed a slot card instead of the identity answer.
+    from app.models.doctor import Doctor
+
+    doc = Doctor(
+        clinic_id=clinic.id, department_id=department.id, external_doctor_id=f"DOC-{uuid.uuid4().hex[:8]}",
+        full_name="Dr. Iqra Raza", specialization="Head & Neck Surgery", is_active=True,
+    )
+    db.add(doc)
+    db.flush()
+
+    monkeypatch.setattr(
+        appointment_agent.llm, "run_tool_calling_agent",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not reach the LLM for a real-doctor identity answer")),
+    )
+    monkeypatch.setattr(
+        appointment_agent, "get_department_availability",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not fetch availability for a plain identity question")),
+    )
+
+    history = [
+        _row("user", "tell me something about dr iqra raza"),
+        _row("assistant", "Did you mean Dr. Iqra Raza in ENT?"),
+    ]
+    result = appointment_agent.run_appointment_agent(db, ctx, "yes", "en", history)
+
+    assert "Iqra Raza" in result
+    assert DOCTOR_OPTIONS_MARKER not in result
+
+
 def test_run_appointment_agent_who_is_a_made_up_doctor_says_it_doesnt_know(monkeypatch, db, ctx):
     monkeypatch.setattr(
         appointment_agent.llm, "run_tool_calling_agent",

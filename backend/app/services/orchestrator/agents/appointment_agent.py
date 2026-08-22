@@ -338,7 +338,15 @@ def _message_is_a_capability_question(message: str) -> bool:
 # everywhere else): a genuine doctor gets a real info answer + booking offer,
 # a made-up name gets an honest "I don't know who that is" instead of ever
 # resolving to a department/slots card for a person who doesn't exist.
-_WHO_IS_DOCTOR_RE = re.compile(r"\bwho(?:'s|\s+is)\b", re.IGNORECASE)
+# "whos" (dropped apostrophe, collapsed into one word — a very common typo, not
+# just "who is"/"who's") and "tell me (something/more) about X" are reported-live
+# gaps in the exact same shape: "whos dr iqra raza" and "tell me something about
+# dr iqra raza" both fell through this check (matching neither "who's" nor "who
+# is") and reached the availability short-circuit below, showing a slot card for
+# what was plainly an identity question.
+_WHO_IS_DOCTOR_RE = re.compile(
+    r"\bwho(?:'s|\s+is)\b|\bwhos\b|\btell me (?:something |more )?about\b", re.IGNORECASE
+)
 
 
 def _message_asks_who_is_a_doctor(message: str) -> bool:
@@ -2305,7 +2313,20 @@ def run_appointment_agent(
     # wording); this only needs to cover the real-doctor case, since
     # resolved_match can also come from pronoun recovery/an affirmative
     # confirmation further above, not just a direct name match this turn.
-    if resolved_appointment is None and resolved_match is not None and _message_asks_who_is_a_doctor(message):
+    #
+    # Reported live: "tell me something about dr iqra raza" -> "Did you mean Dr.
+    # Iqra Raza in ENT?" -> "yes" — confirmed_via_affirmative correctly recovers
+    # the DOCTOR from that first message, but "yes" itself asks nothing, so
+    # _message_asks_who_is_a_doctor("yes") was always False and this fell
+    # through to the availability short-circuit below, showing a slot card
+    # instead of the identity answer the patient actually asked for. Same
+    # "recover intent from the message that triggered the confirmation" pattern
+    # already used for the date/time recovery above.
+    identity_question = _message_asks_who_is_a_doctor(message)
+    if not identity_question and confirmed_via_affirmative:
+        prior_message = _most_recent_user_message(history)
+        identity_question = prior_message is not None and _message_asks_who_is_a_doctor(prior_message)
+    if resolved_appointment is None and resolved_match is not None and identity_question:
         return _doctor_identity_reply(resolved_match)
 
     # Requested: a time was given with no day at all ("room 305 please" could
