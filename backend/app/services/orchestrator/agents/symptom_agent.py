@@ -501,24 +501,6 @@ def _departments_named_in_note_but_not_covered(
 # department against what the patient's own symptoms actually support.
 
 
-def _session_had_an_earlier_emergency_flag(history: list[ConversationMemory]) -> bool:
-    """True when some earlier assistant turn THIS session was a genuine
-    emergency reply — either the deterministic red_flag.py guard (persisted
-    as ConversationMemory.red_flag=True by app.services.chat) or this agent's
-    own PATH 1 determination (not separately persisted as red_flag today, so
-    also checked via _looks_like_a_valid_emergency_reply's "1122" signature —
-    the one thing every PATH 1 reply contains and nothing else in this
-    prompt ever produces, per that function's own comment)."""
-    for row in history:
-        if getattr(row, "role", None) != "assistant":
-            continue
-        if getattr(row, "red_flag", False):
-            return True
-        if _looks_like_a_valid_emergency_reply(getattr(row, "content", "") or ""):
-            return True
-    return False
-
-
 # Reported live: a patient described a headache as "very severe" (a real PATH 1
 # emergency reply, twice — once initially, once again after they said "but i
 # dont wana goto er"), then said "no no its not severe its mild" — the very
@@ -538,12 +520,64 @@ _EMERGENCY_DOWNGRADE_SAFETY_NOTE = (
 )
 
 
-def _append_emergency_downgrade_safety_note(reply: str, history: list[ConversationMemory]) -> str:
+# Reported live: a genuine emergency flag for SEVERE STOMACH pain correctly attached
+# the downgrade note to the immediate stomach-pain follow-ups — but then kept
+# attaching to completely unrelated LATER symptoms in the same session (a fresh mild
+# headache, then a fresh chest-pain report) that were never themselves described as
+# severe at all. _session_had_an_earlier_emergency_flag only checks "did ANY
+# emergency reply happen anywhere in this session," with no concept of the patient
+# having moved on to a different complaint entirely.
+#
+# _introduces_a_new_symptom_category (used elsewhere in this file) can't be reused
+# as-is here: it diffs DEPARTMENT names, and headache/stomach both hint "General
+# Medicine" at a clinic with no separate Neurology/Gastro department, so a
+# department-name diff sees no change at all between them. Diffing the symptom
+# LABEL instead ("head pain" vs "stomach symptoms" vs "chest pain") correctly tells
+# these apart even when they'd route to the very same real department.
+def _message_introduces_a_new_symptom_label(
+    message: str, history: list[ConversationMemory], department_names: list[str]
+) -> bool:
+    if _preceding_assistant_turn_asked_a_screening_question(history):
+        return False
+    prior_labels = set(departments_hinted_by_patient_symptom_words("", history, department_names, set()).values())
+    message_labels = set(departments_hinted_by_patient_symptom_words(message, [], department_names, set()).values())
+    return bool(message_labels - prior_labels)
+
+
+def _session_had_an_earlier_emergency_flag_for_the_current_symptom(
+    message: str, history: list[ConversationMemory], department_names: list[str]
+) -> bool:
+    """Same underlying signal as _session_had_an_earlier_emergency_flag, but scoped
+    to the CURRENT symptom episode only — the flag is cleared the moment a genuinely
+    new symptom label is introduced (by the patient, unprompted), same as how
+    _introduces_a_new_symptom_category tracks a fresh complaint elsewhere in this
+    file, just comparing symptom labels rather than department names (see comment
+    above)."""
+    running_history: list[ConversationMemory] = []
+    saw_emergency = False
+    for row in history:
+        role = getattr(row, "role", None)
+        content = getattr(row, "content", "") or ""
+        if role == "user":
+            if saw_emergency and _message_introduces_a_new_symptom_label(content, running_history, department_names):
+                saw_emergency = False
+        elif role == "assistant":
+            if getattr(row, "red_flag", False) or _looks_like_a_valid_emergency_reply(content):
+                saw_emergency = True
+        running_history.append(row)
+    if saw_emergency and _message_introduces_a_new_symptom_label(message, history, department_names):
+        saw_emergency = False
+    return saw_emergency
+
+
+def _append_emergency_downgrade_safety_note(
+    reply: str, message: str, history: list[ConversationMemory], department_names: list[str]
+) -> str:
     if _looks_like_a_valid_emergency_reply(reply):
         # This reply IS itself a fresh PATH 1 emergency reply — nothing to
         # append, the emergency is already being addressed head-on.
         return reply
-    if not _session_had_an_earlier_emergency_flag(history):
+    if not _session_had_an_earlier_emergency_flag_for_the_current_symptom(message, history, department_names):
         return reply
     if reply.startswith(DOCTOR_OPTIONS_MARKER):
         payload = json.loads(reply[len(DOCTOR_OPTIONS_MARKER):])
@@ -566,8 +600,9 @@ def run_symptom_agent(
     language: str,
     history: list[ConversationMemory],
 ) -> str:
+    department_names = list_active_department_names(db, ctx.clinic_id)
     return _append_emergency_downgrade_safety_note(
-        _run_symptom_agent_body(db, ctx, message, language, history), history
+        _run_symptom_agent_body(db, ctx, message, language, history), message, history, department_names
     )
 
 

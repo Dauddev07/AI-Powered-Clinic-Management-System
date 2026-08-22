@@ -1019,7 +1019,9 @@ def test_append_emergency_downgrade_safety_note_adds_note_to_a_doctor_options_ca
         {"department_name": "General Medicine", "note": "Based on the head pain described, General Medicine would be appropriate.", "doctors": []}
     )
 
-    result = symptom_agent._append_emergency_downgrade_safety_note(reply, history)
+    result = symptom_agent._append_emergency_downgrade_safety_note(
+        reply, "3 days, no other symptoms", history, ["General Medicine"]
+    )
 
     assert result.startswith(DOCTOR_OPTIONS_MARKER)
     payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
@@ -1034,7 +1036,9 @@ def test_append_emergency_downgrade_safety_note_adds_note_to_plain_text_reply():
         _row("assistant", "This sounds like an emergency. Call 1122 right away or go to the nearest ER."),
     ]
 
-    result = symptom_agent._append_emergency_downgrade_safety_note("Please describe your symptoms further.", history)
+    result = symptom_agent._append_emergency_downgrade_safety_note(
+        "Please describe your symptoms further.", "its mild now", history, ["General Medicine"]
+    )
 
     assert "Please describe your symptoms further." in result
     assert "seek emergency care immediately" in result
@@ -1052,7 +1056,7 @@ def test_append_emergency_downgrade_safety_note_no_note_when_no_earlier_emergenc
         {"department_name": "General Medicine", "note": "General Medicine would be appropriate.", "doctors": []}
     )
 
-    result = symptom_agent._append_emergency_downgrade_safety_note(reply, history)
+    result = symptom_agent._append_emergency_downgrade_safety_note(reply, "ok", history, ["General Medicine"])
 
     payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
     assert payload["note"] == "General Medicine would be appropriate."
@@ -1067,7 +1071,9 @@ def test_append_emergency_downgrade_safety_note_skips_a_fresh_emergency_reply():
     ]
     fresh_emergency_reply = "This sounds like an emergency. Call 1122 right away or go to the nearest ER."
 
-    result = symptom_agent._append_emergency_downgrade_safety_note(fresh_emergency_reply, history)
+    result = symptom_agent._append_emergency_downgrade_safety_note(
+        fresh_emergency_reply, "still severe headache", history, ["General Medicine"]
+    )
 
     assert result == fresh_emergency_reply
 
@@ -1087,10 +1093,62 @@ def test_append_emergency_downgrade_safety_note_triggers_on_the_persisted_red_fl
         {"department_name": "General Medicine", "note": "General Medicine would be appropriate.", "doctors": []}
     )
 
-    result = symptom_agent._append_emergency_downgrade_safety_note(reply, history)
+    result = symptom_agent._append_emergency_downgrade_safety_note(
+        reply, "just mild breathing trouble now", history, ["General Medicine"]
+    )
 
     payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
     assert "seek emergency care immediately" in payload["note"]
+
+
+def test_append_emergency_downgrade_safety_note_does_not_follow_the_patient_into_an_unrelated_new_symptom():
+    # Reported live, full transcript: SEVERE stomach pain -> PATH 1 emergency reply
+    # -> "its not severe" (stomach pain again) -> correctly got the downgrade note
+    # -> "i am having mild headache" (a genuinely NEW, unrelated complaint) -> still
+    # got the note attached, even though the headache itself was never described as
+    # severe at all. The note must not survive past the symptom episode it belongs
+    # to — "head pain" is a different symptom label than "stomach symptoms" even
+    # though both hint the same real "General Medicine" department at this clinic
+    # (no separate Neurology/Gastro department), which is exactly why the department-
+    # name-based _introduces_a_new_symptom_category check alone can't be reused here.
+    history = [
+        _row("user", "i am having pain in stomach,and my pain is severe"),
+        _row(
+            "assistant",
+            "This sounds like an emergency; please call 1122 or go to the nearest ER right away.\n\n1) Stay seated...",
+        ),
+        _row("user", "i am having pain in stomach,and my pain is not severe"),
+        _row(
+            "assistant",
+            "Got it. Could you tell me how long the stomach pain has been lasting and whether you've "
+            "noticed any other signs such as fever, vomiting, diarrhea, or blood in the stool?\n\nEarlier "
+            "in this conversation this was described as very severe. If it becomes that severe again, or "
+            "you notice any concerning new symptoms, please seek emergency care immediately.",
+        ),
+        _row("user", "nothing as such..its only pain in stomach just"),
+        _row(
+            "assistant",
+            DOCTOR_OPTIONS_MARKER
+            + json.dumps(
+                {
+                    "department_name": "General Medicine",
+                    "note": "Based on your description of mild stomach pain likely related to food, General "
+                    "Medicine would be appropriate for evaluation. Earlier in this conversation this was "
+                    "described as very severe. If it becomes that severe again, or you notice any concerning "
+                    "new symptoms, please seek emergency care immediately.",
+                    "doctors": [],
+                }
+            ),
+        ),
+    ]
+    reply = "Can you let me know how long you've been experiencing the headache and if it's accompanied by any other signs such as nausea, visual changes, sensitivity to light, or fever?"
+
+    result = symptom_agent._append_emergency_downgrade_safety_note(
+        reply, "i am having mild headache", history, ["General Medicine"]
+    )
+
+    assert result == reply
+    assert "described as very severe" not in result
 
 
 def test_run_symptom_agent_fetches_a_second_department_named_in_the_note_but_never_queried(
