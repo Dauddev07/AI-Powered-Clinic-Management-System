@@ -1548,6 +1548,47 @@ def test_run_symptom_agent_does_not_add_a_second_department_for_a_differentiator
     assert payload["department_name"] == "ENT"
 
 
+def test_run_symptom_agent_does_not_add_a_second_department_for_a_differentiator_answered_several_turns_back(
+    monkeypatch, db, ctx, clinic
+):
+    # Reported live, 2nd instance of the same bug: the first fix only excluded
+    # the CURRENT message's own words when IT was answering a screening
+    # question — "sore throat" -> "fever/swallowing/swollen glands?" -> "yes a
+    # bit of fever" -> "cough or runny nose?" -> "yes a runny nose" still pulled
+    # in General Medicine, because "fever" came from an EARLIER differentiator
+    # answer still sitting in history by the time the final reply is composed.
+    # Every differentiator answer in the whole conversation must be excluded,
+    # not just the most recent one.
+    _make_dept_with_slot(db, clinic, "ENT")
+    _make_dept_with_slot(db, clinic, "General Medicine")
+
+    ent_card = DOCTOR_OPTIONS_MARKER + json.dumps(
+        {
+            "department_name": "ENT",
+            "note": "Based on your mild sore throat, fever, and runny nose, an ENT appointment would be appropriate.",
+            "doctors": [{"doctor_id": "d1", "doctor_name": "Dr. ENT", "specialization": None, "slots": []}],
+        }
+    )
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: ent_card)
+
+    history = [
+        _row("user", "i am having sore throat"),
+        _row(
+            "assistant",
+            "Could you tell me how severe this is (mild, moderate, or severe) and how long you've had it?",
+        ),
+        _row("user", "its mild and since 5 days"),
+        _row("assistant", "Do you have any fever, difficulty swallowing, or swollen glands?"),
+        _row("user", "yes a bit of fever as well"),
+        _row("assistant", "Do you have any cough or runny nose?"),
+    ]
+    result = symptom_agent.run_symptom_agent(db, ctx, "yes a runny nose", "en", history)
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    assert payload["department_name"] == "ENT"
+
+
 def test_run_symptom_agent_still_adds_a_department_for_fever_raised_as_its_own_complaint(
     monkeypatch, db, ctx, clinic
 ):
@@ -3802,6 +3843,157 @@ def test_run_appointment_agent_answers_most_recent_cancelled_appointment_from_re
     tz = appointment_agent._clinic_timezone(db, ctx.clinic_id)
     assert _format_when(later_slot.start_utc, tz) in result
     assert _format_when(sooner_slot.start_utc, tz) not in result
+
+
+# --- rebooking a cancelled appointment ("book it again") -----------------------------
+
+
+def test_run_appointment_agent_rebook_says_none_on_record_when_nothing_was_ever_cancelled(
+    monkeypatch, db, ctx
+):
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for a deterministic rebook reply")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "book it again for me", "en", [])
+
+    assert "don't see a recently cancelled appointment" in result.lower()
+
+
+def test_run_appointment_agent_rebook_says_already_active_when_patient_already_has_one(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.appointment import Appointment
+    from app.models.slot import Slot
+
+    cancelled_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    )
+    db.add(cancelled_slot)
+    db.flush()
+    cancelled_appt = Appointment(
+        clinic_id=clinic.id, slot_id=cancelled_slot.id, patient_id=patient.id, doctor_id=doctor.id,
+        status="cancelled", cancelled_at=datetime.now(timezone.utc),
+    )
+    db.add(cancelled_appt)
+    db.flush()
+
+    # Patient already has a real, active appointment with the SAME doctor —
+    # e.g. rebooked separately already.
+    active_appt = _future_appointment(db, clinic, patient, doctor, days_from_now=3)
+    active_slot = db.get(Slot, active_appt.slot_id)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for a deterministic rebook reply")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "i cancelled my appointment by mistake, book it again for me", "en", []
+    )
+
+    from app.services.chat_tools import _format_when
+
+    tz = appointment_agent._clinic_timezone(db, ctx.clinic_id)
+    assert "already have an upcoming appointment" in result.lower()
+    assert doctor.full_name in result
+    assert _format_when(active_slot.start_utc, tz) in result
+
+
+def test_run_appointment_agent_rebook_asks_to_confirm_the_same_slot_when_still_open(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.appointment import Appointment
+    from app.models.slot import Slot
+
+    # Cancelling reopens the slot (booking_engine.cancel_appointment) — still
+    # open and still in the future here, so the exact same slot can be offered.
+    slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="open",
+    )
+    db.add(slot)
+    db.flush()
+    appt = Appointment(
+        clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id,
+        status="cancelled", cancelled_at=datetime.now(timezone.utc),
+    )
+    db.add(appt)
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for a deterministic rebook confirmation")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    result = appointment_agent.run_appointment_agent(
+        db, ctx, "i cancelled my prev appointment by mistake, book it again for me", "en", []
+    )
+
+    assert result.startswith(DOCTOR_DISAMBIGUATION_MARKER)
+    payload = json.loads(result[len(DOCTOR_DISAMBIGUATION_MARKER):])
+    assert payload["kind"] == "book_confirm"
+    assert payload["candidate"]["slot_id"] == str(slot.id)
+
+    # And confirming with a bare "yes" actually books it, same as any other
+    # book_confirm flow.
+    history = [_row("assistant", result)]
+    confirm_result = appointment_agent.run_appointment_agent(db, ctx, "yes", "en", history)
+    db.refresh(slot)
+    assert slot.status == "booked"
+    assert "confirmed" in confirm_result.lower()
+
+
+def test_run_appointment_agent_rebook_says_no_longer_available_when_slot_is_gone(
+    monkeypatch, db, ctx, clinic, doctor, patient
+):
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.appointment import Appointment
+    from app.models.slot import Slot
+
+    # The original slot is now BOOKED (taken by someone else since the
+    # cancellation) — must not offer to rebook it.
+    slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=1),
+        end_utc=datetime.now(timezone.utc) + timedelta(days=1, minutes=30),
+        status="booked",
+    )
+    db.add(slot)
+    db.flush()
+    appt = Appointment(
+        clinic_id=clinic.id, slot_id=slot.id, patient_id=patient.id, doctor_id=doctor.id,
+        status="cancelled", cancelled_at=datetime.now(timezone.utc),
+    )
+    db.add(appt)
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be called for a deterministic rebook reply")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "please rebook my appointment", "en", [])
+
+    assert "isn't available anymore" in result.lower()
+    assert doctor.full_name in result
+
+
+def test_run_appointment_agent_rebook_intent_does_not_misfire_on_a_plain_cancel_request(monkeypatch, db, ctx):
+    # Guard against being too broad: a plain "cancel my appointment" (no "book"
+    # word anywhere) must be completely unaffected.
+    assert appointment_agent._message_asks_to_rebook_a_cancelled_appointment("cancel my appointment") is False
 
 
 def test_run_appointment_agent_answers_earliest_cancelled_appointment_from_real_db(

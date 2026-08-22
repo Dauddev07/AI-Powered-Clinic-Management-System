@@ -90,6 +90,7 @@ from app.services.chat_tools import (
     ensure_slot_pick_example_has_a_date,
     get_slot_summary,
     list_upcoming_appointments,
+    most_recently_cancelled_appointment,
     reschedule_appointment_now,
     resolve_bare_weekday_reply,
     resolve_bare_weekday_window,
@@ -1302,6 +1303,80 @@ def _most_recent_appointment_by_status_reply(
     return sentence
 
 
+# Requested: "i cancelled my prev appointment by mistake, book it again for me" —
+# reported live, this got read as a fresh CANCEL request instead: "cancelled" is a
+# past-tense match for _CANCEL_ACTION_WORDS, and _detect_action_intent checks the
+# cancel vocabulary before ever considering "book" at all, so the patient's actual
+# ask (rebook) was completely inverted into "Just to confirm — you'd like to
+# cancel...?" for an appointment already cancelled. Checked BEFORE the normal
+# action-word detection below specifically so this narrative-plus-book-request
+# shape never reaches that misreading in the first place.
+_REBOOK_INTENT_RE = re.compile(
+    r"\brebook\w*\b"
+    r"|\bbook\b.{0,20}\b(?:it|that|this|the same(?:\s+(?:slot|appointment|one))?)\b.{0,10}\bagain\b"
+    r"|\bbook\b.{0,15}\bagain\b",
+    re.IGNORECASE,
+)
+_MISTAKEN_CANCELLATION_RE = re.compile(
+    r"\bcancel+(?:l?ed|lation)\b.{0,30}\bby mistake\b"
+    r"|\baccidentally\b.{0,20}\bcancel+(?:l?ed|lation)\b"
+    r"|\bcancel+(?:l?ed|lation)\b.{0,20}\baccidentally\b",
+    re.IGNORECASE,
+)
+
+
+def _message_asks_to_rebook_a_cancelled_appointment(message: str) -> bool:
+    if _REBOOK_INTENT_RE.search(message):
+        return True
+    return bool(_MISTAKEN_CANCELLATION_RE.search(message) and re.search(r"\bbook\b", message, re.IGNORECASE))
+
+
+def _rebook_cancelled_appointment_reply(db: Session, ctx: ClinicContext, message: str) -> str:
+    """Deterministic, DB-grounded handling for "book my cancelled appointment
+    again" — never left to the model to freehand a doctor/time from history
+    (see this module's own recurring principle). Three real outcomes, matching
+    the request this closes:
+    1. No cancelled appointment on record at all -> say so plainly and ask who
+       to book with instead, never inventing one.
+    2. The patient already has a real, active (confirmed, upcoming) appointment
+       with that same doctor — maybe from rebooking separately already, or the
+       cancellation itself was superseded — say it's already there rather than
+       booking a duplicate.
+    3. Otherwise, check the ORIGINAL slot's real current status (cancelling
+       reopens it — see booking_engine.cancel_appointment — but it may since
+       have been taken by someone else, or simply passed): still open and
+       still in the future -> ask to confirm rebooking that exact slot, same
+       code-enforced confirm-then-act gate as every other mutating action here
+       (_pending_book_confirmation picks this up on an explicit "yes"). No
+       longer available -> say so plainly and offer to check that doctor's
+       current availability instead, never silently booking a different time.
+    """
+    cancelled = most_recently_cancelled_appointment(db, ctx)
+    if cancelled is None:
+        return "I don't see a recently cancelled appointment on your account. Who would you like to book with instead?"
+
+    active = list_upcoming_appointments(db, ctx)
+    already_active = next((a for a in active if a["doctor_name"] == cancelled["doctor_name"]), None)
+    if already_active is not None:
+        return (
+            f"You already have an upcoming appointment with {already_active['doctor_name']} in "
+            f"{already_active['department_name']} on {already_active['when']} — no need to rebook."
+        )
+
+    slot = db.get(Slot, uuid.UUID(cancelled["slot_id"]))
+    still_bookable = (
+        slot is not None and slot.status == "open" and slot.start_utc > datetime.now(timezone.utc)
+    )
+    if still_bookable:
+        fresh_slot = get_slot_summary(db, ctx.clinic_id, cancelled["slot_id"])
+        return _book_confirmation_reply(fresh_slot)
+
+    return (
+        f"That slot — {cancelled['doctor_name']} in {cancelled['department_name']} on {cancelled['when']} — "
+        "isn't available anymore. Would you like me to show their current availability instead?"
+    )
+
+
 def _doctor_count_note(department_name: str, count: int) -> str:
     """A real, code-computed answer to a "how many doctors" question — never
     left to the model's own note-writing, which live testing showed doesn't
@@ -1882,6 +1957,13 @@ def _run_appointment_agent_body(
     if most_recent_status_query is not None:
         status_filter, oldest_first = most_recent_status_query
         return _most_recent_appointment_by_status_reply(db, ctx, status_filter, oldest_first)
+
+    # Requested: "i cancelled my appointment by mistake, book it again for me" —
+    # checked before the normal action-word detection below, which would
+    # otherwise misread the past-tense "cancelled" mention as a fresh cancel
+    # request (see _message_asks_to_rebook_a_cancelled_appointment's own comment).
+    if _message_asks_to_rebook_a_cancelled_appointment(message):
+        return _rebook_cancelled_appointment_reply(db, ctx, message)
 
     # Reported live: "cancel both of my appointments" (2 active, same doctor) asked
     # "which one would you like to cancel: 9:00 AM, 9:30 AM?" — then "i want to book

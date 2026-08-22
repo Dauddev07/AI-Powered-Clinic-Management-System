@@ -817,6 +817,46 @@ def list_upcoming_appointments(db: Session, ctx: ClinicContext) -> list[dict]:
     return results
 
 
+def most_recently_cancelled_appointment(db: Session, ctx: ClinicContext) -> dict | None:
+    """Requested: "i cancelled my appointment by mistake, book it again for me" —
+    the real, most-recently-cancelled appointment (by cancelled_at, same ordering
+    _get_my_appointments_impl's own "cancelled" filter already uses), or None if
+    there isn't one. Includes slot_id (unlike list_upcoming_appointments' own
+    dicts, which don't need it) — the caller checks whether that exact original
+    Slot row is still open before offering to rebook it, since cancelling reopens
+    the slot (see booking_engine.cancel_appointment) but it may since have been
+    taken by someone else or simply passed."""
+    from sqlalchemy import select
+
+    from app.models.appointment import Appointment
+
+    stmt = (
+        select(Appointment)
+        .join(Slot, Slot.id == Appointment.slot_id)
+        .where(
+            Appointment.clinic_id == ctx.clinic_id,
+            Appointment.patient_id == ctx.user_id,
+            Appointment.status == "cancelled",
+        )
+        .order_by(Appointment.cancelled_at.desc().nullslast(), Slot.start_utc.desc())
+        .limit(1)
+    )
+    appointment = db.execute(stmt).scalars().first()
+    if appointment is None:
+        return None
+    out = booking_engine.serialize_appointment(db, appointment)
+    tz = _clinic_timezone(db, ctx.clinic_id)
+    return {
+        "appointment_id": str(out.id),
+        "slot_id": str(out.slot_id),
+        "doctor_id": str(out.doctor_id),
+        "doctor_name": out.doctor_name,
+        "department_name": out.department_name,
+        "when": _format_when(out.start_utc, tz),
+        "start_utc": out.start_utc.isoformat(),
+    }
+
+
 @traceable(name="get_my_appointments")
 def _get_my_appointments_impl(
     db: Session, ctx: ClinicContext, status_filter: str, limit: int, oldest_first: bool = False

@@ -30,6 +30,7 @@ either dropped paragraph.
 """
 import json
 import re
+from types import SimpleNamespace
 
 from sqlalchemy.orm import Session
 
@@ -1096,14 +1097,32 @@ def _run_symptom_agent_body(
     # distinguishing signal is exactly the one _introduces_a_new_symptom_category
     # already uses for the identical "answering vs volunteering" question:
     # whether the immediately preceding assistant turn was a plain screening
-    # question. When it was, the CURRENT message's own words are excluded from
-    # this hint scan entirely (falls back to history only) — a confirmatory
-    # differentiator answer must never, by itself, justify an additional
-    # department beyond whatever's already being screened.
+    # question.
+    #
+    # Reported live (2nd instance): the first fix here only excluded the CURRENT
+    # message's own words when IT was answering a screening question — but
+    # "sore throat" -> "any fever/swallowing trouble/swollen glands?" -> "yes a
+    # bit of fever" -> "any cough or runny nose?" -> "yes a runny nose" still
+    # pulled General Medicine in, because "fever" came from an EARLIER
+    # differentiator answer still sitting in `history`, which the hint scanner
+    # (departments_hinted_by_patient_symptom_words) always scans regardless of
+    # which turn it came from. This walks the WHOLE history turn by turn and
+    # excludes EVERY user turn that was itself answering a screening question at
+    # the time it was said, not just the current one — a differentiator answered
+    # three turns ago is excluded exactly the same way as one answered just now.
     def _hinted_departments_excluding_a_screening_answer(already_covered: set[str]) -> dict[str, str]:
-        if _preceding_assistant_turn_asked_a_screening_question(history):
-            return departments_hinted_by_patient_symptom_words("", history, department_names, already_covered)
-        return departments_hinted_by_patient_symptom_words(message, history, department_names, already_covered)
+        filtered_history: list[ConversationMemory] = []
+        for index, row in enumerate(history):
+            if getattr(row, "role", None) == "user" and _preceding_assistant_turn_asked_a_screening_question(
+                history[:index]
+            ):
+                filtered_history.append(SimpleNamespace(role="user", content=""))
+            else:
+                filtered_history.append(row)
+        effective_message = "" if _preceding_assistant_turn_asked_a_screening_question(history) else message
+        return departments_hinted_by_patient_symptom_words(
+            effective_message, filtered_history, department_names, already_covered
+        )
 
     if reply.startswith(DOCTOR_OPTIONS_MARKER):
         payload = json.loads(reply[len(DOCTOR_OPTIONS_MARKER):])
