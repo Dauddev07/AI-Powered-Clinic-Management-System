@@ -72,8 +72,16 @@ _INTRO = (
 _DURATION_HINT_RE = re.compile(
     r"\b(day|days|week|weeks|month|months|hour|hours|year|years|since)\b", re.IGNORECASE
 )
+# "frequent"/"constant"/etc. added alongside the mild/moderate/severe words above —
+# how OFTEN a symptom occurs is as much a real severity signal as its intensity
+# (a constant, ever-present pain reads very differently from an occasional twinge),
+# so a message already describing frequency should skip the severity question the
+# same way one already saying "mild"/"severe" does.
 _SEVERITY_HINT_RE = re.compile(
-    r"\b(mild|moderate|severe|bearable|unbearable|sharp|dull|intense|excruciating|slight)\b", re.IGNORECASE
+    r"\b(mild|moderate|severe|bearable|unbearable|sharp|dull|intense|excruciating|slight"
+    r"|frequent|frequently|constant|constantly|persistent|persistently|occasional|occasionally"
+    r"|intermittent|intermittently|recurring|recurrent|on and off|comes and goes)\b",
+    re.IGNORECASE,
 )
 
 

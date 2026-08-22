@@ -1943,6 +1943,36 @@ def test_run_symptom_agent_first_message_backstop_asks_only_severity_when_durati
     assert result == "Got it — and how severe is it (mild, moderate, or severe)?"
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "frequent jaw pain",
+        "i get frequent jaw pain",
+        "constant jaw pain",
+        "persistent jaw pain",
+        "intermittent jaw pain",
+        "occasional jaw pain",
+        "jaw pain that comes and goes",
+    ],
+)
+def test_run_symptom_agent_first_message_backstop_treats_frequency_words_as_severity_given(
+    monkeypatch, db, ctx, clinic, message
+):
+    # How OFTEN a symptom occurs (frequent/constant/persistent/occasional/
+    # intermittent/"comes and goes") is a real severity signal in its own right —
+    # a message already describing frequency, with no duration word, must only be
+    # asked about duration, not re-asked for severity too.
+    _make_dept_with_slot(db, clinic, "Dentistry")
+
+    monkeypatch.setattr(
+        symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Let me check availability for you."
+    )
+
+    result = symptom_agent.run_symptom_agent(db, ctx, message, "en", [])
+
+    assert result == "Got it — and how long have you had it?"
+
+
 @pytest.mark.parametrize("message", ["i have diabetes", "i think i have diabetes"])
 def test_run_symptom_agent_first_message_backstop_skips_self_diagnosis_claims(monkeypatch, db, ctx, clinic, message):
     # Self-diagnosis claims are deliberately excluded from the backstop — asking
