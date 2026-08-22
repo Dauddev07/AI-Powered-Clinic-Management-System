@@ -17,6 +17,27 @@ export function formatClinicDateTime(iso, timeZone) {
   });
 }
 
+// The clinic-local calendar date (YYYY-MM-DD) an ISO instant falls on — used to
+// scope a reschedule slot query to the SAME day as the appointment being moved
+// (the backend only ever allows rescheduling within one calendar day; see
+// booking_engine.py's own same-day-only rule), never the viewer's browser-local
+// date, which could disagree with the clinic's date near a day boundary.
+export function formatClinicDateISO(iso, timeZone) {
+  return new Date(iso).toLocaleDateString("en-CA", { timeZone });
+}
+
+// Human-readable clinic-local date only, no time — e.g. "Sat, Aug 24". Used
+// wherever only the DAY (not a specific time) needs to be shown, such as the
+// same-day-only reschedule notice above formatClinicDateTime's own slot list.
+export function formatClinicDateLabel(iso, timeZone) {
+  return new Date(iso).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone,
+  });
+}
+
 // Browser-local date+time, used for admin-facing timestamps (feedback submitted at,
 // KB document uploaded at, ingestion log entries) where there's no single clinic
 // timezone convention to match against.

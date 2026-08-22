@@ -16,7 +16,11 @@ import { useToast } from "../../components/ToastContext";
 import { useReveal } from "../../hooks/useReveal";
 import { useNow } from "../../hooks/useNow";
 import { isAppointmentInProgress } from "../../utils/appointmentStatus";
-import { formatClinicDateTime as formatDateTime } from "../../utils/formatDateTime";
+import {
+  formatClinicDateISO,
+  formatClinicDateLabel,
+  formatClinicDateTime as formatDateTime,
+} from "../../utils/formatDateTime";
 import styles from "./PatientScreens.module.css";
 
 const STATUS_TONE = {
@@ -71,6 +75,15 @@ export default function UpcomingAppointments() {
   // cancelled rather than a generic "are you sure?" with no specifics.
   const [pendingCancel, setPendingCancel] = useState(null);
   const [cancelError, setCancelError] = useState(null);
+  // Holds { appointment, slot } while the reschedule confirmation modal is open —
+  // mirrors pendingCancel above, added because picking a slot used to reschedule
+  // immediately with no confirmation step at all (unlike cancel and fresh booking,
+  // which both already ask first).
+  const [pendingReschedule, setPendingReschedule] = useState(null);
+  // Kept separate from rescheduleError below (that one is the slot-list panel's
+  // own fetch-failure state) so a failed confirm doesn't also render inside the
+  // panel behind the modal.
+  const [rescheduleConfirmError, setRescheduleConfirmError] = useState(null);
   const [rescheduleTargetId, setRescheduleTargetId] = useState(null);
   const [rescheduleOptions, setRescheduleOptions] = useState([]);
   // True when rescheduleOptions had to fall back to other doctors' soonest slots
@@ -131,11 +144,23 @@ export default function UpcomingAppointments() {
     setRescheduleOptions([]);
     setRescheduleFallback(false);
     try {
+      // Reschedule only ever moves an appointment within the SAME calendar day —
+      // the backend refuses a different-day reschedule outright (see
+      // booking_engine.py's own same-day-only rule) — so the slot query is scoped
+      // to that one clinic-local date from the start, rather than showing every
+      // upcoming day's slots and letting the patient pick one that would just get
+      // rejected on confirm.
+      const sameDay = formatClinicDateISO(appointment.start_utc, clinicTimezone);
+
       // Queried server-side by doctor_id, not filtered client-side out of a
       // generic top-20-slots-clinic-wide batch — that earlier approach could miss
       // real availability days out whenever other departments' sooner slots
       // crowded the doctor's own (later) slots out of the capped batch.
-      const doctorData = await fetchSlots(undefined, { doctorId: appointment.doctor_id });
+      const doctorData = await fetchSlots(undefined, {
+        doctorId: appointment.doctor_id,
+        dateFrom: sameDay,
+        dateTo: sameDay,
+      });
       const sameDoctor = doctorData.slots.filter((s) => s.is_bookable);
       if (sameDoctor.length > 0) {
         setRescheduleOptions(sameDoctor);
@@ -148,7 +173,7 @@ export default function UpcomingAppointments() {
       const departments = await fetchDepartmentsWithSlots();
       const department = departments.find((d) => d.name === appointment.department_name);
       if (department) {
-        const deptData = await fetchSlots(department.id);
+        const deptData = await fetchSlots(department.id, { dateFrom: sameDay, dateTo: sameDay });
         const sameDepartment = deptData.slots.filter((s) => s.is_bookable);
         setRescheduleOptions(sameDepartment);
         setRescheduleFallback(sameDepartment.length > 0);
@@ -162,19 +187,27 @@ export default function UpcomingAppointments() {
 
   const handleReschedule = async (appointmentId, newSlotId) => {
     setBusyId(appointmentId);
-    setRescheduleError(null);
+    setRescheduleConfirmError(null);
     try {
       await rescheduleAppointment(appointmentId, newSlotId);
       showToast("Appointment rescheduled.");
+      setPendingReschedule(null);
       closeReschedule();
       await load();
     } catch (err) {
       // Surfaced verbatim — covers the no-same-day-reschedule refusal and the
-      // daily per-department booking cap, same pattern as the cancel rejection above.
-      setRescheduleError(err instanceof ApiError ? err.detail || err.message : "Reschedule failed.");
+      // daily per-department booking cap, same pattern as the cancel rejection
+      // above. Kept inside the confirmation modal (not the panel behind it),
+      // same reasoning as cancelError above.
+      setRescheduleConfirmError(err instanceof ApiError ? err.detail || err.message : "Reschedule failed.");
     } finally {
       setBusyId(null);
     }
+  };
+
+  const confirmReschedule = () => {
+    if (!pendingReschedule) return;
+    handleReschedule(pendingReschedule.appointment.id, pendingReschedule.slot.id);
   };
 
   return (
@@ -260,15 +293,19 @@ export default function UpcomingAppointments() {
                         <td colSpan={6}>
                           <div className={styles.reschedulePanel}>
                             <h3>Reschedule with {a.doctor_name}</h3>
+                            <p className={styles.subtitle}>
+                              Appointments can only be rescheduled to a different time on the same day — showing
+                              open slots for {formatClinicDateLabel(a.start_utc, clinicTimezone)} only.
+                            </p>
                             {rescheduleLoading && <p className={styles.subtitle}>Loading available slots…</p>}
                             {rescheduleError && <p className={styles.errorText}>{rescheduleError}</p>}
                             {!rescheduleLoading && rescheduleOptions.length === 0 && !rescheduleError && (
-                              <p className={styles.subtitle}>No open slots in {a.department_name} right now.</p>
+                              <p className={styles.subtitle}>No open slots in {a.department_name} on this day.</p>
                             )}
                             {!rescheduleLoading && rescheduleFallback && (
                               <p className={styles.subtitle}>
-                                {a.doctor_name} has nothing open right now — here are the soonest available times
-                                with other {a.department_name} doctors instead:
+                                {a.doctor_name} has nothing open this day — here are other {a.department_name}{" "}
+                                doctors' open times on this same day instead:
                               </p>
                             )}
                             <div className={styles.rescheduleList}>
@@ -281,7 +318,10 @@ export default function UpcomingAppointments() {
                                   <button
                                     type="button"
                                     className={styles.primaryBtn}
-                                    onClick={() => handleReschedule(a.id, slot.id)}
+                                    onClick={() => {
+                                      setRescheduleConfirmError(null);
+                                      setPendingReschedule({ appointment: a, slot });
+                                    }}
                                     disabled={busyId === a.id}
                                   >
                                     Choose
@@ -325,6 +365,43 @@ export default function UpcomingAppointments() {
             disabled={busyId === pendingCancel?.id}
           >
             {busyId === pendingCancel?.id ? "Cancelling…" : "Cancel appointment"}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!pendingReschedule}
+        onClose={() => setPendingReschedule(null)}
+        title="Reschedule appointment"
+      >
+        <p className={styles.modalIntro}>
+          Reschedule your appointment with <strong>{pendingReschedule?.appointment?.doctor_name}</strong> from{" "}
+          <strong>
+            {pendingReschedule ? formatDateTime(pendingReschedule.appointment.start_utc, clinicTimezone) : ""}
+          </strong>{" "}
+          to{" "}
+          <strong>
+            {pendingReschedule ? formatDateTime(pendingReschedule.slot.start_utc, clinicTimezone) : ""}
+          </strong>
+          ?
+        </p>
+        {rescheduleConfirmError && <p className={styles.errorText}>{rescheduleConfirmError}</p>}
+        <div className={styles.modalActions}>
+          <button
+            type="button"
+            className={styles.modalCancelBtn}
+            onClick={() => setPendingReschedule(null)}
+            disabled={busyId === pendingReschedule?.appointment?.id}
+          >
+            Go back
+          </button>
+          <button
+            type="button"
+            className={styles.primaryBtn}
+            onClick={confirmReschedule}
+            disabled={busyId === pendingReschedule?.appointment?.id}
+          >
+            {busyId === pendingReschedule?.appointment?.id ? "Rescheduling…" : "Confirm reschedule"}
           </button>
         </div>
       </Modal>
