@@ -1948,20 +1948,18 @@ def test_run_symptom_agent_first_message_backstop_asks_only_severity_when_durati
     [
         "frequent jaw pain",
         "i get frequent jaw pain",
-        "constant jaw pain",
-        "persistent jaw pain",
-        "intermittent jaw pain",
-        "occasional jaw pain",
-        "jaw pain that comes and goes",
+        "frequently occurring jaw pain",
     ],
 )
-def test_run_symptom_agent_first_message_backstop_treats_frequency_words_as_severity_given(
+def test_run_symptom_agent_first_message_backstop_treats_frequent_as_severity_given(
     monkeypatch, db, ctx, clinic, message
 ):
-    # How OFTEN a symptom occurs (frequent/constant/persistent/occasional/
-    # intermittent/"comes and goes") is a real severity signal in its own right —
-    # a message already describing frequency, with no duration word, must only be
-    # asked about duration, not re-asked for severity too.
+    # "frequent"/"frequently" is a real severity signal in its own right — a
+    # message already describing it as frequent, with no duration word, must
+    # only be asked about duration, not re-asked for severity too. Scoped
+    # narrowly to just this one word family, not every frequency-adjacent word
+    # (constant/persistent/occasional/intermittent/"comes and goes" are
+    # deliberately NOT covered).
     _make_dept_with_slot(db, clinic, "Dentistry")
 
     monkeypatch.setattr(
@@ -1971,6 +1969,30 @@ def test_run_symptom_agent_first_message_backstop_treats_frequency_words_as_seve
     result = symptom_agent.run_symptom_agent(db, ctx, message, "en", [])
 
     assert result == "Got it — and how long have you had it?"
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["constant jaw pain", "persistent jaw pain", "intermittent jaw pain", "occasional jaw pain", "jaw pain that comes and goes"],
+)
+def test_run_symptom_agent_first_message_backstop_does_not_treat_other_frequency_words_as_severity_given(
+    monkeypatch, db, ctx, clinic, message
+):
+    # Deliberately narrow scope guard: only "frequent"/"frequently" counts as an
+    # already-given severity signal, per explicit instruction — other frequency-
+    # adjacent words (constant/persistent/occasional/intermittent/"comes and
+    # goes") must still get the full severity+duration question.
+    _make_dept_with_slot(db, clinic, "Dentistry")
+
+    monkeypatch.setattr(
+        symptom_agent.llm, "run_tool_calling_agent", lambda *a, **k: "Let me check availability for you."
+    )
+
+    result = symptom_agent.run_symptom_agent(db, ctx, message, "en", [])
+
+    assert result == (
+        "Could you tell me how severe this is (mild, moderate, or severe) and how long you've had it?"
+    )
 
 
 @pytest.mark.parametrize("message", ["i have diabetes", "i think i have diabetes"])
