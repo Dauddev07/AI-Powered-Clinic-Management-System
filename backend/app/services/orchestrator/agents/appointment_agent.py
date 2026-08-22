@@ -1836,7 +1836,28 @@ def run_appointment_agent(
             # No cancel/reschedule keyword in THIS message, but it names exactly
             # one real doctor — check whether that action was requested recently
             # rather than assuming this is unrelated to appointments at all.
-            action = _most_recent_action_intent(history)
+            #
+            # Reported live: "show available slots fr dr farhan" (a plain
+            # availability lookup, no action word at all) hit a doctor-name
+            # disambiguation ("did you mean Dr. Farhan Malik, Dr. Farhan Mirza,
+            # Dr. Farhan Rehman?"). Two unrelated general-info turns had happened
+            # earlier, and before those, an actual "cancel my appointment" — so
+            # answering the disambiguation with "rehman" made
+            # _most_recent_action_intent's plain backward scan reach straight
+            # past the disambiguation-triggering message and resurrect that
+            # stale "cancel", producing "You don't have an upcoming appointment
+            # with Dr. Farhan Rehman to cancel" for what was only ever an
+            # availability question. When the pending question is THIS kind of
+            # doctor-name disambiguation, the only action context that can
+            # possibly be correct is whatever the message that triggered IT
+            # asked for — never a broader lookback past it, since that
+            # disambiguation card is itself proof the action (if any) was
+            # already fully determined by that one message.
+            if _pending_doctor_name_disambiguation(history) is not None:
+                triggering_message = _most_recent_user_message(history) or ""
+                action = _detect_action_intent(triggering_message)
+            else:
+                action = _most_recent_action_intent(history)
         if action is not None:
             active = list_upcoming_appointments(db, ctx)
             # Reported live: patient cancelled their appointment with Dr. Hashmi,

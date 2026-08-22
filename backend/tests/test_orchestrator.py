@@ -3056,6 +3056,99 @@ def test_run_appointment_agent_unambiguous_doctor_name_proceeds_to_the_llm(monke
     assert result == "some reply"
 
 
+def test_run_appointment_agent_answering_an_action_free_name_disambiguation_does_not_resurrect_a_stale_cancel(
+    monkeypatch, db, ctx, doctor, other_doctor
+):
+    # Reported live: "cancel my appointment" (confirmation shown) -> two unrelated
+    # general-info turns -> "show available slots fr dr ahmed" (a plain
+    # availability lookup, no action word) -> ambiguous ("did you mean Dr. Ahmed
+    # Khan or Dr. Ahmed Raza?") -> "khan" got answered with "You don't have an
+    # upcoming appointment with Dr. Ahmed Khan to cancel" — _most_recent_action_
+    # intent's plain backward scan reached straight past the two general-info
+    # turns and the action-free disambiguation-triggering message, resurrecting
+    # the stale "cancel" from several turns back. The action context for a reply
+    # to a doctor-name disambiguation must come only from whatever message
+    # triggered THAT disambiguation (here, action-free), never a broader lookback.
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("run_tool_calling_agent must not be reached for a doctor with zero open slots")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    history = [
+        _row("user", "cancel my appointment"),
+        _row("assistant", "Just to confirm — you'd like to cancel your appointment with Dr. Ahmed Khan?"),
+        _row("user", "whats quick check clinic?"),
+        _row("assistant", "Quick Check Clinic is a hospital management system clinic."),
+        _row("user", "where is quick check clinic located?"),
+        _row("assistant", "Quick Check Clinic is located at 123 Main Boulevard."),
+        _row("user", "show available slots fr dr ahmed"),
+        _row(
+            "assistant",
+            DOCTOR_DISAMBIGUATION_MARKER
+            + json.dumps(
+                {
+                    "kind": "doctor_name",
+                    "question": "I found more than one doctor matching that name — did you mean "
+                    "Dr. Ahmed Khan (Cardiology), Dr. Ahmed Raza (Neurology)? Could you tell me which one?",
+                    "candidates": [
+                        {"doctor_name": "Dr. Ahmed Khan", "department_name": "Cardiology"},
+                        {"doctor_name": "Dr. Ahmed Raza", "department_name": "Neurology"},
+                    ],
+                }
+            ),
+        ),
+    ]
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "khan", "en", history)
+
+    # Falls through to the real, deterministic no-slots reply for Dr. Ahmed Khan
+    # (no slot fixture seeded here) — the key assertion is what it must NOT be:
+    # a bogus "you don't have an upcoming appointment...to cancel" resurrecting
+    # the stale action. run_tool_calling_agent must never even be reached for a
+    # doctor with zero open slots (see the deterministic NO_SLOTS_MARKER path).
+    assert "to cancel" not in result.lower()
+    assert "Dr. Ahmed Khan" in result
+
+
+def test_run_appointment_agent_answering_a_cancel_triggered_name_disambiguation_still_cancels(
+    monkeypatch, db, ctx, clinic, patient, doctor, other_doctor
+):
+    # Guard against the fix above being too broad: when the disambiguation-
+    # triggering message DID name a real action ("cancel my appointment with dr
+    # ahmed"), answering the disambiguation must still apply that action —
+    # only an action-FREE triggering message should leave the action as None.
+    appt = _future_appointment(db, clinic, patient, doctor)
+
+    history = [
+        _row(
+            "assistant",
+            DOCTOR_DISAMBIGUATION_MARKER
+            + json.dumps(
+                {
+                    "kind": "doctor_name",
+                    "question": "I found more than one doctor matching that name — did you mean "
+                    "Dr. Ahmed Khan (Cardiology), Dr. Ahmed Raza (Neurology)? Could you tell me which one?",
+                    "candidates": [
+                        {"doctor_name": "Dr. Ahmed Khan", "department_name": "Cardiology"},
+                        {"doctor_name": "Dr. Ahmed Raza", "department_name": "Neurology"},
+                    ],
+                }
+            ),
+        ),
+    ]
+    # The message that produced this disambiguation card is recovered via
+    # _most_recent_user_message, which scans backward for the last user turn —
+    # inject it right before the card above so it's found as the trigger.
+    history.insert(
+        0, _row("user", "cancel my appointment with dr ahmed")
+    )
+
+    result = appointment_agent.run_appointment_agent(db, ctx, "khan", "en", history)
+
+    assert "cancel" in result.lower()
+    assert "Dr. Ahmed Khan" in result
+
+
 def test_run_appointment_agent_tells_the_patient_plainly_when_a_named_doctor_does_not_exist(
     monkeypatch, db, ctx, doctor
 ):
