@@ -2488,7 +2488,21 @@ def run_appointment_agent(
         # be checked against Monday specifically, not just whatever slots
         # happen to be earliest, and "is he available on mon aug 31" must
         # resolve the real Aug 31 rather than the nearest upcoming Monday.
+        #
+        # Reported live: "is dr ali raza available on mon aug 31st" -> "Did you
+        # mean Dr. Ali Raza in General Medicine?" -> "yes" — confirmed_via_
+        # affirmative recovers the DOCTOR from that first message (see its own
+        # comment above), but the date named in that SAME first message was
+        # dropped: resolve_date_window("yes") is naturally None, so the earlier
+        # code left earliest_date/latest_date unset and showed whatever was
+        # earliest (the wrong day) instead of Aug 31. A bare "yes" confirming
+        # the doctor never restates the date either, so it's recovered from the
+        # same prior message the doctor itself came from.
         forced_window = resolve_date_window(message)
+        if forced_window is None and confirmed_via_affirmative:
+            prior_message = _most_recent_user_message(history)
+            if prior_message is not None:
+                forced_window = resolve_date_window(prior_message)
         earliest_date = date.fromisoformat(forced_window[0]) if forced_window else None
         latest_date = date.fromisoformat(forced_window[1]) if forced_window else None
         # Reported live: "only show me available slots of dr farhan rehman
@@ -2497,6 +2511,10 @@ def run_appointment_agent(
         # same top-5-earliest-of-the-day slots — this was never resolved or
         # applied anywhere in this deterministic path at all.
         time_window = resolve_time_of_day_window(message)
+        if time_window is None and confirmed_via_affirmative:
+            prior_message = _most_recent_user_message(history)
+            if prior_message is not None:
+                time_window = resolve_time_of_day_window(prior_message)
         earliest_time, latest_time = time_window if time_window else (None, None)
         availability = get_department_availability(
             db,

@@ -4355,6 +4355,59 @@ def test_run_appointment_agent_resolves_doctor_from_yes_through_an_intermediate_
     assert [d["doctor_name"] for d in payload["doctors"]] == ["Dr. Ahmed Khan"]
 
 
+def test_run_appointment_agent_confirming_a_doctor_via_yes_still_uses_the_originally_named_date(
+    monkeypatch, db, ctx, clinic, department, doctor
+):
+    # Reported live: "is dr ali raza available on mon aug 31st" -> "Did you mean
+    # Dr. Ali Raza in General Medicine?" -> "yes" — confirmed_via_affirmative
+    # correctly recovers the DOCTOR from that first message, but the date named
+    # in that same first message was silently dropped: resolve_date_window("yes")
+    # is naturally None, so the earlier code left the query unbounded and showed
+    # whatever was earliest instead of the real Aug 31 the patient asked about.
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.slot import Slot
+
+    target_start = datetime.now(timezone.utc) + timedelta(days=10)
+    target_start = target_start.replace(hour=9, minute=0, second=0, microsecond=0)
+    nearer_start = datetime.now(timezone.utc) + timedelta(days=1)
+
+    target_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id, start_utc=target_start,
+        end_utc=target_start + timedelta(minutes=30), status="open",
+    )
+    nearer_slot = Slot(
+        clinic_id=clinic.id, doctor_id=doctor.id, start_utc=nearer_start,
+        end_utc=nearer_start + timedelta(minutes=30), status="open",
+    )
+    db.add_all([target_slot, nearer_slot])
+    db.flush()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be involved once a single doctor is confirmed")
+
+    monkeypatch.setattr(appointment_agent.llm, "run_tool_calling_agent", _fail_if_called)
+
+    weekday_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    wrong_weekday_name = weekday_names[(target_start.weekday() + 1) % 7]
+    month_name = target_start.strftime("%B").lower()
+
+    history = [
+        _row(
+            "user",
+            f"is {doctor.full_name} available on {wrong_weekday_name} {target_start.day} {month_name}",
+        ),
+        _row("assistant", f"Did you mean {doctor.full_name} in Cardiology?"),
+    ]
+    result = appointment_agent.run_appointment_agent(db, ctx, "yes", "en", history)
+
+    assert result.startswith(DOCTOR_OPTIONS_MARKER)
+    payload = json.loads(result[len(DOCTOR_OPTIONS_MARKER):])
+    slot_ids = {s["slot_id"] for doc in payload["doctors"] for s in doc["slots"]}
+    assert str(target_slot.id) in slot_ids
+    assert str(nearer_slot.id) not in slot_ids
+
+
 def test_run_appointment_agent_plain_yes_with_no_preceding_question_does_not_force_a_match(
     monkeypatch, db, ctx, doctor
 ):
