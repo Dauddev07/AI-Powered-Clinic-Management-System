@@ -373,7 +373,12 @@ def needs_path2_screening(message: str, history=None) -> bool:
     plausible screening need at all — every other case, including genuine
     ambiguity, defaults to keeping PATH 2 included."""
     lowered = message.lower()
-    words = set(re.findall(r"[a-z0-9]+", lowered))
+    # Apostrophe kept in the tokenizer here (unlike is_symptom_message's plain
+    # [a-z0-9]+, which never needs to recognize "don't"/"doesn't" as a single
+    # token) so negation_filtered_words below can actually match this
+    # module's own _NEGATION_TOKENS, several of which are apostrophe'd forms.
+    tokens = re.findall(r"[a-z0-9']+", lowered)
+    words = negation_filtered_words(tokens)
     if words & _PATH2_SYMPTOM_KEYWORDS:
         return True
     if any(phrase in lowered for phrase in _PATH2_SYMPTOM_PHRASES):
@@ -716,7 +721,11 @@ def is_symptom_message(message: str) -> bool:
     lowered = message.lower()
     for phrase in _DEPARTMENT_PHRASES_CONTAINING_SYMPTOM_WORDS + _IDIOM_PHRASES_CONTAINING_SYMPTOM_WORDS:
         lowered = lowered.replace(phrase, "")
-    words = set(re.findall(r"[a-z0-9]+", lowered))
+    # Apostrophe kept (see needs_path2_screening's identical comment) so
+    # negation_filtered_words can recognize "don't"/"doesn't"/etc. as single
+    # tokens against this module's _NEGATION_TOKENS.
+    tokens = re.findall(r"[a-z0-9']+", lowered)
+    words = negation_filtered_words(tokens)
     if words & _SYMPTOM_KEYWORDS:
         return True
     # A dual-meaning action word ("cut", "burn", "bite", "sting" — see
@@ -804,6 +813,54 @@ def _action_word_is_negated(tokens: list[str], index: int) -> bool:
         if token in _NEGATION_RESET_TOKENS:
             return False
     return False
+
+
+# General-purpose sibling of _action_word_is_negated above: instead of
+# checking whether one known action word is negated by looking backward, this
+# scans forward from EVERY negation word and marks the next few tokens as
+# "in scope" until a reset word closes it — same _NEGATION_TOKENS/
+# _NEGATION_RESET_TOKENS vocabulary and the same window size
+# (_NEGATION_LOOKBACK_TOKENS) as the booking-action check above, just applied
+# across the whole message in one pass instead of probing one target index at
+# a time. The forward-scope shape (rather than re-running the backward check
+# per candidate word) is what lets a single negation word cover a short list
+# of several denied symptoms ("i dont have fever, cough, or headache") —
+# re-running the backward check per word only ever looks a fixed distance
+# behind THAT word, which the 2nd/3rd item in a list falls outside of.
+#
+# Deliberately reuses the same 4-token span already validated for booking
+# negation rather than widening it for this new use — a wider span would
+# catch longer symptom lists, but at the cost of a coincidental unrelated
+# negation elsewhere in a longer sentence wrongly swallowing a real symptom
+# mentioned nearby, which is the more dangerous failure mode for a medical
+# triage flow (the "when in doubt, treat it as a symptom" bias every other
+# check in this module already commits to — see _KNOWLEDGE_KEYWORDS' own
+# comment). Known residual gap: a denial list longer than ~4 tokens
+# ("i dont have fever, cough, sore throat, or a headache") can still let the
+# last item or two slip through and register as a symptom — same accepted
+# fixed-window tradeoff as everywhere else negation is handled in this
+# codebase (see symptom_hints.py:279's identical disclosure), not something
+# this function tries to solve with real parsing.
+#
+# Lets every existing `words & SOME_VOCAB` intersection check elsewhere
+# (is_symptom_message, needs_path2_screening, symptom_hints.py's department
+# hinting) become negation-aware for free by building `words` through this
+# instead of a plain `set(re.findall(...))` — none of those call sites need
+# their own intersection logic changed. A word with BOTH a negated and a
+# non-negated occurrence in the same message still counts (e.g. "no fever but
+# I do have a headache" keeps "headache", drops "fever") — this only removes
+# words whose every occurrence fell inside a negated span.
+def negation_filtered_words(tokens: list[str]) -> set[str]:
+    negated_indices: set[int] = set()
+    scope_end = -1
+    for index, token in enumerate(tokens):
+        if token in _NEGATION_RESET_TOKENS:
+            scope_end = -1
+        elif index < scope_end:
+            negated_indices.add(index)
+        if token in _NEGATION_TOKENS:
+            scope_end = max(scope_end, index + 1 + _NEGATION_LOOKBACK_TOKENS)
+    return {token for index, token in enumerate(tokens) if index not in negated_indices}
 
 
 def _levenshtein_at_most(a: str, b: str, max_dist: int) -> bool:

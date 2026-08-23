@@ -16,6 +16,7 @@ letting either agent's LLM freehand which department a symptom belongs to.
 import re
 
 from app.models.conversation_memory import ConversationMemory
+from app.services.message_classifier import negation_filtered_words
 
 SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...] = (
     (
@@ -406,7 +407,15 @@ def _symptom_words_from(message: str, history: list[ConversationMemory]) -> set[
     # Normalizing the space/hyphen variants to the single-token spelling before
     # tokenizing catches all three ways a patient might type it.
     joined = re.sub(r"light[\s-]+headed(ness)?", r"lightheaded\1", joined)
-    return set(re.findall(r"[a-z0-9]+", joined))
+    # Apostrophe kept in the tokenizer (unlike the plain [a-z0-9]+ this used
+    # before) so negation_filtered_words can recognize "don't"/"doesn't"/etc.
+    # as single tokens — see message_classifier.negation_filtered_words'
+    # docstring. Filters out any word whose every occurrence was denied
+    # ("i dont have any leg pain" no longer hints Orthopedics off "leg"/
+    # "pain"), while a genuinely asserted symptom elsewhere in the same text
+    # still counts.
+    tokens = re.findall(r"[a-z0-9']+", joined)
+    return negation_filtered_words(tokens)
 
 
 # Extracted out of departments_hinted_by_patient_symptom_words below so
@@ -616,7 +625,8 @@ def unsupported_symptom_labels(
     patient_texts = [message] + [
         getattr(row, "content", "") or "" for row in history if getattr(row, "role", None) == "user"
     ]
-    words = set(re.findall(r"[a-z0-9]+", " ".join(patient_texts).lower()))
+    tokens = re.findall(r"[a-z0-9']+", " ".join(patient_texts).lower())
+    words = negation_filtered_words(tokens)
     lowered_department_names = [name.lower() for name in department_names]
     labels = []
     for keywords, label, real_hint in _ORPHAN_SYMPTOM_CATEGORIES:
