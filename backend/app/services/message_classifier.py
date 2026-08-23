@@ -190,6 +190,20 @@ _SYMPTOM_KEYWORDS = frozenset({
     "fell", "groin", "growing", "growth", "hand", "hands", "headaches", "heart",
     "height", "hip", "hips",
     "hives", "hoarse", "hoarseness", "hopeless", "hopelessness", "hurting",
+    # Reported live: "my bp is high"/"my bp is low" never routed to symptom
+    # triage at all — "bp"/"hypotension" were missing from this list entirely
+    # (only "hypertension" was covered), so is_symptom_message returned False
+    # and the message never reached symptom_agent (and therefore never
+    # reached _vitals_reading_backstop, which already handles "bp"-topic
+    # messages correctly once a message actually gets there — see
+    # symptom_agent._BP_TOPIC_RE, which already recognized "bp" for that
+    # later stage; this list is what decides whether a message gets there in
+    # the first place). "blood pressure" as a two-word phrase is handled
+    # separately below (via _BP_PHRASES) since neither "blood" nor
+    # "pressure" alone is safe to add as a bare keyword — both are too
+    # ambiguous standalone in everyday English ("pressure" at work, "blood"
+    # in an unrelated sense).
+    "bp", "hypotension",
     "gait", "hypertension", "insomnia", "jaw", "joint", "joints", "kidney", "kidneys",
     "knee", "leg", "legs", "lightheaded", "lightheadedness", "limp", "limping",
     "lung", "malaise",
@@ -302,6 +316,12 @@ _BIT_INJURY_PHRASES = (
     "bit my", "bit his", "bit their",
     "bitten by", "got bit", "got bitten", "bite me", "bite him", "bite her",
 )
+
+# "blood pressure" as a phrase — see the "bp"/"hypotension" comment on
+# _SYMPTOM_KEYWORDS above for the reported bug this closes. Phrase-matched
+# rather than added as two bare words since neither "blood" nor "pressure"
+# alone is safe to treat as an unconditional symptom keyword.
+_BP_PHRASES = ("blood pressure",)
 
 # Reported live: "i am very thirsty today" tripped is_symptom_message on the bare
 # word "thirsty" alone and got routed into symptom_agent's triage flow — but
@@ -763,6 +783,8 @@ def is_symptom_message(message: str) -> bool:
     ):
         return True
     if any(phrase in lowered for phrase in _BIT_INJURY_PHRASES):
+        return True
+    if any(phrase in lowered for phrase in _BP_PHRASES):
         return True
     # "thirst"/"thirsty" (see _THIRST_WORDS' own comment) only counts as a
     # symptom signal when paired with a frequency/persistence word or a
