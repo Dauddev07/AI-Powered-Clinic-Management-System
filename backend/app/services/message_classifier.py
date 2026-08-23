@@ -817,30 +817,56 @@ def _action_word_is_negated(tokens: list[str], index: int) -> bool:
 
 # General-purpose sibling of _action_word_is_negated above: instead of
 # checking whether one known action word is negated by looking backward, this
-# scans forward from EVERY negation word and marks the next few tokens as
-# "in scope" until a reset word closes it — same _NEGATION_TOKENS/
-# _NEGATION_RESET_TOKENS vocabulary and the same window size
-# (_NEGATION_LOOKBACK_TOKENS) as the booking-action check above, just applied
-# across the whole message in one pass instead of probing one target index at
-# a time. The forward-scope shape (rather than re-running the backward check
+# scans forward from every negation word and marks the next few tokens as "in
+# scope" until something closes it, reusing the same _NEGATION_TOKENS
+# vocabulary and _NEGATION_LOOKBACK_TOKENS span as the booking-action check
+# above. The forward-scope shape (rather than re-running the backward check
 # per candidate word) is what lets a single negation word cover a short list
 # of several denied symptoms ("i dont have fever, cough, or headache") —
 # re-running the backward check per word only ever looks a fixed distance
 # behind THAT word, which the 2nd/3rd item in a list falls outside of.
 #
-# Deliberately reuses the same 4-token span already validated for booking
-# negation rather than widening it for this new use — a wider span would
-# catch longer symptom lists, but at the cost of a coincidental unrelated
-# negation elsewhere in a longer sentence wrongly swallowing a real symptom
-# mentioned nearby, which is the more dangerous failure mode for a medical
-# triage flow (the "when in doubt, treat it as a symptom" bias every other
-# check in this module already commits to — see _KNOWLEDGE_KEYWORDS' own
-# comment). Known residual gap: a denial list longer than ~4 tokens
-# ("i dont have fever, cough, sore throat, or a headache") can still let the
-# last item or two slip through and register as a symptom — same accepted
-# fixed-window tradeoff as everywhere else negation is handled in this
-# codebase (see symptom_hints.py:279's identical disclosure), not something
-# this function tries to solve with real parsing.
+# What closes a scope is deliberately broader than just _NEGATION_RESET_TOKENS:
+#
+# - "and" — reported live: "its only swelling on hand no other symptoms and
+#   chest pain as well" let "no other symptoms" leak straight across "and"
+#   into "chest", wrongly denying a real, separately-asserted symptom in the
+#   very same message. _NEGATION_RESET_TOKENS alone ("but"/"instead"/etc.)
+#   never covered "and" — a plain conjunction reads as scope-continuing far
+#   more often in general English, but for THIS specific vocabulary (short
+#   denial clauses) closing on "and" is the safer default; the true
+#   comma/"or"-joined denial list case above is unaffected since "and" isn't
+#   what separates those items.
+# - any booking-action word (_BOOKING_ACTION_KEYWORDS) — reported live: "no
+#   no not cancel,symptoms" (a mid-conversation correction) let the scope
+#   opened by "not" carry straight through "cancel" into "symptoms",
+#   wrongly reading the correction as also denying having any symptoms at
+#   all, when the patient was actually introducing a brand new topic right
+#   after the negated action word. A negated action word is a grammatically
+#   complete clause on its own ("not cancel" needs nothing else) — whatever
+#   comes after it is reliably a new clause, never the same denial
+#   continuing.
+# - a negation word immediately followed by "able" — reported live: "no im
+#   not able to put weight on it" (a direct answer to "are you able to put
+#   weight on the leg") is a POSITIVE finding (the patient reporting a real
+#   functional limitation), not a denial of what follows "able to" — "not
+#   able to weight-bear" and "not having weight-bearing pain" say the
+#   opposite thing despite both containing "not". Suppressing scope-opening
+#   here (rather than closing an already-open scope) is what's needed, since
+#   the negation word itself is what would otherwise start swallowing "weight".
+#
+# Deliberately keeps the same 4-token span already validated for booking
+# negation rather than widening it — a wider span raises exactly the risk the
+# three cases above already demonstrate: an unrelated negation elsewhere in a
+# longer message swallowing a real symptom nearby, the more dangerous failure
+# mode for a medical triage flow (the "when in doubt, treat it as a symptom"
+# bias every other check in this module already commits to — see
+# _KNOWLEDGE_KEYWORDS' own comment). Known residual gap: a denial list longer
+# than ~4 tokens ("i dont have fever, cough, sore throat, or a headache") can
+# still let the last item or two slip through — same accepted fixed-window
+# tradeoff as everywhere else negation is handled in this codebase (see
+# symptom_hints.py:279's identical disclosure), not something this function
+# tries to solve with real parsing.
 #
 # Lets every existing `words & SOME_VOCAB` intersection check elsewhere
 # (is_symptom_message, needs_path2_screening, symptom_hints.py's department
@@ -854,12 +880,14 @@ def negation_filtered_words(tokens: list[str]) -> set[str]:
     negated_indices: set[int] = set()
     scope_end = -1
     for index, token in enumerate(tokens):
-        if token in _NEGATION_RESET_TOKENS:
+        if token in _NEGATION_SCOPE_CLOSING_WORDS:
             scope_end = -1
         elif index < scope_end:
             negated_indices.add(index)
         if token in _NEGATION_TOKENS:
-            scope_end = max(scope_end, index + 1 + _NEGATION_LOOKBACK_TOKENS)
+            next_token = tokens[index + 1] if index + 1 < len(tokens) else None
+            if next_token != "able":
+                scope_end = max(scope_end, index + 1 + _NEGATION_LOOKBACK_TOKENS)
     return {token for index, token in enumerate(tokens) if index not in negated_indices}
 
 
@@ -937,6 +965,12 @@ _BOOKING_ACTION_KEYWORDS = frozenset({
     # "slot" — must route to a tool-bound agent same as those do.
     "available", "availability",
 }) | _CANCEL_ACTION_WORDS | _RESCHEDULE_ACTION_WORDS
+
+# See negation_filtered_words' own docstring above for why each of these
+# closes a negation scope — defined here (after _BOOKING_ACTION_KEYWORDS)
+# rather than next to that function, purely so this doesn't have to forward-
+# reference a constant that isn't defined yet.
+_NEGATION_SCOPE_CLOSING_WORDS = _NEGATION_RESET_TOKENS | {"and"} | _BOOKING_ACTION_KEYWORDS
 
 # Phrasal cancel/reschedule intent that a single-word keyword check would miss —
 # "I can't make it anymore" carries the same intent as "cancel" without using that
