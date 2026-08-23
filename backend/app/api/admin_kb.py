@@ -1,11 +1,12 @@
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_role
 from app.core.db import get_db
+from app.core.rate_limit import limiter
 from app.models.audit_log import AuditLog
 from app.models.kb_document import KBDocument
 from app.models.user import User
@@ -35,7 +36,9 @@ def _serialize(document: KBDocument) -> KBDocumentOut:
 
 
 @router.get("", response_model=KBDocumentListOut)
+@limiter.limit("60/minute")
 def list_documents(
+    request: Request = None,
     current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ) -> KBDocumentListOut:
@@ -49,8 +52,10 @@ def list_documents(
 
 
 @router.post("", response_model=KBDocumentUploadOut)
+@limiter.limit("10/minute")
 async def upload_document(
     file: UploadFile = File(...),
+    request: Request = None,
     current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ) -> KBDocumentUploadOut:
@@ -92,8 +97,10 @@ async def upload_document(
 
 
 @router.delete("/{document_id}", response_model=KBDocumentDeleteOut)
+@limiter.limit("20/minute")
 def delete_document(
     document_id: uuid.UUID,
+    request: Request = None,
     current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ) -> KBDocumentDeleteOut:

@@ -1,12 +1,13 @@
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_role
 from app.core.db import get_db
+from app.core.rate_limit import limiter
 from app.models.appointment import Appointment
 from app.models.appointment_feedback import AppointmentFeedback
 from app.models.clinic import Clinic
@@ -29,7 +30,9 @@ router = APIRouter(prefix="/admin/dashboard", tags=["admin-dashboard"])
 
 
 @router.get("/stats", response_model=AdminDashboardStatsOut)
+@limiter.limit("60/minute")
 def get_admin_dashboard_stats(
+    request: Request = None,
     current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ) -> AdminDashboardStatsOut:
@@ -116,7 +119,9 @@ def get_admin_dashboard_stats(
 
 
 @router.get("/appointments-trend", response_model=list[DailyAppointmentCountOut])
+@limiter.limit("60/minute")
 def get_appointments_trend(
+    request: Request = None,
     current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ) -> list[DailyAppointmentCountOut]:
@@ -159,7 +164,9 @@ def get_appointments_trend(
 
 
 @router.get("/top-rated-doctors", response_model=list[TopRatedDoctorOut])
+@limiter.limit("60/minute")
 def get_top_rated_doctors(
+    request: Request = None,
     current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ) -> list[TopRatedDoctorOut]:
@@ -225,7 +232,9 @@ def get_top_rated_doctors(
 
 
 @router.get("/weekly-digest", response_model=AdminWeeklyDigestOut)
+@limiter.limit("30/minute")
 def get_weekly_digest(
+    request: Request = None,
     current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ) -> AdminWeeklyDigestOut:

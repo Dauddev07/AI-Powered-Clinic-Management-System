@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_role
 from app.core.db import get_db
+from app.core.rate_limit import limiter
 from app.models.appointment_feedback import AppointmentFeedback
 from app.models.doctor import Doctor
 from app.models.user import User
@@ -18,10 +19,12 @@ _TONE_RANGES = {"bad": (1, 2), "neutral": (3, 3), "good": (4, 5)}
 
 
 @router.get("", response_model=FeedbackListOut)
+@limiter.limit("60/minute")
 def list_feedback(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     tone: str | None = Query(default=None, pattern="^(good|neutral|bad)$"),
+    request: Request = None,
     current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ) -> FeedbackListOut:

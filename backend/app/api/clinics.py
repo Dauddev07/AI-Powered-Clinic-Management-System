@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
+from app.core.rate_limit import limiter
 from app.models.appointment import Appointment
 from app.models.appointment_feedback import AppointmentFeedback
 from app.models.clinic import Clinic
@@ -16,7 +17,8 @@ router = APIRouter(prefix="/clinics", tags=["clinics"])
 
 
 @router.get("/public-list", response_model=list[ClinicPublicOut])
-def public_list(db: Session = Depends(get_db)) -> list[Clinic]:
+@limiter.limit("30/minute")
+def public_list(request: Request = None, db: Session = Depends(get_db)) -> list[Clinic]:
     """A patient must pick their branch before they have a token. Returns nothing
     beyond what the picker needs.
     """
@@ -25,7 +27,8 @@ def public_list(db: Session = Depends(get_db)) -> list[Clinic]:
 
 
 @router.get("/top-rated-doctors", response_model=list[PublicTopRatedDoctorOut])
-def public_top_rated_doctors(db: Session = Depends(get_db)) -> list[PublicTopRatedDoctorOut]:
+@limiter.limit("30/minute")
+def public_top_rated_doctors(request: Request = None, db: Session = Depends(get_db)) -> list[PublicTopRatedDoctorOut]:
     """Top 3 active doctors by average AppointmentFeedback rating, across every
     active clinic (ties broken by rating count, more ratings first) — powers the
     landing page's "top rated doctors" section, reached before a visitor has

@@ -2,12 +2,13 @@ import uuid
 from datetime import date as date_type, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_role
 from app.core.db import get_db
+from app.core.rate_limit import limiter
 from app.models.appointment_feedback import AppointmentFeedback
 from app.models.clinic import Clinic
 from app.models.department import Department
@@ -27,6 +28,7 @@ TIME_OF_DAY_BANDS = {
 
 
 @router.get("", response_model=SlotListOut)
+@limiter.limit("60/minute")
 def list_slots(
     department_id: uuid.UUID | None = Query(default=None),
     doctor_id: uuid.UUID | None = Query(default=None),
@@ -35,6 +37,7 @@ def list_slots(
     time_of_day: str | None = Query(default=None, pattern="^(morning|afternoon|evening)$"),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     db: Session = Depends(get_db),
 ) -> SlotListOut:
@@ -120,7 +123,9 @@ def list_slots(
 
 
 @router.get("/departments", response_model=list[DepartmentOptionOut])
+@limiter.limit("60/minute")
 def list_departments_with_slots(
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     db: Session = Depends(get_db),
 ) -> list[DepartmentOptionOut]:
@@ -147,10 +152,12 @@ def list_departments_with_slots(
 
 
 @router.get("/doctors", response_model=list[DoctorOptionOut])
+@limiter.limit("60/minute")
 def list_doctors_with_slots(
     department_id: uuid.UUID | None = Query(default=None),
     date_from: date_type | None = Query(default=None, description="Clinic-local calendar date, inclusive"),
     date_to: date_type | None = Query(default=None, description="Clinic-local calendar date, inclusive"),
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     db: Session = Depends(get_db),
 ) -> list[DoctorOptionOut]:

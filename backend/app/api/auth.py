@@ -94,7 +94,12 @@ def login(payload: LoginRequest, request: Request = None, db: Session = Depends(
 
 
 @router.get("/me", response_model=UserWithClinicOut)
-def get_my_account(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> UserWithClinicOut:
+@limiter.limit("60/minute")
+def get_my_account(
+    request: Request = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserWithClinicOut:
     """Any authenticated role (patient or admin) — unlike /patients/me, which is
     patient-only. Read-only; account edits still go through the role-specific flows
     that already exist (patient profile PATCH, superadmin CLI for admins). Includes
@@ -106,7 +111,13 @@ def get_my_account(current_user: User = Depends(get_current_user), db: Session =
 
 
 @router.post("/register", response_model=UserPublicOut, status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)) -> User:
+@limiter.limit("5/minute")
+def register(
+    payload: RegisterRequest,
+    background_tasks: BackgroundTasks,
+    request: Request = None,
+    db: Session = Depends(get_db),
+) -> User:
     clinic = db.get(Clinic, payload.clinic_id)
     if clinic is None or not clinic.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clinic not found")
@@ -146,8 +157,10 @@ def register(payload: RegisterRequest, background_tasks: BackgroundTasks, db: Se
 
 
 @router.post("/change-password")
+@limiter.limit("10/minute")
 def change_password(
     payload: ChangePasswordRequest,
+    request: Request = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -306,7 +319,8 @@ def refresh(payload: RefreshTokenRequest, request: Request = None, db: Session =
 
 
 @router.post("/logout")
-def logout(payload: LogoutRequest, db: Session = Depends(get_db)) -> dict:
+@limiter.limit("20/minute")
+def logout(payload: LogoutRequest, request: Request = None, db: Session = Depends(get_db)) -> dict:
     """Revokes this one refresh token (i.e. this one device/session) — every other
     session the patient is logged into elsewhere is untouched. The now-short-lived
     access token this device already holds simply expires on its own within

@@ -20,7 +20,9 @@ router = APIRouter(prefix="/patients", tags=["patients"])
 
 
 @router.get("/me", response_model=PatientProfileOut)
+@limiter.limit("60/minute")
 def get_my_profile(
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     scope: ClinicScope = Depends(get_clinic_scope),
 ) -> User:
@@ -28,8 +30,10 @@ def get_my_profile(
 
 
 @router.patch("/me", response_model=PatientProfileOut)
+@limiter.limit("20/minute")
 def update_my_profile(
     payload: PatientProfileUpdate,
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     scope: ClinicScope = Depends(get_clinic_scope),
 ) -> User:

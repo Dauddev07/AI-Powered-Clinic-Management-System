@@ -1,12 +1,13 @@
 import json
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_role
 from app.core.db import get_db
+from app.core.rate_limit import limiter
 from app.models.audit_log import AuditLog
 from app.models.clinic import Clinic
 from app.models.department import Department
@@ -112,9 +113,11 @@ def _write_ingestion_log(
 
 
 @router.post("/csv/preview", response_model=CSVPreviewOut)
+@limiter.limit("10/minute")
 async def preview_csv(
     file: UploadFile = File(...),
     header_mapping: str | None = Form(default=None),
+    request: Request = None,
     current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ) -> CSVPreviewOut:
@@ -203,9 +206,11 @@ async def preview_csv(
 
 
 @router.post("/csv/confirm", response_model=CSVConfirmOut)
+@limiter.limit("10/minute")
 async def confirm_csv(
     file: UploadFile = File(...),
     header_mapping: str | None = Form(default=None),
+    request: Request = None,
     current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ) -> CSVConfirmOut:
@@ -417,9 +422,11 @@ async def confirm_csv(
 
 
 @router.get("/csv/ingestion-logs", response_model=IngestionLogListOut)
+@limiter.limit("60/minute")
 def list_ingestion_logs(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    request: Request = None,
     current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ) -> IngestionLogListOut:
@@ -451,10 +458,12 @@ def _serialize_doctor(doctor: Doctor, department: Department) -> DoctorOut:
 
 
 @router.get("", response_model=DoctorListOut)
+@limiter.limit("60/minute")
 def list_doctors(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     q: str | None = Query(default=None, max_length=200),
+    request: Request = None,
     current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ) -> DoctorListOut:
@@ -486,9 +495,11 @@ def list_doctors(
 
 
 @router.patch("/{doctor_id}/status", response_model=DoctorOut)
+@limiter.limit("20/minute")
 def update_doctor_status(
     doctor_id: uuid.UUID,
     payload: DoctorStatusUpdate,
+    request: Request = None,
     current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ) -> DoctorOut:

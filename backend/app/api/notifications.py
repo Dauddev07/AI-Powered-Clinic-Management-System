@@ -1,12 +1,13 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_role
 from app.core.db import get_db
+from app.core.rate_limit import limiter
 from app.models.notification import Notification
 from app.models.user import User
 from app.schemas.notification import NotificationListOut, NotificationOut
@@ -15,7 +16,9 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 
 @router.get("", response_model=NotificationListOut)
+@limiter.limit("60/minute")
 def list_my_notifications(
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     db: Session = Depends(get_db),
 ) -> NotificationListOut:
@@ -46,8 +49,10 @@ def list_my_notifications(
 
 
 @router.patch("/{notification_id}/read", response_model=NotificationOut)
+@limiter.limit("30/minute")
 def mark_notification_read(
     notification_id: uuid.UUID,
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     db: Session = Depends(get_db),
 ) -> Notification:
@@ -69,7 +74,9 @@ def mark_notification_read(
 
 
 @router.patch("/mark-all-read", response_model=NotificationListOut)
+@limiter.limit("20/minute")
 def mark_all_notifications_read(
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     db: Session = Depends(get_db),
 ) -> NotificationListOut:

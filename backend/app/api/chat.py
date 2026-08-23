@@ -32,7 +32,9 @@ def send_chat_message(
 
 
 @router.get("/pending-feedback", response_model=PendingFeedbackOut)
+@limiter.limit("60/minute")
 def get_pending_feedback(
+    request: Request = None,
     _current_user: User = Depends(require_role("patient")),
     ctx: ClinicContext = Depends(get_clinic_context),
     db: Session = Depends(get_db),
@@ -42,8 +44,10 @@ def get_pending_feedback(
 
 
 @router.post("/feedback", response_model=FeedbackSubmitOut)
+@limiter.limit("20/minute")
 def post_feedback(
     payload: FeedbackSubmitIn,
+    request: Request = None,
     _current_user: User = Depends(require_role("patient")),
     ctx: ClinicContext = Depends(get_clinic_context),
     db: Session = Depends(get_db),
@@ -53,7 +57,9 @@ def post_feedback(
 
 
 @router.get("/sessions", response_model=list[ChatSessionOut])
+@limiter.limit("60/minute")
 def get_chat_sessions(
+    request: Request = None,
     _current_user: User = Depends(require_role("patient")),
     ctx: ClinicContext = Depends(get_clinic_context),
     db: Session = Depends(get_db),
@@ -62,8 +68,10 @@ def get_chat_sessions(
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("30/minute")
 def delete_chat_session(
     session_id: uuid.UUID,
+    request: Request = None,
     _current_user: User = Depends(require_role("patient")),
     ctx: ClinicContext = Depends(get_clinic_context),
     db: Session = Depends(get_db),
@@ -73,8 +81,10 @@ def delete_chat_session(
 
 
 @router.get("/history", response_model=ChatHistoryOut)
+@limiter.limit("60/minute")
 def get_chat_history(
     session_id: uuid.UUID | None = Query(default=None),
+    request: Request = None,
     _current_user: User = Depends(require_role("patient")),
     ctx: ClinicContext = Depends(get_clinic_context),
     db: Session = Depends(get_db),

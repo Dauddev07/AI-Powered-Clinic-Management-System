@@ -1,11 +1,12 @@
 import uuid
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_role
 from app.core.db import get_db
+from app.core.rate_limit import limiter
 from app.models.appointment import Appointment
 from app.models.clinic import Clinic
 from app.models.slot import Slot
@@ -26,8 +27,10 @@ router = APIRouter(prefix="/appointments", tags=["appointments"])
 
 
 @router.post("", response_model=AppointmentOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit("20/minute")
 def book_appointment(
     payload: BookAppointmentRequest,
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     db: Session = Depends(get_db),
 ) -> AppointmentOut:
@@ -43,7 +46,9 @@ def book_appointment(
 
 
 @router.get("", response_model=AppointmentListOut)
+@limiter.limit("60/minute")
 def list_my_appointments(
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     db: Session = Depends(get_db),
 ) -> AppointmentListOut:
@@ -68,7 +73,9 @@ def list_my_appointments(
 
 
 @router.get("/pending-confirmations", response_model=AppointmentListOut)
+@limiter.limit("60/minute")
 def list_my_pending_confirmations(
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     db: Session = Depends(get_db),
 ) -> AppointmentListOut:
@@ -87,7 +94,9 @@ def list_my_pending_confirmations(
 
 
 @router.get("/history", response_model=AppointmentHistoryOut)
+@limiter.limit("60/minute")
 def list_my_appointment_history(
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     db: Session = Depends(get_db),
 ) -> AppointmentHistoryOut:
@@ -126,7 +135,9 @@ def list_my_appointment_history(
 
 
 @router.get("/summary", response_model=AppointmentSummaryOut)
+@limiter.limit("60/minute")
 def get_my_appointment_summary(
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     db: Session = Depends(get_db),
 ) -> AppointmentSummaryOut:
@@ -173,8 +184,10 @@ def get_my_appointment_summary(
 
 
 @router.post("/{appointment_id}/cancel", response_model=AppointmentOut)
+@limiter.limit("20/minute")
 def cancel_appointment(
     appointment_id: uuid.UUID,
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     db: Session = Depends(get_db),
 ) -> AppointmentOut:
@@ -185,9 +198,11 @@ def cancel_appointment(
 
 
 @router.post("/{appointment_id}/confirm-visit", response_model=AppointmentOut)
+@limiter.limit("20/minute")
 def confirm_visit(
     appointment_id: uuid.UUID,
     payload: ConfirmVisitRequest,
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     db: Session = Depends(get_db),
 ) -> AppointmentOut:
@@ -202,9 +217,11 @@ def confirm_visit(
 
 
 @router.post("/{appointment_id}/reschedule", response_model=AppointmentOut)
+@limiter.limit("20/minute")
 def reschedule_appointment(
     appointment_id: uuid.UUID,
     payload: RescheduleRequest,
+    request: Request = None,
     current_user: User = Depends(require_role("patient")),
     db: Session = Depends(get_db),
 ) -> AppointmentOut:
