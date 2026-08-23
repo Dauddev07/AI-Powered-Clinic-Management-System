@@ -74,6 +74,64 @@ _INTRO = (
 _DURATION_HINT_RE = re.compile(
     r"\b(day|days|week|weeks|month|months|hour|hours|year|years|since)\b", re.IGNORECASE
 )
+
+# Requested: a stated duration well past the normal severity-screening window
+# (100 days, 50 days, "since childhood", etc.) should not change the normal
+# triage questioning at all — severity is still asked exactly as usual if not
+# already given — but by the time a real department/slots card is eventually
+# shown, it should carry an extra note encouraging the patient to get seen
+# soon even if it isn't severe, since something that's been going on this long
+# is worth timely attention regardless of severity. See
+# _append_long_duration_note below (mirrors _append_emergency_downgrade_safety_
+# note's exact mechanism/scoping) and _session_stated_long_duration_for_the_
+# current_symptom (mirrors _session_had_an_earlier_emergency_flag_for_the_
+# current_symptom's exact same-symptom-episode tracking, including clearing on
+# a genuinely new complaint).
+_DURATION_NUMBER_RE = re.compile(
+    r"\b(\d{1,4})\s*(day|days|week|weeks|month|months|year|years)\b", re.IGNORECASE
+)
+_DURATION_UNIT_TO_DAYS = {
+    "day": 1, "days": 1, "week": 7, "weeks": 7, "month": 30, "months": 30, "year": 365, "years": 365,
+}
+_LONG_DURATION_DAY_THRESHOLD = 5
+
+_CHRONIC_DURATION_PHRASE_RE = re.compile(
+    r"\bsince\s+(?:childhood|birth|i\s+was\s+(?:a\s+)?(?:child|kid|little|young))\b"
+    r"|\b(?:for|since)\s+(?:many|several)\s+years\b"
+    r"|\ba\s+long\s+time\b"
+    r"|\bmy\s+(?:whole|entire)\s+life\b"
+    r"|\blifelong\b",
+    re.IGNORECASE,
+)
+
+
+def _message_states_long_duration(message: str) -> bool:
+    if _CHRONIC_DURATION_PHRASE_RE.search(message):
+        return True
+    match = _DURATION_NUMBER_RE.search(message)
+    if match is None:
+        return False
+    count = int(match.group(1))
+    unit_days = _DURATION_UNIT_TO_DAYS[match.group(2).lower()]
+    return count * unit_days > _LONG_DURATION_DAY_THRESHOLD
+
+
+# "no no its not that long, its been 2/3/4 days" — the patient walking back an
+# earlier long-duration statement. Deliberately its own check rather than
+# reusing _message_states_long_duration's own negative — a plain SHORT duration
+# stated later in the SAME episode without any explicit correction wording
+# (e.g. answering a differentiator question with "2 days" for an unrelated
+# reason) is not the same signal as the patient actively correcting themselves,
+# so this only fires on the correction phrasing itself.
+_DURATION_CORRECTION_RE = re.compile(
+    r"\bnot\b.{0,20}\b(?:that|so)\s+long\b"
+    r"|\bisn'?t\b.{0,20}\b(?:that|so)\s+long\b",
+    re.IGNORECASE,
+)
+
+
+def _message_corrects_long_duration(message: str) -> bool:
+    return bool(_DURATION_CORRECTION_RE.search(message))
 # "frequent"/"frequently"/"excessive"/"excessively" added alongside the mild/
 # moderate/severe words above — how OFTEN or how MUCH a symptom occurs is a real
 # severity signal in its own right (e.g. "frequent urination", "excessive
@@ -682,7 +740,21 @@ _BLOOD_SUGAR_SEVERITY_INSTRUCTION = (
 
 
 def _message_states_a_numeric_vital_reading(message: str) -> bool:
-    return _extract_stated_blood_pressure(message) is not None or _extract_stated_blood_sugar(message) is not None
+    # Reported live: "i am having fever and its 103" still got asked "how severe
+    # is this... and how long" — this function is what the PATH-3 "never zero
+    # questions" backstop's gives_severity check relies on to recognize a numeric
+    # reading as severity-already-given (same as it already does for BP/blood
+    # sugar), but it never called _extract_stated_fever_temperature at all, even
+    # though that function already existed in this same file for the clinic's own
+    # fever guidance table. A stated fever number is exactly as much "the reading
+    # itself IS the severity" as a stated BP/sugar reading is (see this function's
+    # existing callers' own comments) — there was never a reason fever should have
+    # been left out.
+    return (
+        _extract_stated_blood_pressure(message) is not None
+        or _extract_stated_blood_sugar(message) is not None
+        or _extract_stated_fever_temperature(message) is not None
+    )
 
 
 def _patient_named_this_department(department_name: str, message: str, history: list[ConversationMemory]) -> bool:
@@ -841,6 +913,65 @@ def _append_emergency_downgrade_safety_note(
     return f"{reply}\n\n{_EMERGENCY_DOWNGRADE_SAFETY_NOTE}"
 
 
+_LONG_DURATION_NOTE = (
+    "This has been going on for a while — even if it isn't severe, it's best to get it "
+    "checked soon so treatment isn't delayed."
+)
+
+
+def _session_stated_long_duration_for_the_current_symptom(
+    message: str, history: list[ConversationMemory], department_names: list[str]
+) -> bool:
+    """Same same-symptom-episode tracking as
+    _session_had_an_earlier_emergency_flag_for_the_current_symptom above,
+    just for a long/chronic duration instead of an emergency flag — cleared
+    the moment either a genuinely new symptom is introduced (same signal as
+    that function) or the patient explicitly walks the duration back (see
+    _message_corrects_long_duration)."""
+    running_history: list[ConversationMemory] = []
+    long_duration = False
+    for row in history:
+        role = getattr(row, "role", None)
+        content = getattr(row, "content", "") or ""
+        if role == "user":
+            if long_duration and (
+                _message_corrects_long_duration(content)
+                or _message_introduces_a_new_symptom_label(content, running_history, department_names)
+            ):
+                long_duration = False
+            elif _message_states_long_duration(content):
+                long_duration = True
+        running_history.append(row)
+    if long_duration and (
+        _message_corrects_long_duration(message)
+        or _message_introduces_a_new_symptom_label(message, history, department_names)
+    ):
+        long_duration = False
+    elif _message_states_long_duration(message):
+        long_duration = True
+    return long_duration
+
+
+def _append_long_duration_note(
+    reply: str, message: str, history: list[ConversationMemory], department_names: list[str]
+) -> str:
+    if _looks_like_a_valid_emergency_reply(reply):
+        # Already being told to seek emergency care right now — a "get it
+        # checked soon" note would read as a confusing downgrade.
+        return reply
+    if not _session_stated_long_duration_for_the_current_symptom(message, history, department_names):
+        return reply
+    if reply.startswith(DOCTOR_OPTIONS_MARKER):
+        payload = json.loads(reply[len(DOCTOR_OPTIONS_MARKER):])
+        existing_note = payload.get("note")
+        payload["note"] = f"{existing_note} {_LONG_DURATION_NOTE}" if existing_note else _LONG_DURATION_NOTE
+        return DOCTOR_OPTIONS_MARKER + json.dumps(payload, default=str)
+    # Multi-department/no-slots shapes left untouched — same conservative
+    # scoping as _append_emergency_downgrade_safety_note above, for the same
+    # reason (rarer shape, more involved to rewrite structurally without risk).
+    return reply
+
+
 def run_symptom_agent(
     db: Session,
     ctx: ClinicContext,
@@ -852,6 +983,7 @@ def run_symptom_agent(
     reply = _append_emergency_downgrade_safety_note(
         _run_symptom_agent_body(db, ctx, message, language, history), message, history, department_names
     )
+    reply = _append_long_duration_note(reply, message, history, department_names)
     return ensure_slot_pick_example_has_a_date(reply)
 
 
