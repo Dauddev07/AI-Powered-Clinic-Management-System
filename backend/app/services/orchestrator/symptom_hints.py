@@ -422,15 +422,44 @@ def _symptom_words_from(message: str, history: list[ConversationMemory]) -> set[
 # symptom_words_with_no_matching_department can share the exact same matched
 # groups (hints alternatives + label) without duplicating every conditional
 # branch's logic a second time and risking the two drifting apart.
+#
+# `corroboration_words` defaults to `words` for every existing caller
+# (unchanged behavior) but symptom_agent.py's screening-answer-excluding
+# caller passes a SEPARATE, non-excluded word set for it. That exclusion
+# exists to stop a differentiator answer ("yes a bit of fever", answering
+# "any fever/chills with that sore throat?") from being misread as an
+# independent NEW complaint and adding its own unrelated department —
+# necessary because words like "fever" (SYMPTOM_DEPARTMENT_HINTS) can
+# unconditionally trigger a hint entirely on their own. But
+# _LIMB_JOINT_INJURY_SIGNAL_WORDS/_LOW_MOOD_PERSISTENCE_WORDS/
+# _MIND_LOSS_SIGNAL_WORDS/_NECK_NEUROLOGICAL_SIGNAL_WORDS/
+# _LIGHTHEADED_ENT_SIGNAL_WORDS below can NEVER do that — every one of them
+# only ever refines a bucket some OTHER word already gated open (e.g.
+# "swelling" alone hints nothing; it only matters once "leg" is already
+# present) — so excluding them from a screening answer has no such
+# unrelated-department risk, only the cost of silently discarding the exact
+# corroborating detail the screening question was asked to get. Reported
+# live: "pain in my eyes and also in my legs" -> screened -> "any swelling
+# or difficulty moving your legs?" -> "nothing accompanying eye pain but i
+# have a bit of swelling in leg" still got General Medicine for the legs,
+# not Orthopedics — the swelling that would have corroborated it came
+# entirely from that answer, which the exclusion had blanked out before this
+# function ever saw it. These five corroboration-only checks read from
+# `corroboration_words` specifically so that exclusion can no longer erase
+# them, while every GATING check below (the word that decides whether a hint
+# fires AT ALL, never just which specific one) stays on the possibly-excluded
+# `words` — preserving the original fix's actual protection.
 def _matched_hint_groups(
-    words: set[str], already_covered: set[str]
+    words: set[str], already_covered: set[str], corroboration_words: set[str] | None = None
 ) -> list[tuple[tuple[str, ...], str]]:
+    if corroboration_words is None:
+        corroboration_words = words
     groups: list[tuple[tuple[str, ...], str]] = []
     for keywords, hints, label in SYMPTOM_DEPARTMENT_HINTS:
         if words & keywords:
             groups.append((hints, label))
     if words & _LIMB_JOINT_WORDS:
-        if words & _LIMB_JOINT_INJURY_SIGNAL_WORDS:
+        if corroboration_words & _LIMB_JOINT_INJURY_SIGNAL_WORDS:
             groups.append((("ortho",), "limb/joint injury symptoms"))
         else:
             # Reported live: a patient described hand swelling + chest pain; the
@@ -452,9 +481,9 @@ def _matched_hint_groups(
             )
             if not already_covered_by_ortho:
                 groups.append((("general medicine", "internal medicine", "family medicine"), "limb/joint pain"))
-    if words & _LOW_MOOD_PASSING_WORDS and words & _LOW_MOOD_PERSISTENCE_WORDS:
+    if words & _LOW_MOOD_PASSING_WORDS and corroboration_words & _LOW_MOOD_PERSISTENCE_WORDS:
         groups.append((("psych",), "low mood"))
-    if "mind" in words and words & _MIND_LOSS_SIGNAL_WORDS:
+    if "mind" in words and corroboration_words & _MIND_LOSS_SIGNAL_WORDS:
         groups.append((("psych",), "loss of mental control"))
     # "forehead" is its own single token (re.findall splits on word boundaries, not
     # substrings) — it never matched bare "head" here, so "forehead pain" produced
@@ -467,10 +496,10 @@ def _matched_hint_groups(
     # reliable instead of accidental.
     if words & {"head", "forehead"} and words & _GENERIC_PAIN_WORDS:
         groups.append((("general medicine", "internal medicine", "family medicine"), "head pain"))
-    if words & {"neck", "necks"} and not (words & _NECK_NEUROLOGICAL_SIGNAL_WORDS):
+    if words & {"neck", "necks"} and not (corroboration_words & _NECK_NEUROLOGICAL_SIGNAL_WORDS):
         groups.append((("ortho",), "neck/joint pain"))
     if words & {"lightheaded", "lightheadedness"}:
-        if words & _LIGHTHEADED_ENT_SIGNAL_WORDS:
+        if corroboration_words & _LIGHTHEADED_ENT_SIGNAL_WORDS:
             groups.append((("ent", "otolaryn"), "lightheadedness with vertigo/ear symptoms"))
         else:
             groups.append((("general medicine", "internal medicine", "family medicine"), "lightheadedness"))
@@ -478,7 +507,12 @@ def _matched_hint_groups(
 
 
 def departments_hinted_by_patient_symptom_words(
-    message: str, history: list[ConversationMemory], department_names: list[str], already_covered: set[str]
+    message: str,
+    history: list[ConversationMemory],
+    department_names: list[str],
+    already_covered: set[str],
+    corroboration_message: str | None = None,
+    corroboration_history: list[ConversationMemory] | None = None,
 ) -> dict[str, str]:
     """Returns {department_name: symptom_label} for every real, active,
     not-yet-covered department a symptom category the PATIENT mentioned (this
@@ -486,10 +520,23 @@ def departments_hinted_by_patient_symptom_words(
     Pass message="" to scan only prior history (e.g. when checking what the
     patient has described SO FAR in the session, independent of a current
     message that isn't itself symptom-shaped, like a booking request or a
-    "what do you recommend" question)."""
+    "what do you recommend" question).
+
+    `corroboration_message`/`corroboration_history` default to `message`/
+    `history` (no behavior change for every existing caller) — pass them
+    separately only when the caller has ALREADY filtered/blanked some
+    screening-answer content out of `message`/`history` for the gating checks
+    (see _matched_hint_groups' own docstring on why the two need to differ)
+    but still wants corroboration-only words read from the real, unfiltered
+    conversation."""
     words = _symptom_words_from(message, history)
+    corroboration_words = (
+        words
+        if corroboration_message is None and corroboration_history is None
+        else words | _symptom_words_from(corroboration_message or "", corroboration_history or [])
+    )
     hinted_substrings: dict[str, str] = {}
-    for hints, label in _matched_hint_groups(words, already_covered):
+    for hints, label in _matched_hint_groups(words, already_covered, corroboration_words):
         for hint in hints:
             hinted_substrings.setdefault(hint, label)
     if not hinted_substrings:

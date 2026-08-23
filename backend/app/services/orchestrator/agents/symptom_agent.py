@@ -1142,8 +1142,14 @@ def _run_symptom_agent_body(
             else:
                 filtered_history.append(row)
         effective_message = "" if _preceding_assistant_turn_asked_a_screening_question(history) else message
+        # corroboration_message/corroboration_history deliberately pass the REAL,
+        # unfiltered message/history — see departments_hinted_by_patient_symptom_
+        # words' and _matched_hint_groups' own docstrings for why a screening
+        # answer's corroboration-only words (e.g. "swelling") must still count even
+        # though its GATING words are excluded here.
         return departments_hinted_by_patient_symptom_words(
-            effective_message, filtered_history, department_names, already_covered
+            effective_message, filtered_history, department_names, already_covered,
+            corroboration_message=message, corroboration_history=history,
         )
 
     if reply.startswith(DOCTOR_OPTIONS_MARKER):
