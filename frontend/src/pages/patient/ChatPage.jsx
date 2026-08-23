@@ -301,7 +301,8 @@ function DoctorOptionsCard({ options, onSelectSlot, disabled }) {
 function SlotsCardHint() {
   return (
     <div className={styles.doctorOptionsHint}>
-      Click any slot above to book it, or type it directly — e.g. "Dr. Ahmed Khan, Mon Aug 24, 10:00 AM".
+      Click any slot above to book it, or type "book" with the doctor's name and the slot time exactly as
+      shown — e.g. "book Dr. Ahmed Khan on Mon, Aug 24 at 10:00 AM".
     </div>
   );
 }
