@@ -1115,15 +1115,16 @@ def test_run_symptom_agent_does_not_add_the_fever_safe_range_note_outside_the_sa
     monkeypatch, db, ctx, clinic, message
 ):
     # Guard against being too broad: a genuinely abnormal reading (below 97°F or
-    # above 103°F) must NOT get the "not an emergency" instruction — those readings
-    # are still meant to read as emergency-level per the clinic's own table.
-    captured = {}
+    # above 103°F) must NOT read as safe. Superseded by _vitals_reading_backstop's
+    # own deterministic, code-level emergency check (requested: fever/BP/blood
+    # sugar must never rely on the LLM's own judgment for this, on any turn) —
+    # an out-of-range reading is now answered immediately, without ever calling
+    # the LLM at all, rather than via a prompt instruction the model might or
+    # might not follow correctly.
+    def _fail_if_called(*a, **k):
+        raise AssertionError("run_tool_calling_agent must not be called for an emergency-range vital reading")
 
-    def fake_run_tool_calling_agent(system_prompt, message, history, tools):
-        captured["system_prompt"] = system_prompt
-        return "This sounds like an emergency. Call 1122 or go to the nearest ER right away."
-
-    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", fake_run_tool_calling_agent)
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", _fail_if_called)
     _make_dept_with_slot(db, clinic, "General Medicine")
     history = [
         _row("user", "i have a fever"),
@@ -1133,20 +1134,23 @@ def test_run_symptom_agent_does_not_add_the_fever_safe_range_note_outside_the_sa
         ),
     ]
 
-    symptom_agent.run_symptom_agent(db, ctx, message, "en", history)
+    result = symptom_agent.run_symptom_agent(db, ctx, message, "en", history)
 
-    assert "97°F and 103°F" not in captured["system_prompt"]
+    assert "1122" in result
+    assert "emergency" in result.lower()
 
 
 @pytest.mark.parametrize(
-    "message", ["my bp is 150/95", "blood pressure 130/85", "bp 180/120 since yesterday", "my bp is 85/55"]
+    "message", ["my bp is 150/95", "blood pressure 130/85", "my bp is 85/55"]
 )
 def test_run_symptom_agent_instructs_the_model_to_classify_a_stated_blood_pressure_reading_itself(
     monkeypatch, db, ctx, clinic, message
 ):
     # Requested: a stated BP reading IS the severity per the clinic's own guidance
     # table — the model must classify it itself from the numbers, never ask the
-    # patient "is it mild, moderate, or severe" for it.
+    # patient "is it mild, moderate, or severe" for it. Excludes hypertensive-
+    # crisis-range readings (see the deterministic-emergency test just below) —
+    # those are now answered in code, without ever calling the LLM.
     captured = {}
 
     def fake_run_tool_calling_agent(system_prompt, message, history, tools):
@@ -1168,6 +1172,32 @@ def test_run_symptom_agent_instructs_the_model_to_classify_a_stated_blood_pressu
     assert "STATED BLOOD PRESSURE READING" in captured["system_prompt"]
     assert "do NOT ask the patient" in captured["system_prompt"]
     assert result == "Got it — how long have you had this?"
+
+
+def test_run_symptom_agent_deterministically_escalates_a_hypertensive_crisis_bp_reading(
+    monkeypatch, db, ctx, clinic
+):
+    # A hypertensive-crisis-range reading (180+ systolic and/or 120+ diastolic)
+    # must escalate immediately, in code (_vitals_reading_backstop), never left
+    # to the LLM's own judgment on any turn — same principle as the fever
+    # emergency-range test above.
+    def _fail_if_called(*a, **k):
+        raise AssertionError("run_tool_calling_agent must not be called for a hypertensive-crisis BP reading")
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", _fail_if_called)
+    _make_dept_with_slot(db, clinic, "General Medicine")
+    history = [
+        _row("user", "i have high blood pressure"),
+        _row(
+            "assistant",
+            "Could you tell me how severe this is (mild, moderate, or severe) and how long you've had it?",
+        ),
+    ]
+
+    result = symptom_agent.run_symptom_agent(db, ctx, "bp 180/120 since yesterday", "en", history)
+
+    assert "1122" in result
+    assert "emergency" in result.lower()
 
 
 @pytest.mark.parametrize(
@@ -2299,19 +2329,24 @@ def test_run_symptom_agent_first_message_combining_symptoms_and_recommendation_s
     # resolves to something real — otherwise the general "no matching
     # department" apology (symptom_words_with_no_matching_department) would
     # short-circuit before any of this test's logic is even reached.
+    #
+    # Superseded by _vitals_reading_backstop (requested: fever/BP/blood sugar
+    # must never be asked "is it mild, moderate, or severe", on any turn,
+    # including the very first message) — this now deterministically asks for
+    # the temperature reading instead of letting the LLM ask its own severity
+    # question, without ever calling the LLM at all for this turn.
     _make_dept_with_slot(db, clinic, "General Medicine")
 
-    monkeypatch.setattr(
-        symptom_agent.llm,
-        "run_tool_calling_agent",
-        lambda *a, **k: "How long have you had the fever and body aches, and how severe are they?",
-    )
+    def _fail_if_called(*a, **k):
+        raise AssertionError("run_tool_calling_agent must not be called — the vitals backstop should intercept first")
+
+    monkeypatch.setattr(symptom_agent.llm, "run_tool_calling_agent", _fail_if_called)
 
     result = symptom_agent.run_symptom_agent(
         db, ctx, "I am having a bit of fever and body aches what do you recommend ?", "en", []
     )
 
-    assert result == "How long have you had the fever and body aches, and how severe are they?"
+    assert result == "Could you tell me your temperature reading (in °F), and how long you've had it?"
 
 
 @pytest.mark.parametrize("message", ["I am having pain in my jaw", "I am haiving nausea.."])

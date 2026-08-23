@@ -738,6 +738,256 @@ _BLOOD_SUGAR_SEVERITY_INSTRUCTION = (
     "category plainly, don't assert a diagnosis."
 )
 
+# Severe hypoglycemia (<54 mg/dL) or a reading high enough to carry a real
+# DKA/HHS risk (>400 mg/dL) — standard clinical emergency cutoffs, same "hand
+# the model/code the real numeric threshold, never make it reason about one
+# itself" principle as every other vital-reading table in this file. Used by
+# _vitals_reading_backstop below, the only caller — unlike fever/BP, blood
+# sugar had no code-level emergency threshold defined anywhere before this.
+_BLOOD_SUGAR_EMERGENCY_LOW = 54
+_BLOOD_SUGAR_EMERGENCY_HIGH = 400
+
+
+def _blood_sugar_is_emergency_range(value: int) -> bool:
+    return value < _BLOOD_SUGAR_EMERGENCY_LOW or value > _BLOOD_SUGAR_EMERGENCY_HIGH
+
+
+# Topic vocabulary for _vitals_reading_backstop below — deliberately just the
+# vital's own name/abbreviation, not full symptom vocabulary, since this only
+# needs to recognize "the patient is talking about fever/BP/blood sugar AT
+# ALL," not classify the message's overall symptom category.
+_FEVER_TOPIC_RE = re.compile(r"\b(fever|temp|temperature)\b", re.IGNORECASE)
+_BP_TOPIC_RE = re.compile(r"\b(bp|blood\s*pressure|hypertension|hypotension)\b", re.IGNORECASE)
+_SUGAR_TOPIC_RE = re.compile(r"\b(sugar|glucose|diabet\w*)\b", re.IGNORECASE)
+
+
+_VITALS_EMERGENCY_REPLY_TEMPLATE = (
+    "This sounds like an emergency — a {reading_description} needs urgent medical attention. "
+    "Please call 1122 or go to the nearest emergency department right away.\n\n"
+    "1) Stay as calm as possible and avoid unnecessary movement.\n"
+    "2) Do not take any medication unless a medical professional tells you to.\n"
+    "3) If possible, don't go alone — have someone accompany you or call an ambulance."
+)
+
+
+# Requested: "for fever/sugar/bp, never ask severity — just ask for the
+# reading" as a CODE-LEVEL check, not a prompt instruction the model might or
+# might not follow. Reported live, full transcript: "fever of 104" correctly
+# skipped straight to asking duration on the FIRST message (the
+# gives_severity check in the general PATH-3 backstop above already covered
+# turn 1 specifically) — but the very next turn ("since yesterday", no number
+# restated) fell through to the LLM's own judgment with zero deterministic
+# guidance (the _FEVER_SAFE_RANGE_INSTRUCTION prompt injection near
+# _build_system_prompt only ever scanned the CURRENT message for a number,
+# never prior turns), and the model re-asked "mild, moderate, or severe" for
+# a fever it had already been given a number for. Then, several turns later,
+# it wrongly escalated a documented-safe 103°F reading (this clinic's own
+# table: 97-103°F inclusive is NOT an emergency) to a false emergency alert —
+# the exact failure this whole guidance-table system exists to prevent,
+# simply because the guidance wasn't reliably present on that turn either.
+#
+# Unlike the general PATH-3 backstop above (gated by no_symptom_yet, i.e.
+# first message of the session only), this runs on EVERY turn of a fever/BP/
+# blood-sugar-topic episode, deterministically, before the LLM is ever
+# called — a stated numeric reading for these three vitals never needs the
+# mild/moderate/severe question on ANY turn (the reading itself always IS
+# the severity, same principle the existing prompt instructions already
+# state), and an emergency-range reading is answered immediately, in code,
+# rather than relying on the model to notice and act on it correctly.
+#
+# Scoped to the CURRENT symptom episode only (same "clears on a genuinely new
+# symptom label" convention as _session_had_an_earlier_emergency_flag_for_
+# the_current_symptom/_session_stated_long_duration_for_the_current_symptom
+# above) so switching to an unrelated complaint doesn't keep this backstop
+# firing on stale vitals from an earlier, resolved episode. Supports a
+# correction ("no no its 103" after "104") the same way every other reading
+# in this function already does — later readings simply overwrite earlier
+# ones as the scan walks forward, so the LATEST stated number always wins.
+#
+# Reported live: "no no its 103" (correcting an earlier "fever of 104") still
+# read back as 104 — _extract_stated_fever_temperature requires the literal
+# word "fever"/"temp"/"temperature" adjacent to the number, which a natural
+# follow-up correction usually doesn't repeat at all, relying entirely on the
+# already-established topic for context the way a human reader would. The
+# bare-number fallback below only fires once EXACTLY ONE of the three vital
+# topics is already active from earlier in the episode (never firing at all
+# ambiguously across two, e.g. a fever+BP episode) and the message itself is
+# short — the same two guardrails _BARE_NUMBER_ONLY_RE already uses for pain-
+# scale corrections elsewhere in this file.
+_BARE_NUMBER_RE = re.compile(r"\b(\d{1,3}(?:\.\d)?)\b")
+
+
+def _extract_bare_number(text: str) -> float | None:
+    if len(text.split()) > 6:
+        return None
+    match = _BARE_NUMBER_RE.search(text)
+    if match is None:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def _vitals_reading_backstop(
+    message: str, history: list[ConversationMemory], department_names: list[str]
+) -> str | None:
+    fever_temp: float | None = None
+    bp_reading: tuple[int, int] | None = None
+    blood_sugar: int | None = None
+    saw_fever_topic = False
+    saw_bp_topic = False
+    saw_sugar_topic = False
+    saw_duration = False
+    saw_severity_word = False
+
+    # Reported live: "sore throat" -> "is it accompanied by fever or chills?"
+    # -> "yes fever and chills" wrongly started a fever-topic episode from
+    # what was actually just a DIFFERENTIATOR ANSWER about the sore throat
+    # complaint — sore throat/ENT was and remained the real primary complaint.
+    # A bare topic WORD ("fever"/"bp"/"sugar") with no accompanying number
+    # only counts toward starting/continuing this backstop's own episode when
+    # the message ISN'T purely answering a screening question about a
+    # different complaint (`answering_screening_question` below) — same
+    # differentiator-vs-new-complaint distinction
+    # _hinted_departments_excluding_a_screening_answer/_session_had_an_
+    # earlier_emergency_flag_for_the_current_symptom already draw elsewhere
+    # in this file. An actual stated NUMBER always counts regardless of that
+    # distinction — a real reading's clinical significance can't be dismissed
+    # just because it happened to come up while answering a differentiator
+    # question (e.g. "yes, and my fever is 104 too" mid-differentiator is
+    # still a genuine 104°F reading).
+    def _scan(text: str, answering_screening_question: bool) -> None:
+        nonlocal fever_temp, bp_reading, blood_sugar, saw_fever_topic, saw_bp_topic, saw_sugar_topic, saw_duration, saw_severity_word
+        topic_before = (saw_fever_topic, saw_bp_topic, saw_sugar_topic)
+        if not answering_screening_question:
+            if _FEVER_TOPIC_RE.search(text):
+                saw_fever_topic = True
+            if _BP_TOPIC_RE.search(text):
+                saw_bp_topic = True
+            if _SUGAR_TOPIC_RE.search(text):
+                saw_sugar_topic = True
+        if _DURATION_HINT_RE.search(text):
+            saw_duration = True
+        if _SEVERITY_HINT_RE.search(text):
+            saw_severity_word = True
+        temp = _extract_stated_fever_temperature(text)
+        if temp is not None:
+            fever_temp = temp
+            saw_fever_topic = True
+        bp = _extract_stated_blood_pressure(text)
+        if bp is not None:
+            bp_reading = bp
+            saw_bp_topic = True
+        sugar = _extract_stated_blood_sugar(text)
+        if sugar is not None:
+            blood_sugar = sugar
+            saw_sugar_topic = True
+        if temp is None and bp is None and sugar is None and sum(topic_before) == 1:
+            bare = _extract_bare_number(text)
+            if bare is not None:
+                if topic_before[0] and 90.0 <= bare <= 112.0:
+                    fever_temp = bare
+                elif topic_before[2] and 30 <= bare <= 600:
+                    blood_sugar = int(bare)
+
+    def _episode_started() -> bool:
+        return fever_temp is not None or bp_reading is not None or blood_sugar is not None or (
+            saw_fever_topic or saw_bp_topic or saw_sugar_topic
+        )
+
+    running_history: list[ConversationMemory] = []
+    for row in history:
+        if getattr(row, "role", None) == "user":
+            content = getattr(row, "content", "") or ""
+            if _episode_started() and _message_introduces_a_new_symptom_label(content, running_history, department_names):
+                fever_temp = bp_reading = blood_sugar = None
+                saw_fever_topic = saw_bp_topic = saw_sugar_topic = saw_duration = saw_severity_word = False
+            _scan(content, _preceding_assistant_turn_asked_a_screening_question(running_history))
+        running_history.append(row)
+    if _episode_started() and _message_introduces_a_new_symptom_label(message, history, department_names):
+        fever_temp = bp_reading = blood_sugar = None
+        saw_fever_topic = saw_bp_topic = saw_sugar_topic = saw_duration = saw_severity_word = False
+    _scan(message, _preceding_assistant_turn_asked_a_screening_question(history))
+
+    if not (saw_fever_topic or saw_bp_topic or saw_sugar_topic):
+        return None
+
+    # Self-diagnosis claims ("i have diabetes") get the SAME fast, concise
+    # LLM-composed redirect as the general backstop above (see
+    # _is_self_diagnosis_claim's own comment) rather than this backstop's own
+    # "please give me your reading" question, which would read as dismissive
+    # for something the patient is already alarmed about — but only when no
+    # actual reading was ever stated; a self-diagnosis claim genuinely
+    # accompanied by a real emergency-range number must still escalate.
+    if fever_temp is None and bp_reading is None and blood_sugar is None and _is_self_diagnosis_claim(message):
+        return None
+
+    if fever_temp is not None and not _fever_temperature_is_within_the_clinic_safe_range(fever_temp):
+        return _VITALS_EMERGENCY_REPLY_TEMPLATE.format(reading_description=f"fever of {fever_temp:g}°F")
+    if bp_reading is not None and _blood_pressure_category(*bp_reading) == "hypertensive crisis":
+        return _VITALS_EMERGENCY_REPLY_TEMPLATE.format(
+            reading_description=f"blood pressure reading of {bp_reading[0]}/{bp_reading[1]}"
+        )
+    if blood_sugar is not None and _blood_sugar_is_emergency_range(blood_sugar):
+        return _VITALS_EMERGENCY_REPLY_TEMPLATE.format(reading_description=f"blood sugar reading of {blood_sugar}")
+
+    # Everything below only decides whether THIS backstop should ask its own
+    # canned follow-up (reading, or duration) — never the emergency check
+    # above, which always applies regardless. Two independent reasons to
+    # instead defer entirely to the LLM (return None, same as "this doesn't
+    # apply at all"):
+    #
+    # 1. `_preceding_assistant_turn_asked_a_screening_question` — mirrors
+    #    PATH 2's own "exactly one round" rule elsewhere in this file: once
+    #    the immediately preceding assistant turn already asked SOMETHING
+    #    (duration, a differentiator, anything) and the patient answered it,
+    #    that round is spent — reported live: "my blood sugar level is
+    #    200+" -> LLM asked about accompanying symptoms -> "yes excessive
+    #    thirst and frequent urination" (the diabetes triad, answering that
+    #    question) still got asked "how long have you had it?" by this
+    #    backstop, when the patient had already answered a real screening
+    #    question and the diabetes-triad answer should route immediately.
+    #    Scoped to the reading/duration CANNED QUESTIONS only — the
+    #    emergency check two paragraphs up is never subject to this, an
+    #    emergency-range reading always escalates regardless of how many
+    #    rounds have already happened.
+    # 2. Ordinary severity+duration language already given across the
+    #    episode (`saw_severity_word and saw_duration`) — reported live: "i
+    #    have a mild sore throat since 2 days and i am also having fever and
+    #    chills" (fever mentioned as a second, genuinely new complaint in the
+    #    very FIRST message, so guard 1 above doesn't apply) got asked for a
+    #    temperature reading instead of proceeding straight to the normal
+    #    multi-department card — but "mild"/"since 2 days" already convey
+    #    exactly the same severity+duration information a reading would,
+    #    same "when in doubt, the patient's own ordinary words already
+    #    answered it" principle as _message_already_gives_duration_and_
+    #    severity elsewhere in this file (that helper only checks the
+    #    CURRENT message; this checks the whole episode the same way this
+    #    backstop's other state already does).
+    if _preceding_assistant_turn_asked_a_screening_question(history) or (saw_duration and saw_severity_word):
+        return None
+
+    have_reading = fever_temp is not None or bp_reading is not None or blood_sugar is not None
+    if not have_reading:
+        if saw_fever_topic:
+            reading_prompt = "your temperature reading (in °F)"
+        elif saw_bp_topic:
+            reading_prompt = "your blood pressure reading (e.g. 130/85)"
+        else:
+            reading_prompt = "your blood sugar reading (mg/dL), and whether it was fasting or after a meal"
+        if saw_duration:
+            return f"Could you tell me {reading_prompt}?"
+        return f"Could you tell me {reading_prompt}, and how long you've had it?"
+
+    if not saw_duration:
+        return "Got it — and how long have you had it?"
+
+    # Reading + duration both known and the reading is in the safe range —
+    # nothing further for this backstop to do; fall through to normal PATH 3
+    # routing exactly as it would for any other routine symptom.
+    return None
+
 
 def _message_states_a_numeric_vital_reading(message: str) -> bool:
     # Reported live: "i am having fever and its 103" still got asked "how severe
@@ -995,6 +1245,15 @@ def _run_symptom_agent_body(
     history: list[ConversationMemory],
 ) -> str:
     department_names = list_active_department_names(db, ctx.clinic_id)
+
+    # Checked before every other deterministic check below, including the
+    # unsupported-department apology and recommendation-request handling —
+    # see _vitals_reading_backstop's own docstring for why a fever/BP/blood-
+    # sugar reading's severity/emergency status must never be left to the LLM
+    # on ANY turn, not just the first message.
+    vitals_reply = _vitals_reading_backstop(message, history, department_names)
+    if vitals_reply is not None:
+        return vitals_reply
 
     # Instructed live: a symptom this clinic genuinely has no matching specialist
     # for (e.g. a growth/height concern with no Endocrinology department, or a
