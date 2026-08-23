@@ -849,6 +849,36 @@ def test_router_rule4_symptom_fallback_requires_recency_over_booking_context_dir
     assert _rule_4_symptom_signal_anywhere("whats the clinic hours?", history, "assistant", history[-1].content) is None
 
 
+def test_router_rule1_65_doctor_identity_question_routes_to_appointment():
+    # Reported live: "whos dr babar ali" (a real doctor) got general_info_agent's
+    # generic "I don't have information on that doctor" refusal instead of
+    # appointment_agent's real, live doctor-lookup answer — a bare identity
+    # question names no booking-action word/verb, so nothing else in the cascade
+    # recognized it and it fell to the LLM fallback's own APPOINTMENT definition,
+    # which never mentions doctor-identity questions at all.
+    assert classify_agent_intent("whos dr babar ali") == APPOINTMENT
+    assert classify_agent_intent("who is dr ali raza") == APPOINTMENT
+    assert classify_agent_intent("tell me something about dr iqra raza") == APPOINTMENT
+    # Unrelated "who is"/"tell me about" questions with no doctor title must be
+    # completely unaffected.
+    assert classify_agent_intent("who is the president") != APPOINTMENT
+    assert classify_agent_intent("tell me about diabetes") != APPOINTMENT
+
+
+def test_router_rule1_65_doctor_identity_follow_up_correction_routes_to_appointment():
+    # Reported live (2nd half of the same report): the natural next turn —
+    # "whos dr babar nawaz" (no such doctor) -> "oh sorry, i mean dr babar ali" —
+    # names no "who is" phrase of its own, just a corrected name, so it still fell
+    # through to GENERAL_INFO even after the fix above. Recognized instead by the
+    # immediately preceding assistant turn being appointment_agent's own
+    # not-found identity reply.
+    history = [
+        _row("user", "whos dr babar nawaz"),
+        _row("assistant", 'I don\'t know who that is — there\'s no doctor named "Babar Nawaz" at this clinic.'),
+    ]
+    assert classify_agent_intent("oh sorry,i mean dr babar ali", history) == APPOINTMENT
+
+
 # =====================================================================================
 # symptom_agent
 # =====================================================================================

@@ -47,7 +47,9 @@ from app.services.message_classifier import (
     needs_booking_action_tools,
 )
 from app.services.orchestrator.agents.appointment_agent import (
+    _DOCTOR_TITLE_RE,
     _message_asks_for_most_recent_appointment_by_status,
+    _message_asks_who_is_a_doctor,
 )
 
 logger = logging.getLogger(__name__)
@@ -436,6 +438,54 @@ def _rule_1_6_doctor_count_or_listing_request(message, history, last_role, last_
     return None
 
 
+# The assistant's own three identity-reply templates from appointment_agent.py's
+# "who is Dr. X" handling (see that module's not-found branch and
+# _doctor_identity_reply) — matched verbatim rather than re-derived, so this can
+# never disagree with what was actually said.
+_ASSISTANT_DOCTOR_IDENTITY_REPLY_RE = re.compile(
+    r"i don't know who that is|there's no doctor named|is a doctor in", re.IGNORECASE
+)
+
+
+def _rule_1_65_doctor_identity_question(message, history, last_role, last_content):
+    """Reported live: "whos dr babar ali" (a real doctor) got a generic "I don't
+    have information on that doctor" refusal from general_info_agent instead of
+    a real answer, even though appointment_agent already has exactly this
+    logic built in (find_doctors_by_name + _doctor_identity_reply — see that
+    module's own "Reported live: who is Dr. X?" comment). The identity-question
+    machinery never got a chance to run: a bare "who is Dr. X"/"whos dr X"/"tell
+    me about Dr. X" names no booking action word ("book"/"appointment"/"slot"/
+    "available"/...) and no "see/consult/meet" verb, so needs_booking_action_tools
+    is False and nothing else in this cascade recognizes it either — it fell
+    through to the LLM fallback, whose own classification prompt describes
+    APPOINTMENT purely in terms of booking/rescheduling/cancelling and never
+    mentions doctor-identity questions at all, so a doctor's real name got
+    reasonably (but wrongly) classified as GENERAL_INFO. Same fix shape as rule
+    1.6 above: this needs appointment_agent's real, live doctor lookup, not
+    general_info_agent's KB-only text search, which can't answer for a doctor
+    that has no matching KB document. Requires an actual "dr"/"doctor" title
+    mention alongside the identity phrasing so this never fires on an unrelated
+    "who is the president"/"tell me about diabetes" style question."""
+    if _message_asks_who_is_a_doctor(message) and _DOCTOR_TITLE_RE.search(message):
+        return APPOINTMENT
+    # Reported live (2nd half of the same report): the natural follow-up
+    # correction — "whos dr babar nawaz" -> (no such doctor) -> "oh sorry, i mean
+    # dr babar ali" — names no "who is" phrase of its own, just a corrected name,
+    # so the check above doesn't fire for it either. Recognized instead by the
+    # immediately preceding assistant turn being one of appointment_agent's own
+    # identity replies (the not-found template from the block above, or
+    # _doctor_identity_reply's own "is a doctor in ..." for a found one) — that
+    # reply is what makes "i mean dr X" unambiguously a name correction to the
+    # identity question just asked, not a fresh, unrelated doctor mention.
+    if (
+        last_role == "assistant"
+        and _ASSISTANT_DOCTOR_IDENTITY_REPLY_RE.search(last_content)
+        and _DOCTOR_TITLE_RE.search(message)
+    ):
+        return APPOINTMENT
+    return None
+
+
 def _rule_1_8_current_message_states_a_symptom(message, history, last_role, last_content):
     """The CURRENT message itself plainly describes a symptom. Reported live:
     General Medicine was resolved for dizziness/fainting, then small talk
@@ -584,6 +634,7 @@ _RULE_CASCADE = (
     ("1.5", _rule_1_5_department_list_request),
     ("1", _rule_1_marker_continuity),
     ("1.6", _rule_1_6_doctor_count_or_listing_request),
+    ("1.65", _rule_1_65_doctor_identity_question),
     ("1.8", _rule_1_8_current_message_states_a_symptom),
     ("2", _rule_2_screening_continuity),
     ("3", _rule_3_booking_action_signal),
