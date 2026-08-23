@@ -210,7 +210,7 @@ _SYMPTOM_KEYWORDS = frozenset({
     "sadness", "scrotal", "scrotum", "seizure", "seizures", "shoulder",
     "shoulders", "sinus", "sinusitis", "skin", "spine", "stomach", "stress",
     "stressed", "stunted", "sugar", "teeth", "teeths", "testicle", "testicles",
-    "testicular", "testies", "thigh", "thirst", "thirsty", "throat", "tooth",
+    "testicular", "testies", "thigh", "throat", "tooth",
     "tremor", "tremors", "urinary", "urinate", "urinating", "urination",
     "urine", "vaginal", "vertigo", "wart", "warts", "wrist", "wrists",
     # Reported live: "i am having blury vision" (and the correctly-spelled
@@ -303,14 +303,38 @@ _BIT_INJURY_PHRASES = (
     "bitten by", "got bit", "got bitten", "bite me", "bite him", "bite her",
 )
 
+# Reported live: "i am very thirsty today" tripped is_symptom_message on the bare
+# word "thirsty" alone and got routed into symptom_agent's triage flow — but
+# "I'm thirsty" is at least as often a plain everyday statement (hot day, after
+# exercise) as a real medical complaint, the same "dual-meaning in everyday
+# English" shape as _AMBIGUOUS_ACTION_SYMPTOM_WORDS above ("i am very hungry
+# today", which has no medical-keyword equivalent at all, correctly stays
+# CONVERSATIONAL — "thirsty" was the odd one out, treated as an unconditional
+# trigger when "hungry" wasn't). Kept OUT of _SYMPTOM_KEYWORDS and gated instead
+# behind is_symptom_message's own corroboration check just below, same technique
+# as the ambiguous action words: only counts as a symptom signal when paired
+# with a frequency/persistence word or a urination-related word in the SAME
+# message — "excessive thirst" and "frequent urination and thirst" are the real,
+# clinically meaningful diabetes-triad phrasing this is meant to catch (this
+# module's own _PATH2_FREQUENCY_WORDS/_PATH2_URINATION_THIRST_WORDS already
+# apply the identical gate for the narrower PATH-2-screening decision — this
+# mirrors that same judgment at the broader is_symptom_message gate it was
+# missing from).
+_THIRST_WORDS = frozenset({"thirst", "thirsty"})
+_THIRST_CORROBORATION_WORDS = frozenset({
+    "frequent", "frequently", "excessive", "excessively", "continuous",
+    "continuously", "constant", "constantly", "always", "urination", "urinate",
+    "urinating", "urine",
+})
+
 # Deliberately broad and erring toward false positives (routing more things to
 # knowledge_seeking than strictly necessary) per this module's fail-safe design.
 # This heuristic is CONVERSATIONAL-vs-KNOWLEDGE_SEEKING only (never symptom
 # routing itself), a much lower-stakes distinction than is_symptom_message's own
-# symptom-vs-general_info call below — so the ambiguous action words stay folded
-# in here unconditionally, same as before this change, rather than gated behind
-# the same corroboration check.
-_KNOWLEDGE_KEYWORDS = _LOGISTICS_KEYWORDS | _SYMPTOM_KEYWORDS | _AMBIGUOUS_ACTION_SYMPTOM_WORDS
+# symptom-vs-general_info call below — so the ambiguous action words (and bare
+# "thirst"/"thirsty") stay folded in here unconditionally, same as before this
+# change, rather than gated behind the same corroboration check.
+_KNOWLEDGE_KEYWORDS = _LOGISTICS_KEYWORDS | _SYMPTOM_KEYWORDS | _AMBIGUOUS_ACTION_SYMPTOM_WORDS | _THIRST_WORDS
 
 
 # PATH 2's own named-symptom list (llm.py's _TRIAGE_SECTION) — mirrored here only
@@ -739,6 +763,14 @@ def is_symptom_message(message: str) -> bool:
     ):
         return True
     if any(phrase in lowered for phrase in _BIT_INJURY_PHRASES):
+        return True
+    # "thirst"/"thirsty" (see _THIRST_WORDS' own comment) only counts as a
+    # symptom signal when paired with a frequency/persistence word or a
+    # urination-related word in the SAME message — "i am very thirsty today"
+    # has neither and stays conversational/general_info; "i have excessive
+    # thirst"/"continuously thirsty and frequent urination" has one and still
+    # reaches symptom triage.
+    if words & _THIRST_WORDS and words & _THIRST_CORROBORATION_WORDS:
         return True
     return False
 

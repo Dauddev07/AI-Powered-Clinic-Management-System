@@ -97,6 +97,27 @@ _SEVERITY_HINT_RE = re.compile(
 # guarantee; only wording that reads as already-at-emergency skips it.
 _HIGH_SEVERITY_HINT_RE = re.compile(r"\b(severe|unbearable|excruciating)\b", re.IGNORECASE)
 
+# Requested: "i am continuously thirsty"/"i have continuous thirst" must be
+# treated as severity-already-given the same way "excessive thirst"/"frequent
+# thirst" already are via _SEVERITY_HINT_RE above — only duration should be
+# asked, never severity. Deliberately NOT added to _SEVERITY_HINT_RE itself
+# (which applies to every symptom, not just thirst): "continuous"/"constant"
+# describe a DURATION pattern (always present vs. comes-and-goes), not
+# intensity, for most symptoms — symptom_hints.py's own low-mood-persistence-
+# words comment already draws this exact distinction ("constant"/"persistent"/
+# "ongoing" are pure duration modifiers with zero severity meaning alone).
+# Broadening the general regex would wrongly skip the severity question for
+# something like "continuous headache" too. Scoped narrowly to thirst instead,
+# where "continuous"/"constant" genuinely is the clinically relevant
+# diabetes-triad framing (alongside "frequent"/"excessive", which already work).
+_THIRST_WORDS = frozenset({"thirst", "thirsty"})
+_THIRST_PERSISTENCE_WORDS = frozenset({"continuous", "continuously", "constant", "constantly"})
+
+
+def _message_states_persistent_thirst(message: str) -> bool:
+    words = set(re.findall(r"[a-z0-9]+", message.lower()))
+    return bool(words & _THIRST_WORDS and words & _THIRST_PERSISTENCE_WORDS)
+
 
 def _message_already_gives_duration_and_severity(
     message: str, history: list[ConversationMemory] | None = None
@@ -107,6 +128,7 @@ def _message_already_gives_duration_and_severity(
             _SEVERITY_HINT_RE.search(message)
             or _message_states_a_numeric_vital_reading(message)
             or _extract_stated_pain_scale_number(message, history or []) is not None
+            or _message_states_persistent_thirst(message)
         )
     )
 
@@ -1011,6 +1033,7 @@ def _run_symptom_agent_body(
             bool(_SEVERITY_HINT_RE.search(message))
             or _message_states_a_numeric_vital_reading(message)
             or _extract_stated_pain_scale_number(message, history) is not None
+            or _message_states_persistent_thirst(message)
         )
         gives_duration = bool(_DURATION_HINT_RE.search(message))
         if gives_severity and not gives_duration:
