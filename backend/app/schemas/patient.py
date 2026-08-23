@@ -62,3 +62,7 @@ class PatientProfileUpdate(BaseModel):
         if value is None:
             raise ValueError("Date of birth is required")
         return validate_dob_within_reasonable_range(value)
+
+
+class ConfirmDeleteAccountRequest(BaseModel):
+    otp: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")

@@ -162,6 +162,40 @@ def send_password_reset_otp_email(*, to: str, full_name: str, otp_code: str, ttl
     send_email(to=to, subject="Your QuickCheck Clinic verification code", html_body=html)
 
 
+def send_account_delete_otp_email(*, to: str, full_name: str, otp_code: str, ttl_minutes: int) -> None:
+    body = f"""\
+    <p style="margin:0 0 22px;text-align:center;">
+      Hi {full_name}, use the verification code below to confirm deleting your
+      QuickCheck Clinic account. This code expires in
+      <strong>{ttl_minutes} minutes</strong>.
+    </p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;">
+      <tr>
+        <td align="center" style="background:linear-gradient(180deg,{_ACCENT_SOFT},#ffffff);border:1.5px solid {_ACCENT_SOFT};border-radius:14px;padding:24px 0;box-shadow:inset 0 1px 0 #ffffff;">
+          <span style="font-family:'Courier New',monospace;font-size:32px;font-weight:700;letter-spacing:0.4em;color:{_ACCENT_DARK};">
+            {otp_code}
+          </span>
+        </td>
+      </tr>
+    </table>
+    <p style="margin:0 0 22px;text-align:center;font-size:13px;font-weight:600;color:#b42318;">
+      This will permanently delete your account and all associated data —
+      appointments, chat history, and everything else on file. This cannot be undone.
+    </p>
+    <p style="margin:0;font-size:13px;color:{_MUTED};border-top:1px solid {_BORDER};padding-top:16px;">
+      If you didn't request this, ignore this email — your account will not be
+      deleted unless this code is used.
+    </p>
+    """
+    html = _layout(
+        preheader=f"Your verification code is {otp_code} — expires in {ttl_minutes} minutes.",
+        icon="⚠️",
+        heading="Confirm account deletion",
+        body_html=body,
+    )
+    send_email(to=to, subject="Confirm deleting your QuickCheck Clinic account", html_body=html)
+
+
 def send_email_verification_otp_email(*, to: str, full_name: str, otp_code: str, ttl_minutes: int) -> None:
     body = f"""\
     <p style="margin:0 0 22px;text-align:center;">

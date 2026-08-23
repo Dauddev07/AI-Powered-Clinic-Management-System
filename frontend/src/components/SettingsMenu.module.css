@@ -445,6 +445,20 @@
   transition: color 180ms ease;
 }
 
+.subMenuButtonDanger {
+  color: var(--app-error-text);
+  border-color: var(--app-error-border);
+}
+
+.subMenuButtonDanger svg {
+  color: var(--app-error-text);
+}
+
+.subMenuButtonDanger:hover {
+  background: var(--app-error-bg);
+  border-color: var(--app-error-border);
+}
+
 .subMenuButtonLabel {
   flex: 1;
   min-width: 0;

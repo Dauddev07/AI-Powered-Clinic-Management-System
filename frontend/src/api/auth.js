@@ -58,3 +58,11 @@ export function fetchMyProfile() {
 export function updateMyProfile(payload) {
   return apiFetch("/patients/me", { method: "PATCH", auth: true, body: payload });
 }
+
+export function requestDeleteAccountOtp() {
+  return apiFetch("/patients/me/delete/request-otp", { method: "POST", auth: true });
+}
+
+export function confirmDeleteAccount(otp) {
+  return apiFetch("/patients/me/delete/confirm", { method: "POST", auth: true, body: { otp } });
+}

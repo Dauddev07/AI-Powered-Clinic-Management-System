@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { fetchMyAccount } from "../api/auth";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme/ThemeContext";
+import DeleteAccountModal from "./DeleteAccountModal";
 import styles from "./SettingsMenu.module.css";
 
 const ICONS = {
@@ -20,6 +21,9 @@ const ICONS = {
     <path d="M4 12h4l2 3h4l2-3h4M4 12l1.5-6.5A1 1 0 0 1 6.47 4.75h11.06a1 1 0 0 1 .97.75L20 12M4 12v6a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6" />
   ),
   theme: <path d="M12 3a9 9 0 1 0 9 9c0-.46-.03-.92-.09-1.36A5.5 5.5 0 0 1 12 3Z" />,
+  trash: (
+    <path d="M4 7h16M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7M6 7l1 12.5A2 2 0 0 0 9 21h6a2 2 0 0 0 2-1.5L18 7M10 11v6M14 11v6" />
+  ),
 };
 
 // Nested sub-panels reached from a top-level menu item, keyed by the `view`
@@ -127,6 +131,7 @@ export default function SettingsMenu() {
   // wrong guess never breaks anything, only looks slightly off.
   const [direction, setDirection] = useState("forward");
   const [account, setAccount] = useState(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const panelRef = useRef(null);
   const launcherRef = useRef(null);
 
@@ -185,7 +190,28 @@ export default function SettingsMenu() {
   // so it's prepended here rather than baked into the static SUBVIEWS config above.
   const subviewItems =
     view === "settings"
-      ? [{ to: profilePath, icon: "profile", section: "Profile", label: "View profile" }, ...SUBVIEWS.settings.items]
+      ? [
+          { to: profilePath, icon: "profile", section: "Profile", label: "View profile" },
+          ...SUBVIEWS.settings.items,
+          // Patient-only, self-service — admins manage their own accounts through
+          // other means, and there's no equivalent "delete" concept for them here.
+          ...(user.role === "patient"
+            ? [
+                {
+                  kind: "action",
+                  key: "deleteAccount",
+                  icon: "trash",
+                  section: "Danger Zone",
+                  label: "Delete account",
+                  danger: true,
+                  onClick: () => {
+                    setOpen(false);
+                    setDeleteModalOpen(true);
+                  },
+                },
+              ]
+            : []),
+        ]
       : SUBVIEWS[view]?.items;
 
   return (
@@ -323,6 +349,16 @@ export default function SettingsMenu() {
                     <span className={styles.subMenuSectionLabel}>{item.section}</span>
                     {item.kind === "themeToggle" ? (
                       <ThemeToggleRow />
+                    ) : item.kind === "action" ? (
+                      <button
+                        type="button"
+                        className={`${styles.subMenuButton} ${item.danger ? styles.subMenuButtonDanger : ""}`}
+                        role="menuitem"
+                        onClick={item.onClick}
+                      >
+                        <ItemIcon name={item.icon} />
+                        <span className={styles.subMenuButtonLabel}>{item.label}</span>
+                      </button>
                     ) : (
                       <Link
                         to={item.to}
@@ -354,6 +390,10 @@ export default function SettingsMenu() {
           {initial}
         </button>
       </div>
+
+      {user.role === "patient" && (
+        <DeleteAccountModal open={deleteModalOpen} onClose={() => setDeleteModalOpen(false)} />
+      )}
     </>
   );
 }

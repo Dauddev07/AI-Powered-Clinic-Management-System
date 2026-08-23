@@ -88,6 +88,13 @@ class Settings(BaseSettings):
     EMAIL_VERIFICATION_OTP_MAX_ATTEMPTS: int = 5
     EMAIL_VERIFICATION_OTP_RESEND_COOLDOWN_SECONDS: int = 60
 
+    # Same three knobs again, for the patient self-service account-deletion OTP (see
+    # app/services/account_deletion.py) — a permanent, irreversible action, so it gets
+    # its own independently-tunable timing rather than reusing either flow above.
+    ACCOUNT_DELETE_OTP_TTL_MINUTES: int = 5
+    ACCOUNT_DELETE_OTP_MAX_ATTEMPTS: int = 5
+    ACCOUNT_DELETE_OTP_RESEND_COOLDOWN_SECONDS: int = 60
+
     DEFAULT_SLOT_MINUTES: int = 30
     RETRIEVAL_SIMILARITY_THRESHOLD: float = 0.5
 
