@@ -149,7 +149,12 @@ def test_confirm_and_delete_account_removes_user_and_all_dependent_data(db):
             clinic_id=clinic.id, patient_id=user.id, appointment_id=appointment.id, doctor_id=doctor.id, rating=5,
         )
     )
-    db.add(Notification(clinic_id=clinic.id, user_id=user.id, type="appointment_booked", message="hi"))
+    db.add(
+        Notification(
+            clinic_id=clinic.id, user_id=user.id, type="appointment_booked", message="hi",
+            related_appointment_id=appointment.id,
+        )
+    )
     db.add(RefreshToken(user_id=user.id, token_hash="x" * 64, expires_at=datetime.now(timezone.utc) + timedelta(days=1)))
     db.add(ConversationMemory(clinic_id=clinic.id, user_id=user.id, session_id=uuid.uuid4(), role="user", content="hi"))
     audit_row = AuditLog(clinic_id=clinic.id, actor_user_id=user.id, action="test_action", entity_type="test")

@@ -124,8 +124,13 @@ def confirm_and_delete_account(db: Session, user: User, code: str) -> None:
         (AppointmentFeedback, AppointmentFeedback.patient_id),
         (AppointmentDepartmentDayUse, AppointmentDepartmentDayUse.patient_id),
         (AppointmentDepartmentDayRescheduleUse, AppointmentDepartmentDayRescheduleUse.patient_id),
-        (Appointment, Appointment.patient_id),
+        # Notification.related_appointment_id also FKs to appointments.id, so this
+        # must clear before Appointment is deleted below (a patient's own
+        # notifications are always about their own appointment, so scoping this
+        # by user_id already covers every notification referencing one of their
+        # appointments).
         (Notification, Notification.user_id),
+        (Appointment, Appointment.patient_id),
         (RefreshToken, RefreshToken.user_id),
         (EmailVerificationOtp, EmailVerificationOtp.user_id),
         (PasswordResetOtp, PasswordResetOtp.user_id),
