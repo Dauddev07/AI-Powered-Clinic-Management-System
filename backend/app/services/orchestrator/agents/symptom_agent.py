@@ -30,6 +30,7 @@ either dropped paragraph.
 """
 import json
 import re
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 from sqlalchemy.orm import Session
@@ -769,6 +770,19 @@ _VITALS_EMERGENCY_REPLY_TEMPLATE = (
     "3) If possible, don't go alone — have someone accompany you or call an ambulance."
 )
 
+# Every canned reply _vitals_reading_backstop itself can produce, as prefixes
+# — used to recognize "the preceding assistant turn was THIS backstop asking
+# for the reading/duration" so answering it is never mistaken for spending an
+# unrelated PATH-2-style screening round (see the "PATH 2 is exactly one
+# round" guard inside _vitals_reading_backstop for the reported-live bug this
+# closes).
+_VITALS_BACKSTOP_QUESTION_PREFIXES = (
+    "Could you tell me your temperature reading",
+    "Could you tell me your blood pressure reading",
+    "Could you tell me your blood sugar reading",
+    "Got it — and how long have you had it?",
+)
+
 
 # Requested: "for fever/sugar/bp, never ask severity — just ask for the
 # reading" as a CODE-LEVEL check, not a prompt instruction the model might or
@@ -829,88 +843,115 @@ def _extract_bare_number(text: str) -> float | None:
         return None
 
 
-def _vitals_reading_backstop(
-    message: str, history: list[ConversationMemory], department_names: list[str]
-) -> str | None:
+@dataclass
+class _VitalsEpisodeState:
     fever_temp: float | None = None
     bp_reading: tuple[int, int] | None = None
     blood_sugar: int | None = None
-    saw_fever_topic = False
-    saw_bp_topic = False
-    saw_sugar_topic = False
-    saw_duration = False
-    saw_severity_word = False
+    saw_fever_topic: bool = False
+    saw_bp_topic: bool = False
+    saw_sugar_topic: bool = False
+    saw_duration: bool = False
+    saw_severity_word: bool = False
 
-    # Reported live: "sore throat" -> "is it accompanied by fever or chills?"
-    # -> "yes fever and chills" wrongly started a fever-topic episode from
-    # what was actually just a DIFFERENTIATOR ANSWER about the sore throat
-    # complaint — sore throat/ENT was and remained the real primary complaint.
-    # A bare topic WORD ("fever"/"bp"/"sugar") with no accompanying number
-    # only counts toward starting/continuing this backstop's own episode when
-    # the message ISN'T purely answering a screening question about a
-    # different complaint (`answering_screening_question` below) — same
-    # differentiator-vs-new-complaint distinction
-    # _hinted_departments_excluding_a_screening_answer/_session_had_an_
-    # earlier_emergency_flag_for_the_current_symptom already draw elsewhere
-    # in this file. An actual stated NUMBER always counts regardless of that
-    # distinction — a real reading's clinical significance can't be dismissed
-    # just because it happened to come up while answering a differentiator
-    # question (e.g. "yes, and my fever is 104 too" mid-differentiator is
-    # still a genuine 104°F reading).
+    def started(self) -> bool:
+        return self.fever_temp is not None or self.bp_reading is not None or self.blood_sugar is not None or (
+            self.saw_fever_topic or self.saw_bp_topic or self.saw_sugar_topic
+        )
+
+    def has_reading(self) -> bool:
+        return self.fever_temp is not None or self.bp_reading is not None or self.blood_sugar is not None
+
+    def reset(self) -> None:
+        self.fever_temp = self.bp_reading = self.blood_sugar = None
+        self.saw_fever_topic = self.saw_bp_topic = self.saw_sugar_topic = False
+        self.saw_duration = self.saw_severity_word = False
+
+
+# Shared by _vitals_reading_backstop below AND the fever/BP/blood-sugar
+# guidance-table prompt injections near _build_system_prompt's call site —
+# reported live: "its 103 since 6 days" (answering this backstop's OWN "give
+# me your reading" question) still got asked "mild, moderate, or severe"
+# again, then a bare correction "its 103" wrongly escalated — because once
+# _vitals_reading_backstop itself defers to the LLM (see its own "PATH 2 is
+# exactly one round" guard below), the OLD prompt-injection mechanism only
+# ever scanned the CURRENT message for a number, never the reading given one
+# or two turns earlier in the SAME episode, leaving the LLM with zero
+# deterministic guidance for a reading it had already been given. Extracting
+# the episode scan into its own function lets both call sites see the exact
+# same up-to-date picture of "what reading, if any, is this episode's".
+#
+# A bare topic WORD ("fever"/"bp"/"sugar") with no accompanying number only
+# counts toward starting/continuing the episode when the message ISN'T
+# purely answering a screening question about a DIFFERENT complaint — same
+# differentiator-vs-new-complaint distinction
+# _hinted_departments_excluding_a_screening_answer/_session_had_an_earlier_
+# emergency_flag_for_the_current_symptom already draw elsewhere in this file
+# (reported live: "sore throat" -> "is it accompanied by fever or chills?" ->
+# "yes fever and chills" must never start a fever-topic episode of its own).
+# An actual stated NUMBER always counts regardless of that distinction — a
+# real reading's clinical significance can't be dismissed just because it
+# happened to come up while answering a differentiator question.
+def _scan_vitals_episode(
+    message: str, history: list[ConversationMemory], department_names: list[str]
+) -> _VitalsEpisodeState:
+    state = _VitalsEpisodeState()
+
     def _scan(text: str, answering_screening_question: bool) -> None:
-        nonlocal fever_temp, bp_reading, blood_sugar, saw_fever_topic, saw_bp_topic, saw_sugar_topic, saw_duration, saw_severity_word
-        topic_before = (saw_fever_topic, saw_bp_topic, saw_sugar_topic)
+        topic_before = (state.saw_fever_topic, state.saw_bp_topic, state.saw_sugar_topic)
         if not answering_screening_question:
             if _FEVER_TOPIC_RE.search(text):
-                saw_fever_topic = True
+                state.saw_fever_topic = True
             if _BP_TOPIC_RE.search(text):
-                saw_bp_topic = True
+                state.saw_bp_topic = True
             if _SUGAR_TOPIC_RE.search(text):
-                saw_sugar_topic = True
+                state.saw_sugar_topic = True
         if _DURATION_HINT_RE.search(text):
-            saw_duration = True
+            state.saw_duration = True
         if _SEVERITY_HINT_RE.search(text):
-            saw_severity_word = True
+            state.saw_severity_word = True
         temp = _extract_stated_fever_temperature(text)
         if temp is not None:
-            fever_temp = temp
-            saw_fever_topic = True
+            state.fever_temp = temp
+            state.saw_fever_topic = True
         bp = _extract_stated_blood_pressure(text)
         if bp is not None:
-            bp_reading = bp
-            saw_bp_topic = True
+            state.bp_reading = bp
+            state.saw_bp_topic = True
         sugar = _extract_stated_blood_sugar(text)
         if sugar is not None:
-            blood_sugar = sugar
-            saw_sugar_topic = True
+            state.blood_sugar = sugar
+            state.saw_sugar_topic = True
         if temp is None and bp is None and sugar is None and sum(topic_before) == 1:
             bare = _extract_bare_number(text)
             if bare is not None:
                 if topic_before[0] and 90.0 <= bare <= 112.0:
-                    fever_temp = bare
+                    state.fever_temp = bare
                 elif topic_before[2] and 30 <= bare <= 600:
-                    blood_sugar = int(bare)
-
-    def _episode_started() -> bool:
-        return fever_temp is not None or bp_reading is not None or blood_sugar is not None or (
-            saw_fever_topic or saw_bp_topic or saw_sugar_topic
-        )
+                    state.blood_sugar = int(bare)
 
     running_history: list[ConversationMemory] = []
     for row in history:
         if getattr(row, "role", None) == "user":
             content = getattr(row, "content", "") or ""
-            if _episode_started() and _message_introduces_a_new_symptom_label(content, running_history, department_names):
-                fever_temp = bp_reading = blood_sugar = None
-                saw_fever_topic = saw_bp_topic = saw_sugar_topic = saw_duration = saw_severity_word = False
+            if state.started() and _message_introduces_a_new_symptom_label(content, running_history, department_names):
+                state.reset()
             _scan(content, _preceding_assistant_turn_asked_a_screening_question(running_history))
         running_history.append(row)
-    if _episode_started() and _message_introduces_a_new_symptom_label(message, history, department_names):
-        fever_temp = bp_reading = blood_sugar = None
-        saw_fever_topic = saw_bp_topic = saw_sugar_topic = saw_duration = saw_severity_word = False
+    if state.started() and _message_introduces_a_new_symptom_label(message, history, department_names):
+        state.reset()
     _scan(message, _preceding_assistant_turn_asked_a_screening_question(history))
+    return state
 
-    if not (saw_fever_topic or saw_bp_topic or saw_sugar_topic):
+
+def _vitals_reading_backstop(
+    message: str, history: list[ConversationMemory], department_names: list[str]
+) -> str | None:
+    state = _scan_vitals_episode(message, history, department_names)
+    fever_temp, bp_reading, blood_sugar = state.fever_temp, state.bp_reading, state.blood_sugar
+    saw_duration, saw_severity_word = state.saw_duration, state.saw_severity_word
+
+    if not (state.saw_fever_topic or state.saw_bp_topic or state.saw_sugar_topic):
         return None
 
     # Self-diagnosis claims ("i have diabetes") get the SAME fast, concise
@@ -952,6 +993,22 @@ def _vitals_reading_backstop(
     #    emergency check two paragraphs up is never subject to this, an
     #    emergency-range reading always escalates regardless of how many
     #    rounds have already happened.
+    #    Reported live (2nd instance): guard 1 was too broad in the OTHER
+    #    direction too — "i am having fever" -> this backstop asked "Could
+    #    you tell me your temperature reading (in °F), and how long you've
+    #    had it?" -> "its 103 since 6 days" (directly answering THIS
+    #    backstop's OWN question, reading AND duration both given in one
+    #    reply) still got deferred to the LLM by guard 1, since the
+    #    preceding turn technically did ask a question — the LLM then
+    #    re-asked "mild, moderate, or severe" anyway (no deterministic
+    #    guidance for a reading two turns back — see _scan_vitals_episode's
+    #    own docstring on why the prompt-injection call site needed the
+    #    exact same episode-wide scan), and a later bare correction wrongly
+    #    escalated. Guard 1 must only defer when the round that was just
+    #    spent belongs to something OTHER than this backstop's own question
+    #    — answering this backstop's own question is never a "round" in the
+    #    PATH-2 sense, it's this backstop completing its own exchange, and
+    #    must always be processed by the checks above/below.
     # 2. Ordinary severity+duration language already given across the
     #    episode (`saw_severity_word and saw_duration`) — reported live: "i
     #    have a mild sore throat since 2 days and i am also having fever and
@@ -965,14 +1022,22 @@ def _vitals_reading_backstop(
     #    severity elsewhere in this file (that helper only checks the
     #    CURRENT message; this checks the whole episode the same way this
     #    backstop's other state already does).
-    if _preceding_assistant_turn_asked_a_screening_question(history) or (saw_duration and saw_severity_word):
+    preceding_was_this_backstops_own_question = (
+        _preceding_assistant_turn_asked_a_screening_question(history)
+        and bool(history)
+        and (getattr(history[-1], "content", "") or "").startswith(_VITALS_BACKSTOP_QUESTION_PREFIXES)
+    )
+    if (
+        _preceding_assistant_turn_asked_a_screening_question(history)
+        and not preceding_was_this_backstops_own_question
+    ) or (saw_duration and saw_severity_word):
         return None
 
     have_reading = fever_temp is not None or bp_reading is not None or blood_sugar is not None
     if not have_reading:
-        if saw_fever_topic:
+        if state.saw_fever_topic:
             reading_prompt = "your temperature reading (in °F)"
-        elif saw_bp_topic:
+        elif state.saw_bp_topic:
             reading_prompt = "your blood pressure reading (e.g. 130/85)"
         else:
             reading_prompt = "your blood sugar reading (mg/dL), and whether it was fasting or after a meal"
@@ -1440,13 +1505,21 @@ def _run_symptom_agent_body(
     system_prompt = _build_system_prompt(language_name, department_names, include_path2)
     if _last_reply_was_an_emergency_reply(history) and _message_downgrades_severity(message):
         system_prompt += _SEVERITY_DOWNGRADE_INSTRUCTION
-    stated_fever_temp = _extract_stated_fever_temperature(message)
+    # Episode-wide (not just the CURRENT message) — see _scan_vitals_episode's
+    # own docstring: a reading given one or two turns back (e.g. answering
+    # _vitals_reading_backstop's own "what's your reading?" question, which
+    # this call site never sees since that backstop already returned before
+    # the LLM was ever reached) must still get this deterministic guidance on
+    # every later turn of the same episode, not just the turn the number was
+    # first stated in.
+    vitals_episode = _scan_vitals_episode(message, history, department_names)
+    stated_fever_temp = vitals_episode.fever_temp
     if stated_fever_temp is not None and _fever_temperature_is_within_the_clinic_safe_range(stated_fever_temp):
         system_prompt += _FEVER_SAFE_RANGE_INSTRUCTION
-    stated_bp = _extract_stated_blood_pressure(message)
+    stated_bp = vitals_episode.bp_reading
     if stated_bp is not None:
         system_prompt += _BLOOD_PRESSURE_SEVERITY_INSTRUCTION
-    stated_blood_sugar = _extract_stated_blood_sugar(message)
+    stated_blood_sugar = vitals_episode.blood_sugar
     if stated_blood_sugar is not None:
         system_prompt += _BLOOD_SUGAR_SEVERITY_INSTRUCTION
     stated_pain_scale = _extract_stated_pain_scale_number(message, history)

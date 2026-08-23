@@ -8503,3 +8503,4 @@ def test_run_general_info_agent_never_rewrites_a_clean_standalone_question_even_
     assert calls["rewrite"] == 0, "rewrite_query must not run when the raw message already clears the threshold"
     assert result == "Dr. Ahmed Farooq and Dr. Farhan Malik."
 
+
