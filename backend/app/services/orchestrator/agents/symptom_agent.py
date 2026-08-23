@@ -86,6 +86,17 @@ _SEVERITY_HINT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Narrow subset of _SEVERITY_HINT_RE that unambiguously means "already at
+# emergency severity" per llm.py's own PATH 1 wording ("SEVERITY ALREADY
+# STATED... SKIPS THE SEVERITY QUESTION: ... stated 'severe' goes to PATH
+# 1") — used below to stop the PATH-3 "never zero questions" backstop from
+# forcing a clarifying question onto a message that should get zero further
+# questions and go straight to the emergency reply instead. Deliberately
+# excludes "mild"/"moderate"/"bearable"/"slight"/"sharp"/"dull"/"intense" —
+# those genuinely still need the duration follow-up this backstop exists to
+# guarantee; only wording that reads as already-at-emergency skips it.
+_HIGH_SEVERITY_HINT_RE = re.compile(r"\b(severe|unbearable|excruciating)\b", re.IGNORECASE)
+
 
 def _message_already_gives_duration_and_severity(
     message: str, history: list[ConversationMemory] | None = None
@@ -943,8 +954,8 @@ def _run_symptom_agent_body(
     # broken. A prompt instruction alone was not a reliable enough guarantee for
     # this correctness-critical step, same conclusion reached for every other
     # deterministic backstop in this file. Two independent triggers, both gated by
-    # the same three universal exceptions (a recommendation request, duration+
-    # severity already given, a self-diagnosis claim):
+    # the same four universal exceptions (a recommendation request, duration+
+    # severity already given, a self-diagnosis claim, high-severity wording):
     #   1. The session's first-ever symptom (_no_symptom_described_yet) — kept
     #      scoped to `not include_path2` since PATH 2 already reliably asks its
     #      own first question in THIS specific case.
@@ -963,6 +974,17 @@ def _run_symptom_agent_body(
         not is_department_recommendation_request(message)
         and not _message_already_gives_duration_and_severity(message, history)
         and not _is_self_diagnosis_claim(message)
+        # Reported live: "i am having severe sore throat" (sore throat isn't in
+        # any PATH 2 keyword list, so include_path2 was False) got "Got it —
+        # and how long have you had it?" from this exact block below instead
+        # of going straight to PATH 1 with zero further questions — the
+        # gives_severity check a few lines down only asks WHETHER a severity
+        # word matched, never WHICH one, so "severe" got the same
+        # ask-for-duration treatment as "mild"/"moderate". This backstop
+        # exists to guarantee AT LEAST ONE clarifying question is asked; it
+        # must never force one in on top of wording that means the correct
+        # number of further questions is actually zero.
+        and not _HIGH_SEVERITY_HINT_RE.search(message)
         and (
             (not include_path2 and no_symptom_yet)
             # Guarded by `not no_symptom_yet` so this stays mutually exclusive
