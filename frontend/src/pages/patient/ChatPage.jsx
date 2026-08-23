@@ -290,6 +290,18 @@ function DoctorOptionsCard({ options, onSelectSlot, disabled }) {
       {options.doctors.map((doctor) => (
         <DoctorGroup key={doctor.doctor_id} doctor={doctor} onSelectSlot={onSelectSlot} disabled={disabled} />
       ))}
+      <SlotsCardHint />
+    </div>
+  );
+}
+
+// Shared closing tip for any card that lists bookable slots — see
+// .doctorOptionsHint in ChatPage.module.css for why this isn't styled like
+// .doctorOptionsNote above.
+function SlotsCardHint() {
+  return (
+    <div className={styles.doctorOptionsHint}>
+      Click any slot above to book it, or type it directly — e.g. "Dr. Ahmed Khan, Mon Aug 24, 10:00 AM".
     </div>
   );
 }
@@ -343,6 +355,7 @@ function DepartmentListCard({ list, onSelectSlot, disabled }) {
           <div className={styles.doctorOptionsNote}>{entry.message}</div>
         </div>
       ))}
+      {list.departments.length > 0 && <SlotsCardHint />}
     </div>
   );
 }

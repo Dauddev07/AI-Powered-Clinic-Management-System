@@ -1130,6 +1130,19 @@
   gap: 0.4rem;
 }
 
+/* Closing tip on a slots card (DoctorOptionsCard/DepartmentListCard) telling
+   the patient they aren't limited to tapping a button — they can also just
+   type the doctor/date/time directly. Set off from the card's own content
+   with a divider, same treatment as .doctorOptionGroup + .doctorOptionGroup
+   above, and deliberately not italic like .doctorOptionsNote so it doesn't
+   read as another backend-provided note about THIS doctor/department. */
+.doctorOptionsHint {
+  padding-top: 0.6rem;
+  border-top: 1px solid color-mix(in srgb, var(--app-accent) 12%, var(--app-border));
+  font-size: var(--font-size-caption);
+  color: var(--app-text-subtitle);
+}
+
 .departmentListCard {
   display: flex;
   flex-direction: column;
