@@ -855,18 +855,32 @@ def _action_word_is_negated(tokens: list[str], index: int) -> bool:
 #   here (rather than closing an already-open scope) is what's needed, since
 #   the negation word itself is what would otherwise start swallowing "weight".
 #
-# Deliberately keeps the same 4-token span already validated for booking
-# negation rather than widening it — a wider span raises exactly the risk the
-# three cases above already demonstrate: an unrelated negation elsewhere in a
-# longer message swallowing a real symptom nearby, the more dangerous failure
-# mode for a medical triage flow (the "when in doubt, treat it as a symptom"
-# bias every other check in this module already commits to — see
-# _KNOWLEDGE_KEYWORDS' own comment). Known residual gap: a denial list longer
-# than ~4 tokens ("i dont have fever, cough, sore throat, or a headache") can
-# still let the last item or two slip through — same accepted fixed-window
-# tradeoff as everywhere else negation is handled in this codebase (see
-# symptom_hints.py:279's identical disclosure), not something this function
-# tries to solve with real parsing.
+# Budget is spent in CONTENT words only, not every token — a run of throwaway
+# articles/prepositions/possessives (_NEGATION_TRANSPARENT_WORDS) passes
+# through free rather than eating into the 4-word span. Reported live:
+# "and i didnt got a cut on my hand" — "cut" (2 content words: got, cut) is
+# well inside a plain 4-TOKEN window, but "hand" (a bare body-part word that's
+# itself a _SYMPTOM_KEYWORDS member, not just corroboration for "cut") sits 6
+# tokens out — "a"/"on"/"my" between them pushed it past a flat per-token
+# count even though none of those three add any real distance a human reader
+# would perceive. A flat token count was measuring the wrong thing; a
+# content-word count matches how far a negation actually reads as reaching in
+# practice, without needing to widen the budget for genuinely unrelated
+# content words (which is what raises the false-negative risk described
+# below).
+#
+# Deliberately keeps the same 4-CONTENT-word budget already validated for
+# booking negation rather than widening it further — a wider budget raises
+# exactly the risk the three cases above already demonstrate: an unrelated
+# negation elsewhere in a longer message swallowing a real symptom nearby,
+# the more dangerous failure mode for a medical triage flow (the "when in
+# doubt, treat it as a symptom" bias every other check in this module already
+# commits to — see _KNOWLEDGE_KEYWORDS' own comment). Known residual gap: a
+# denial list longer than ~4 CONTENT words ("i dont have fever, cough, sore
+# throat, or a headache") can still let the last item or two slip through —
+# same accepted fixed-budget tradeoff as everywhere else negation is handled
+# in this codebase (see symptom_hints.py:279's identical disclosure), not
+# something this function tries to solve with real parsing.
 #
 # Lets every existing `words & SOME_VOCAB` intersection check elsewhere
 # (is_symptom_message, needs_path2_screening, symptom_hints.py's department
@@ -876,18 +890,30 @@ def _action_word_is_negated(tokens: list[str], index: int) -> bool:
 # non-negated occurrence in the same message still counts (e.g. "no fever but
 # I do have a headache" keeps "headache", drops "fever") — this only removes
 # words whose every occurrence fell inside a negated span.
+_NEGATION_TRANSPARENT_WORDS = frozenset({
+    "a", "an", "the", "my", "your", "his", "her", "its", "our", "their",
+    "on", "in", "at", "to", "of", "any", "some",
+})
+
+
 def negation_filtered_words(tokens: list[str]) -> set[str]:
     negated_indices: set[int] = set()
-    scope_end = -1
+    scope_open = False
+    remaining = 0
     for index, token in enumerate(tokens):
         if token in _NEGATION_SCOPE_CLOSING_WORDS:
-            scope_end = -1
-        elif index < scope_end:
+            scope_open = False
+        elif scope_open:
             negated_indices.add(index)
+            if token not in _NEGATION_TRANSPARENT_WORDS:
+                remaining -= 1
+                if remaining <= 0:
+                    scope_open = False
         if token in _NEGATION_TOKENS:
             next_token = tokens[index + 1] if index + 1 < len(tokens) else None
             if next_token != "able":
-                scope_end = max(scope_end, index + 1 + _NEGATION_LOOKBACK_TOKENS)
+                scope_open = True
+                remaining = _NEGATION_LOOKBACK_TOKENS
     return {token for index, token in enumerate(tokens) if index not in negated_indices}
 
 

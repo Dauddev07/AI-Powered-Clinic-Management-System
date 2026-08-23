@@ -219,10 +219,22 @@ _RED_FLAG_PATTERNS = [
     # detached" or "I am missing a leg" fell through to the generic triage agent
     # instead of the emergency redirect, since no pattern here covered amputation or
     # severed/missing limbs).
-    r"\bamputat\w*\b",
-    r"\b(severed|detached)\b.{0,25}\b(leg|arm|hand|foot|finger|toe|limb)\b",
-    r"\b(leg|arm|hand|foot|finger|toe|limb)\b.{0,25}\b(severed|detached|cut off|chopped off|torn off|ripped off)\b",
-    r"\bmissing\b.{0,10}\b(a|an|my|one)\b.{0,10}\b(leg|arm|hand|foot|finger|toe|limb)\b",
+    #
+    # Reported live: "my hand is not severed" / "my hand is not detached" still
+    # fired the emergency redirect — every pattern in this limb-loss/decapitation/
+    # crush block below was missing the same _NEG guard the bleeding/breathing
+    # patterns above already use, so a patient's own denial of the injury matched
+    # exactly the same as a genuine report. _NEG is placed immediately before
+    # whichever alternation group the trigger word/phrase (severed/detached/
+    # amputated/missing/crushed/etc.) sits in for that specific pattern — first
+    # group when the trigger word leads ("severed ... leg"), inserted after the
+    # `.{0,25}` gap when the trigger word trails ("leg ... severed") so the
+    # lookbehind checks what's immediately in front of the trigger word itself,
+    # not what's in front of the body-part word.
+    _NEG + r"\bamputat\w*\b",
+    _NEG + r"\b(severed|detached)\b.{0,25}\b(leg|arm|hand|foot|finger|toe|limb)\b",
+    r"\b(leg|arm|hand|foot|finger|toe|limb)\b.{0,25}" + _NEG + r"\b(severed|detached|cut off|chopped off|torn off|ripped off)\b",
+    _NEG + r"\bmissing\b.{0,10}\b(a|an|my|one)\b.{0,10}\b(leg|arm|hand|foot|finger|toe|limb)\b",
     # Decapitation / head or neck severed / body bisected — same shape as the limb
     # patterns directly above, but the leg/arm/hand/foot/finger/toe/limb word list
     # there never included head or neck, so "my head got detached from my body"
@@ -232,11 +244,11 @@ _RED_FLAG_PATTERNS = [
     # docstring on treating unambiguous categories as deterministic regardless of
     # context) — kept as their own patterns rather than folded into the limb list
     # above so "head"/"neck" don't have to be added to every unrelated limb rule.
-    r"\bdecapitat\w*\b",
-    r"\bhead\b.{0,25}\b(severed|detached|cut off|chopped off|torn off|ripped off|separated)\b",
-    r"\b(severed|detached|cut off|chopped off|torn off|ripped off|separated)\b.{0,25}\bhead\b",
-    r"\bneck\b.{0,25}\b(severed|snapped|detached|broken)\b",
-    r"\b(severed|snapped|detached|broken)\b.{0,25}\bneck\b",
+    _NEG + r"\bdecapitat\w*\b",
+    r"\bhead\b.{0,25}" + _NEG + r"\b(severed|detached|cut off|chopped off|torn off|ripped off|separated)\b",
+    _NEG + r"\b(severed|detached|cut off|chopped off|torn off|ripped off|separated)\b.{0,25}\bhead\b",
+    r"\bneck\b.{0,25}" + _NEG + r"\b(severed|snapped|detached|broken)\b",
+    _NEG + r"\b(severed|snapped|detached|broken)\b.{0,25}\bneck\b",
     # Scoped to "body"/"torso"/"waist" nearby, or a person-reference ("i was",
     # "he got") right before the verb — a bare "cut/split/sliced in half" alone
     # would false-fire on something like "cut my sandwich in half", which has
@@ -244,7 +256,7 @@ _RED_FLAG_PATTERNS = [
     r"\b(body|torso|waist)\b.{0,15}\b(cut|split|sliced|torn)\b.{0,10}\bin half\b",
     r"\b(i|he|she|they)\b.{0,5}\b(was|were|got)\b.{0,15}\b(cut|split|sliced|torn)\b.{0,10}\bin half\b",
     r"\b(i|he|she|they)\b.{0,5}\b(was|were|got)\b.{0,15}\bcut\b.{0,10}\binto (two|2) (pieces|parts|halves)\b",
-    r"\bspine\b.{0,20}\b(severed|snapped|broken in (two|half))\b",
+    r"\bspine\b.{0,20}" + _NEG + r"\b(severed|snapped|broken in (two|half))\b",
     r"\bcompound fracture\b",
     r"\bbone\b.{0,15}\bsticking out\b",
     # Broken/fractured bones are handled separately below (see
@@ -252,9 +264,9 @@ _RED_FLAG_PATTERNS = [
     # adjacent lookbehind isn't wide enough to catch a negation several words
     # away ("i dont think my arm is broken"), the same problem the bare-severity
     # rule already had to solve with a forward-scanning window instead.
-    r"\bcrush(ed|ing)\b.{0,20}\b(leg|arm|hand|foot|limb|chest|head)\b",
-    r"\b(leg|arm|hand|foot|limb|chest|head)\b.{0,20}\bcrush(ed|ing)\b",
-    r"\bimpaled\b",
+    _NEG + r"\bcrush(ed|ing)\b.{0,20}\b(leg|arm|hand|foot|limb|chest|head)\b",
+    r"\b(leg|arm|hand|foot|limb|chest|head)\b.{0,20}" + _NEG + r"\bcrush(ed|ing)\b",
+    _NEG + r"\bimpaled\b",
     # Choking / airway obstruction. Deliberately no bare "X stuck in my throat"
     # pattern here — product decision (see the foreign-object section above): that
     # alone, with no distress signal, is meant to fall through to ENT department
