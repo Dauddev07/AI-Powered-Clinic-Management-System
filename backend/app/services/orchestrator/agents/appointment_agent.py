@@ -61,7 +61,7 @@ action gets a real guarantee, not just a prompt instruction it might not follow.
 import json
 import re
 import uuid
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
@@ -597,7 +597,12 @@ def _reschedule_different_day_reply(appointment: dict) -> str:
 # all to know the answer — same-day-only means ANY different day is refused,
 # regardless of which one.
 _VAGUE_DIFFERENT_DAY_RE = re.compile(
-    r"\b(?:a\s+|some\s+)?(?:different|another|other)\s+(?:day|date)\b"
+    # "day"/"date" plural ("days"/"dates") included — reported live: "on what
+    # other days hes available"/"what other days is he available" didn't match
+    # at all, since (?:day|date)\b requires a word boundary immediately after
+    # the singular form, which a following "s" breaks ("day" + "s" = "days"
+    # has no boundary between them for \b to land on).
+    r"\b(?:a\s+|some\s+)?(?:different|another|other)\s+(?:days?|dates?)\b"
     # Reported live: "anyother day then this one" — "any"+"other" fused into
     # one word with no space at all — has no word boundary before "other" for
     # the pattern above to find at all ("y" immediately precedes "o"), a
@@ -610,6 +615,105 @@ _VAGUE_DIFFERENT_DAY_RE = re.compile(
 
 def _message_asks_for_a_different_day_vaguely(message: str) -> bool:
     return bool(_VAGUE_DIFFERENT_DAY_RE.search(message))
+
+
+# "except monday"/"excluding mon"/"other than saturday" — a weekday explicitly
+# named as the one NOT wanted, as opposed to resolve_date_window's own weekday
+# matching (which reads a named weekday as the one that IS wanted). Used below
+# by _excluded_date_for_other_day_request, alongside the vague "any other day"
+# case just above, so the availability search that follows can be pointed
+# strictly AFTER the excluded day instead of left date-unbounded.
+_EXCEPT_DAY_RE = re.compile(
+    r"\b(?:except|excluding|other than|besides)\s+(?:for\s+|on\s+)?"
+    r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    r"mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)\b",
+    re.IGNORECASE,
+)
+
+
+# Reported live: after hitting ENT's daily booking cap on Monday, "show me his
+# availability for any other day" and (more explicitly) "anyother day then
+# monday" both still showed Monday's slots again — the deterministic narrowing
+# short-circuit below only ever called resolve_date_window(message), which
+# finds nothing in either phrasing (no explicit date/weekday NAMED as wanted),
+# so earliest_date/latest_date stayed unset and the availability search ran
+# completely open, returning the same earliest (Monday) slots as before.
+# "Any other day"/"except X" is a real, answerable constraint — it means
+# "search strictly AFTER this specific day" — it just isn't expressed as a
+# date the patient wants, so resolve_date_window alone can never see it.
+def _excluded_date_for_other_day_request(message: str, history: list[ConversationMemory]) -> date | None:
+    match = _EXCEPT_DAY_RE.search(message)
+    if match is not None:
+        window = resolve_bare_weekday_window(match.group(1))
+        if window is not None:
+            return date.fromisoformat(window[0])
+    if not _message_asks_for_a_different_day_vaguely(message):
+        return None
+    # No day named explicitly ("any other day" alone) — infer which day that
+    # means from the most recent PATIENT message that itself resolved to a
+    # real date.
+    for row in reversed(history):
+        if getattr(row, "role", None) != "user":
+            continue
+        content = getattr(row, "content", "") or ""
+        window = resolve_date_window(content)
+        if window is not None:
+            return date.fromisoformat(window[0])
+    # Reported live: the patient never typed a date themselves at all — the
+    # doctor's card was shown for a day the SYSTEM picked (its own earliest-
+    # available default), never one the patient asked for — so the history
+    # walk above finds nothing. The day being excluded is still perfectly
+    # well-defined here: whichever day the most recently shown card actually
+    # displayed. Falls back to that card's own first slot's display date
+    # ("Mon, Aug 24 at 3:15 PM" -> Aug 24) — the only place that date exists
+    # at all, since it's never stored as a raw ISO date anywhere.
+    marker = _most_recent_availability_marker(history)
+    if marker is not None:
+        when = _first_shown_slot_when(marker)
+        if when is not None:
+            return _parse_date_from_when_display(when)
+    return None
+
+
+def _first_shown_slot_when(marker: dict) -> str | None:
+    doctors = marker.get("doctors")
+    if not doctors:
+        for department in marker.get("departments") or []:
+            doctors = department.get("doctors")
+            if doctors:
+                break
+    for doctor in doctors or []:
+        for slot in doctor.get("slots") or []:
+            when = slot.get("when")
+            if when:
+                return when
+    return None
+
+
+_WHEN_DISPLAY_DATE_RE = re.compile(r"^\w+,\s*(\w+\s+\d{1,2})\s+at\b")
+
+
+def _parse_date_from_when_display(when: str) -> date | None:
+    """Reverses _format_when's own "Mon, Aug 24 at 3:15 PM" display format back
+    into a real date — that string is the ONLY place a shown slot's date lives
+    at all (see _first_shown_slot_when's own comment), since the card payload
+    never stores a raw ISO date. No year in the display string, same as
+    resolve_explicit_calendar_date's own forward-rolling assumption: assume
+    the current year, then roll to next year only if that reading would be
+    implausibly far in the past (a genuinely upcoming slot is never more than
+    a few months out)."""
+    match = _WHEN_DISPLAY_DATE_RE.match(when)
+    if match is None:
+        return None
+    try:
+        parsed = datetime.strptime(match.group(1), "%b %d")
+    except ValueError:
+        return None
+    today = datetime.now(timezone.utc).date()
+    candidate = date(today.year, parsed.month, parsed.day)
+    if candidate < today - timedelta(days=180):
+        candidate = date(today.year + 1, parsed.month, parsed.day)
+    return candidate
 
 
 # Reported live: a reschedule slot-pick card shown ("Select a time below to
@@ -2666,13 +2770,23 @@ def _run_appointment_agent_body(
         # earliest (the wrong day) instead of Aug 31. A bare "yes" confirming
         # the doctor never restates the date either, so it's recovered from the
         # same prior message the doctor itself came from.
-        forced_window = resolve_date_window(message)
-        if forced_window is None and confirmed_via_affirmative:
-            prior_message = _most_recent_user_message(history)
-            if prior_message is not None:
-                forced_window = resolve_date_window(prior_message)
-        earliest_date = date.fromisoformat(forced_window[0]) if forced_window else None
-        latest_date = date.fromisoformat(forced_window[1]) if forced_window else None
+        # "Any other day"/"except monday" (see _excluded_date_for_other_day_
+        # request's own comment) checked first — it takes priority over the
+        # normal forced_window resolution below since a named "except X" day
+        # would otherwise also get (wrongly) read as resolve_date_window's own
+        # "the day the patient wants" instead of the one they're excluding.
+        excluded_date = _excluded_date_for_other_day_request(message, history)
+        if excluded_date is not None:
+            earliest_date = excluded_date + timedelta(days=1)
+            latest_date = None
+        else:
+            forced_window = resolve_date_window(message)
+            if forced_window is None and confirmed_via_affirmative:
+                prior_message = _most_recent_user_message(history)
+                if prior_message is not None:
+                    forced_window = resolve_date_window(prior_message)
+            earliest_date = date.fromisoformat(forced_window[0]) if forced_window else None
+            latest_date = date.fromisoformat(forced_window[1]) if forced_window else None
         # Reported live: "only show me available slots of dr farhan rehman
         # after 12 pm on monday" and "show me his available slots after 12
         # pm" both silently ignored the time-of-day request and returned the
