@@ -15,6 +15,7 @@ export default function ChangePassword() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [passwordFocused, setPasswordFocused] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -83,8 +84,10 @@ export default function ChangePassword() {
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               autoComplete="new-password"
+              onFocus={() => setPasswordFocused(true)}
+              onBlur={() => setPasswordFocused(false)}
             />
-            <PasswordRequirements password={newPassword} />
+            {passwordFocused && <PasswordRequirements password={newPassword} />}
             <span className={styles.fieldHint}>Different from your current password.</span>
           </div>
           <div className={styles.field}>

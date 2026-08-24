@@ -8,7 +8,7 @@ import styles from "./PasswordInput.module.css";
 // class) still applies exactly as before — only the padding-right below is
 // added inline, to make room for the toggle button without fighting each
 // page's separately-hashed CSS module on specificity.
-export default function PasswordInput({ id, value, onChange, autoComplete, required, placeholder }) {
+export default function PasswordInput({ id, value, onChange, autoComplete, required, placeholder, onFocus, onBlur }) {
   const [visible, setVisible] = useState(false);
   const hasContent = value.length > 0;
 
@@ -30,6 +30,8 @@ export default function PasswordInput({ id, value, onChange, autoComplete, requi
         onChange={handleChange}
         autoComplete={autoComplete}
         placeholder={placeholder}
+        onFocus={onFocus}
+        onBlur={onBlur}
         style={{ paddingRight: "2.5rem" }}
       />
       {hasContent && (

@@ -48,6 +48,7 @@ export default function Register() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [passwordFocused, setPasswordFocused] = useState(false);
 
   useEffect(() => {
     fetchPublicClinics()
@@ -229,8 +230,10 @@ export default function Register() {
                   value={form.password}
                   onChange={setField("password")}
                   autoComplete="new-password"
+                  onFocus={() => setPasswordFocused(true)}
+                  onBlur={() => setPasswordFocused(false)}
                 />
-                <PasswordRequirements password={form.password} />
+                {passwordFocused && <PasswordRequirements password={form.password} />}
                 {fieldErrors.password && <span className={styles.error}>{fieldErrors.password}</span>}
               </div>
 
