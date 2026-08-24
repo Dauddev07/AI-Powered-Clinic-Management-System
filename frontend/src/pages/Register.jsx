@@ -4,6 +4,7 @@ import { fetchPublicClinics, register } from "../api/auth";
 import { ApiError } from "../api/client";
 import DateInput from "../components/DateInput";
 import PasswordInput from "../components/PasswordInput";
+import PasswordRequirements from "../components/PasswordRequirements";
 import PhoneInput, { isPhoneDigitsComplete, toE164 } from "../components/PhoneInput";
 import SuccessCheck from "../components/SuccessCheck";
 import Logo from "../components/Logo";
@@ -229,7 +230,7 @@ export default function Register() {
                   onChange={setField("password")}
                   autoComplete="new-password"
                 />
-                <span className={styles.fieldHint}>At least 8 characters, with a letter and a number.</span>
+                <PasswordRequirements password={form.password} />
                 {fieldErrors.password && <span className={styles.error}>{fieldErrors.password}</span>}
               </div>
 

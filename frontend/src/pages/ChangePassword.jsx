@@ -3,6 +3,7 @@ import { changePassword } from "../api/auth";
 import { ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import PasswordInput from "../components/PasswordInput";
+import PasswordRequirements from "../components/PasswordRequirements";
 import { useReveal } from "../hooks/useReveal";
 import styles from "./Login.module.css";
 
@@ -83,7 +84,8 @@ export default function ChangePassword() {
               onChange={(e) => setNewPassword(e.target.value)}
               autoComplete="new-password"
             />
-            <span className={styles.fieldHint}>At least 8 characters, different from your current password.</span>
+            <PasswordRequirements password={newPassword} />
+            <span className={styles.fieldHint}>Different from your current password.</span>
           </div>
           <div className={styles.field}>
             <label htmlFor="confirmPassword">
