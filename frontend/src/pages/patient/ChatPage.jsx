@@ -27,24 +27,45 @@ const SESSION_TITLE_MAX_LENGTH = 60;
 // whatever timestamp the backend itself later reports for that same row, but the
 // text content is byte-identical either way, the same string round-tripped) and
 // scoped per chat session so a used card from one thread never bleeds into another.
+//
+// Reported live: after staying logged in a while (or on a plain refresh), OTHER,
+// never-clicked slot cards also went unclickable — content alone isn't a unique
+// key when the backend legitimately re-shows an identical department/doctor/note/
+// slot-list card more than once in the same session (e.g. the same near-term
+// availability re-surfacing after an unrelated detour). The old storage was a flat
+// Set<content>, so marking one occurrence "used" silently disabled every OTHER
+// message that happened to share the exact same content too. Storage is now a
+// Map<content, usedCount> instead — each click increments that content string's
+// own count, and _deriveUsedCardIndices only disables that many OCCURRENCES of a
+// given content, in chronological order (stable across reloads, since messages
+// only ever get appended, never reordered) — so clicking the 1st of two identical
+// cards disables only that 1st one, never the 2nd, unresolved card sitting later
+// in the same thread. Logging out and back in "fixed" it before only because that
+// path drops the locally-cached session id, effectively looking up a different/
+// empty storage bucket — never actually cleared the bad entries.
 const USED_CARDS_STORAGE_PREFIX = "chat_used_cards:";
 
-function _loadUsedCardContents(sessionId) {
-  if (!sessionId) return new Set();
+function _loadUsedCardCounts(sessionId) {
+  if (!sessionId) return new Map();
   try {
     const raw = localStorage.getItem(USED_CARDS_STORAGE_PREFIX + sessionId);
-    return raw ? new Set(JSON.parse(raw)) : new Set();
+    if (!raw) return new Map();
+    const parsed = JSON.parse(raw);
+    // Back-compat: the previous format was a plain array of content strings
+    // (a Set) — each entry meant "used once". Read transparently as count 1.
+    if (Array.isArray(parsed)) return new Map(parsed.map((content) => [content, 1]));
+    return new Map(Object.entries(parsed));
   } catch {
-    return new Set();
+    return new Map();
   }
 }
 
 function _persistUsedCardContent(sessionId, content) {
   if (!sessionId || !content) return;
-  const contents = _loadUsedCardContents(sessionId);
-  contents.add(content);
+  const counts = _loadUsedCardCounts(sessionId);
+  counts.set(content, (counts.get(content) || 0) + 1);
   try {
-    localStorage.setItem(USED_CARDS_STORAGE_PREFIX + sessionId, JSON.stringify([...contents]));
+    localStorage.setItem(USED_CARDS_STORAGE_PREFIX + sessionId, JSON.stringify(Object.fromEntries(counts)));
   } catch {
     // Best-effort — worst case this card goes clickable again on a future
     // reload, same as before this persistence existed at all.
@@ -52,16 +73,58 @@ function _persistUsedCardContent(sessionId, content) {
 }
 
 // Re-derives which message indices should start out disabled from the persisted
-// contents above — run once right after `messages` itself is (re)built, same
+// counts above — run once right after `messages` itself is (re)built, same
 // moment usedCardIndices used to just reset to an empty Set.
 function _deriveUsedCardIndices(messages, sessionId) {
-  const contents = _loadUsedCardContents(sessionId);
-  if (contents.size === 0) return new Set();
+  const counts = _loadUsedCardCounts(sessionId);
+  if (counts.size === 0) return new Set();
+  const seenSoFar = new Map();
   const indices = new Set();
   messages.forEach((m, i) => {
-    if (m.content && contents.has(m.content)) indices.add(i);
+    if (!m.content) return;
+    const usedCount = counts.get(m.content);
+    if (!usedCount) return;
+    const occurrence = (seenSoFar.get(m.content) || 0) + 1;
+    seenSoFar.set(m.content, occurrence);
+    if (occurrence <= usedCount) indices.add(i);
   });
   return indices;
+}
+
+// The backend composes a card's "note" by concatenating separate, complete-
+// sentence reasons with a single space when more than one applies — e.g. the
+// department-fit reason plus a "this was described as severe earlier" or "this
+// has been going on a while" reminder (see app/services/orchestrator/agents/
+// symptom_agent.py's _append_emergency_downgrade_safety_note/_append_long_
+// duration_note) — which used to render as one dense run-on paragraph with no
+// way to tell the separate points apart. Splits on a sentence boundary (period +
+// whitespace + capital letter), guarding against "Dr. <Name>" being misread as a
+// sentence break. A note with only one point renders exactly as before (a single
+// plain line); more than one renders as a list instead.
+const _NOTE_SENTENCE_SPLIT_RE = /(?<!\bDr)\.\s+(?=[A-Z])/;
+
+function _splitNoteIntoPoints(note) {
+  if (!note) return [];
+  return note
+    .split(_NOTE_SENTENCE_SPLIT_RE)
+    .map((piece) => piece.trim())
+    .filter(Boolean)
+    .map((piece) => (/[.?!]$/.test(piece) ? piece : `${piece}.`));
+}
+
+function NoteText({ note, className }) {
+  if (!note) return null;
+  const points = _splitNoteIntoPoints(note);
+  if (points.length <= 1) {
+    return <div className={className}>{note}</div>;
+  }
+  return (
+    <ol className={`${className} ${styles.doctorOptionsNoteList}`}>
+      {points.map((point, idx) => (
+        <li key={idx}>{point}</li>
+      ))}
+    </ol>
+  );
 }
 
 // The booking/reschedule tools (task 6.2.4) prefix a confirmed-booking reply with
@@ -283,7 +346,7 @@ function BookingConfirmationCard({ booking }) {
 function DoctorOptionsCard({ options, onSelectSlot, disabled }) {
   return (
     <div className={styles.doctorOptionsCard}>
-      {options.note && <div className={styles.doctorOptionsNote}>{options.note}</div>}
+      <NoteText note={options.note} className={styles.doctorOptionsNote} />
       {options.department_name && (
         <div className={styles.doctorOptionsHeader}>{options.department_name}</div>
       )}
@@ -343,7 +406,7 @@ function DepartmentListCard({ list, onSelectSlot, disabled }) {
     <div className={styles.departmentListCard}>
       {list.departments.map((department) => (
         <div key={department.department_name} className={styles.departmentListSection}>
-          {department.note && <div className={styles.doctorOptionsNote}>{department.note}</div>}
+          <NoteText note={department.note} className={styles.doctorOptionsNote} />
           <div className={styles.doctorOptionsHeader}>{department.department_name}</div>
           {department.doctors.map((doctor) => (
             <DoctorGroup key={doctor.doctor_id} doctor={doctor} onSelectSlot={onSelectSlot} disabled={disabled} />
@@ -353,7 +416,7 @@ function DepartmentListCard({ list, onSelectSlot, disabled }) {
       {(list.unavailable || []).map((entry) => (
         <div key={entry.department_name} className={styles.departmentListSection}>
           <div className={styles.doctorOptionsHeader}>{entry.department_name}</div>
-          <div className={styles.doctorOptionsNote}>{entry.message}</div>
+          <NoteText note={entry.message} className={styles.doctorOptionsNote} />
         </div>
       ))}
       {list.departments.length > 0 && <SlotsCardHint />}

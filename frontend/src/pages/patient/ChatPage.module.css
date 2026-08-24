@@ -1086,6 +1086,25 @@
   font-size: var(--font-size-label);
   color: var(--app-text-subtitle);
   font-style: italic;
+  font-weight: 600;
+}
+
+/* Applied alongside .doctorOptionsNote (same font-size/color/weight) whenever a
+   note has more than one distinct point — see NoteText/_splitNoteIntoPoints in
+   ChatPage.jsx. Not italic, unlike the plain single-line case: a bulleted/
+   numbered list already reads as distinct points visually, so italics on top
+   just add noise. */
+.doctorOptionsNoteList {
+  font-style: normal;
+  margin: 0;
+  padding-left: 1.25em;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.doctorOptionsNoteList li {
+  padding-left: 2px;
 }
 
 .doctorOptionsHeader {
