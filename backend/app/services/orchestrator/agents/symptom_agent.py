@@ -280,6 +280,24 @@ def _preceding_assistant_turn_asked_a_screening_question(history: list[Conversat
     content = (getattr(last, "content", "") or "").strip()
     if not content or content.startswith((DOCTOR_OPTIONS_MARKER, DEPARTMENT_LIST_MARKER, NO_SLOTS_MARKER)):
         return False
+    # Reported live: this returned False for a turn that WAS genuinely a
+    # question ("Do you have any fever, difficulty swallowing, or swollen
+    # glands?"), purely because _append_emergency_downgrade_safety_note (see
+    # its own docstring) appends its reminder sentence AFTER the question
+    # text whenever an earlier emergency reply happened earlier in this same
+    # symptom episode — moving the string's true trailing character from "?"
+    # to the note's own closing period. The very next reply ("yes a bit of
+    # fever and difficulty swallowing" — a direct answer to that exact
+    # question) then got silently misread as an unprompted new complaint
+    # instead of an answer, re-triggering the "never zero questions"
+    # backstop's severity/duration question from scratch as if screening had
+    # never started. Only happens once an earlier emergency reply exists in
+    # the session — with none, no note gets appended, "?" stays the true
+    # trailing character, and this already worked correctly, matching
+    # exactly what was reported live. Strip that specific, known suffix
+    # before checking what the question itself actually ended with.
+    if content.endswith(_EMERGENCY_DOWNGRADE_SAFETY_NOTE):
+        content = content[: -len(_EMERGENCY_DOWNGRADE_SAFETY_NOTE)].rstrip()
     return content.endswith("?") or content.endswith("؟")
 
 

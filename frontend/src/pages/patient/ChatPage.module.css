@@ -1160,6 +1160,7 @@
   border-top: 1px solid color-mix(in srgb, var(--app-accent) 12%, var(--app-border));
   font-size: var(--font-size-caption);
   color: var(--app-text-subtitle);
+  font-weight: 600;
 }
 
 .departmentListCard {

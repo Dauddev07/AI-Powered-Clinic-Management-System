@@ -797,6 +797,22 @@ def is_symptom_message(message: str) -> bool:
     return False
 
 
+# Duplicated (not imported) from app.services.orchestrator.agents.symptom_agent's
+# own _EMERGENCY_DOWNGRADE_SAFETY_NOTE to avoid a circular import (that module
+# already imports FROM this one). Reported live: mirrors the identical bug fixed
+# in that module's _preceding_assistant_turn_asked_a_screening_question — a bare
+# "yes"/"ok" reply, given after symptom_agent.py appended this reminder sentence
+# to a genuine question (whenever an earlier emergency reply happened earlier in
+# the same symptom episode), was silently misread as small talk instead of the
+# patient answering that prompt, since the note moves the string's true trailing
+# character from "?" to the note's own closing period. Keep this text in sync
+# with the other copy if it's ever edited.
+_EMERGENCY_DOWNGRADE_SAFETY_NOTE_SUFFIX = (
+    "Earlier in this conversation this was described as very severe. If it becomes that severe "
+    "again, or you notice any concerning new symptoms, please seek emergency care immediately."
+)
+
+
 def _preceding_assistant_turn_looks_like_a_question(history) -> bool:
     """True when the last assistant turn was a triage/tool-driven prompt awaiting a
     reply — a DOCTOR_OPTIONS:: card (awaiting a slot pick) or a plain reply ending in
@@ -813,6 +829,8 @@ def _preceding_assistant_turn_looks_like_a_question(history) -> bool:
         return False
     if content.startswith(DOCTOR_OPTIONS_MARKER):
         return True
+    if content.endswith(_EMERGENCY_DOWNGRADE_SAFETY_NOTE_SUFFIX):
+        content = content[: -len(_EMERGENCY_DOWNGRADE_SAFETY_NOTE_SUFFIX)].rstrip()
     return content.endswith("?") or content.endswith("؟")
 
 
