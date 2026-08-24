@@ -21,7 +21,12 @@ from app.services.message_classifier import negation_filtered_words
 SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...] = (
     (
         frozenset({
-            "skin", "itchy", "itching", "rash", "allergic", "allergy", "eczema", "hives",
+            # "allergic"/"allergy" deliberately excluded: allergy is not skin-specific
+            # (it can just as easily cause throat/respiratory symptoms — reported
+            # live: "i think its allergic" with throat pain/fever falsely triggered
+            # a Dermatology suggestion with no skin symptom mentioned at all), so it
+            # must not gate this skin-specific department on its own.
+            "skin", "itchy", "itching", "rash", "eczema", "hives",
             # Common named skin complaints — same "specific symptom word missing from
             # an otherwise-covered category" gap as the head/leg additions below.
             "mole", "moles", "acne", "pimple", "pimples", "boil", "boils", "wart", "warts",
@@ -99,6 +104,31 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
         frozenset({"chest", "heart", "palpitations", "cardiac", "hypertension"}),
         ("cardio",),
         "chest pain",
+    ),
+    # "bp"/"hypotension"/"bloodpressure" (the last a normalized form of the
+    # two-word phrase "blood pressure" — see _symptom_words_from's own
+    # normalization step just below) kept as their OWN entry rather than
+    # folded into the chest/cardiac group above — reported live: a patient
+    # whose ONLY complaint was "my bp is high"/"my bp is low" (no chest pain,
+    # no cardiac symptom at all) got no department hint at all, since none of
+    # this clinic's BP vocabulary was covered here beyond the clinical term
+    # "hypertension" itself (message_classifier._SYMPTOM_KEYWORDS already
+    # recognizes "bp"/"blood pressure" for is_symptom_message's OWN, separate
+    # "is this symptom-shaped at all" gate — this table is what actually
+    # resolves a real department from it once it clears that gate, and had
+    # drifted out of sync with that fix). Trying it AND then narrowing it
+    # into the chest/cardiac group above (rather than routing bare "bp" hints
+    # to Cardiology directly the way "hypertension" already does) would have
+    # forced every clinic without a Cardiology department into the "sorry,
+    # this clinic doesn't have that" apology even though routine BP
+    # management is squarely General/Internal Medicine territory clinically
+    # — same "endocrin, THEN internal/general medicine" fallback chain
+    # blood-sugar's own entry just below already uses for the identical
+    # reason.
+    (
+        frozenset({"bp", "hypotension", "bloodpressure"}),
+        ("cardio", "internal medicine", "general medicine"),
+        "blood pressure symptoms",
     ),
     (
         frozenset({"stomach", "abdominal", "abdomen", "digestive", "diarrhea", "diarrhoea", "vomit", "vomiting"}),
@@ -257,6 +287,17 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
         frozenset({
             "fever", "chills", "sweating", "sweat", "sweats", "sweaty",
             "ache", "aches", "aching", "body ache", "malaise", "fatigue",
+            # Reported live: "i am having flu"/"flue" (a common misspelling,
+            # same typo-tolerance pattern as "diziness"/"breething" elsewhere
+            # in this codebase) matched no hint at all here — message_
+            # classifier._SYMPTOM_KEYWORDS already recognized bare "cold"/
+            # "flu" for is_symptom_message's own "is this symptom-shaped at
+            # all" gate, but this table (what actually resolves a real
+            # department once a message clears that gate) had never been
+            # given the same words, so a flu/cold complaint with no OTHER
+            # symptom word alongside it cleared the gate but then resolved
+            # to no department at all.
+            "flu", "flue", "cold",
         }),
         ("general medicine", "internal medicine", "family medicine"),
         "fever/body aches",
@@ -407,6 +448,10 @@ def _symptom_words_from(message: str, history: list[ConversationMemory]) -> set[
     # Normalizing the space/hyphen variants to the single-token spelling before
     # tokenizing catches all three ways a patient might type it.
     joined = re.sub(r"light[\s-]+headed(ness)?", r"lightheaded\1", joined)
+    # Same "tokenizing splits a two-word phrase apart" gap, for "blood
+    # pressure" — see the "bp"/"hypotension"/"bloodpressure" addition to the
+    # chest/heart hint entry above for the reported bug this closes.
+    joined = re.sub(r"\bblood\s+pressure\b", "bloodpressure", joined)
     # Apostrophe kept in the tokenizer (unlike the plain [a-z0-9]+ this used
     # before) so negation_filtered_words can recognize "don't"/"doesn't"/etc.
     # as single tokens — see message_classifier.negation_filtered_words'

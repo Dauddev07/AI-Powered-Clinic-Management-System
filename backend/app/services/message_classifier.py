@@ -117,7 +117,11 @@ _LOGISTICS_KEYWORDS = frozenset({
 # script, never Roman Urdu).
 _SYMPTOM_KEYWORDS = frozenset({
     "pain", "ache", "aches", "aching", "fever", "cough", "symptom", "symptoms",
-    "headache", "cold", "flu", "medicine", "medication", "prescription", "treatment",
+    "headache", "cold", "flu",
+    # "flue" — a common misspelling of "flu", same typo-tolerance pattern as
+    # "diziness"/"breething"/"blury" elsewhere in this list.
+    "flue",
+    "medicine", "medication", "prescription", "treatment",
     "diagnosis", "sick", "ill", "illness", "hurt", "hurts", "injury", "injured",
     # "diziness" (missing the second "z") reported live: this typo matched no
     # keyword at all, so the message fell through to GENERAL_INFO/the plain

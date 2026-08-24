@@ -1072,6 +1072,40 @@ def _vitals_reading_backstop(
     return None
 
 
+# Loosely matches a reply that asks the literal "mild, moderate, or severe"
+# question in either word order — used by the recovery net in
+# _run_symptom_agent_body below to catch the model asking this AGAIN despite
+# a reading that already answers it (see that net's own comment for the
+# reported live transcript). Deliberately loose (all three words appearing
+# near each other, not a single fixed phrase) since the model's own wording
+# varies turn to turn ("Is the fever severe, moderate, or mild?", "mild,
+# moderate, or severe?", etc.) — a false positive here only means an
+# already-known-safe reading's episode routes a turn early, never mid-
+# screening for a symptom with no reading involved at all (this check is
+# only ever consulted alongside _episode_has_a_known_safe_vital_reading).
+_ASKS_SEVERITY_QUESTION_RE = re.compile(
+    r"\bmild\b.{0,30}\bmoderate\b.{0,30}\bsevere\b|\bsevere\b.{0,30}\bmoderate\b.{0,30}\bmild\b",
+    re.IGNORECASE,
+)
+
+
+def _reply_asks_the_severity_question_again(reply: str) -> bool:
+    return bool(_ASKS_SEVERITY_QUESTION_RE.search(reply))
+
+
+def _episode_has_a_known_safe_vital_reading(
+    message: str, history: list[ConversationMemory], department_names: list[str]
+) -> bool:
+    state = _scan_vitals_episode(message, history, department_names)
+    if state.fever_temp is not None and _fever_temperature_is_within_the_clinic_safe_range(state.fever_temp):
+        return True
+    if state.bp_reading is not None and _blood_pressure_category(*state.bp_reading) != "hypertensive crisis":
+        return True
+    if state.blood_sugar is not None and not _blood_sugar_is_emergency_range(state.blood_sugar):
+        return True
+    return False
+
+
 def _message_states_a_numeric_vital_reading(message: str) -> bool:
     # Reported live: "i am having fever and its 103" still got asked "how severe
     # is this... and how long" — this function is what the PATH-3 "never zero
@@ -1602,6 +1636,29 @@ def _run_symptom_agent_body(
             or _recommends_a_specialist_in_free_text(reply)
             or _names_a_real_department_in_free_text(reply, department_names)
             or _asks_the_patient_to_pick_a_department(reply)
+            # Reported live: "its 103 since 10 days" (safe range, duration
+            # given) -> "Is the fever severe, moderate, or mild? Also..." ->
+            # "no such symptoms" -> "Is the fever mild, moderate, or
+            # severe?" — TWICE the model re-asked the exact question this
+            # clinic's own guidance table says a stated reading already
+            # answers, despite _run_symptom_agent_body injecting the safe-
+            # range instruction on every one of these turns (see
+            # _scan_vitals_episode's own docstring — that part already works
+            # correctly). _vitals_reading_backstop above only takes full,
+            # guaranteed control for the FIRST round of a vitals episode;
+            # once one real screening round has happened it deliberately
+            # hands off to the model for the rest (see that backstop's own
+            # "PATH 2 is exactly one round" comment, and the diabetes-triad
+            # bug that guard was built to fix) — but handing off doesn't mean
+            # the model can be trusted to get it right every time, same
+            # "prompt instruction alone isn't a guarantee" lesson as every
+            # other recovery net in this if-block. Same recovery as the rest
+            # of this block: discard the redundant question and route from
+            # the real symptom-hint table instead.
+            or (
+                _reply_asks_the_severity_question_again(reply)
+                and _episode_has_a_known_safe_vital_reading(message, history, department_names)
+            )
         )
     ):
         hinted = departments_hinted_by_patient_symptom_words(message, history, department_names, set())
