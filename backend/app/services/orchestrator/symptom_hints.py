@@ -131,7 +131,20 @@ SYMPTOM_DEPARTMENT_HINTS: tuple[tuple[frozenset[str], tuple[str, ...], str], ...
         "blood pressure symptoms",
     ),
     (
-        frozenset({"stomach", "abdominal", "abdomen", "digestive", "diarrhea", "diarrhoea", "vomit", "vomiting"}),
+        # Requested: plain digestion-issue wording ("indigestion", "acidity",
+        # "heartburn", "gastritis", "bloating", "constipation", "cramps") had no
+        # entry here at all — a patient using these words instead of "stomach"/
+        # "vomiting" got no department hint at all. Kept in the same gastro
+        # bucket as the existing stomach/vomiting words rather than a separate
+        # entry, since they route to the identical specialty.
+        frozenset({
+            "stomach", "abdominal", "abdomen", "digestive", "diarrhea", "diarrhoea",
+            "vomit", "vomiting", "indigestion", "acidity", "heartburn", "gastritis",
+            "bloating", "constipation", "cramps",
+            # Food poisoning is a normal GI complaint here, not the emergency
+            # red-flag layer (see red_flag.py's own comment on this decision).
+            "poisoning",
+        }),
         ("gastro", "internal medicine", "general medicine"),
         "stomach symptoms",
     ),

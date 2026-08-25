@@ -281,7 +281,15 @@ _RED_FLAG_PATTERNS = [
     r"\b(swallowed|drank|drunk|ingested)\b.{0,20}\b(poison|bleach|chemical|acid|pills|medicine|detergent)\b",
     r"\b(took|took too many|overdosed on)\b.{0,15}\bpills\b",
     r"\boverdos\w*\b",
-    r"\bpoison(ed|ing)?\b",
+    # Product decision: food poisoning is routed as a NORMAL symptom (Gastro/
+    # Internal Medicine triage via symptom_hints.py), not this emergency
+    # redirect — unlike swallowing bleach/chemicals/pills above, which stay
+    # unconditional emergencies. The bare "poison(ed|ing)" pattern below would
+    # otherwise auto-fire on "food poisoning" too (the word "poisoning" alone
+    # matches it), so it's scoped with a negative lookbehind to skip exactly
+    # that phrase while still catching every other poisoning mention
+    # ("he was poisoned", "chemical poisoning", "poisoning from a snake bite").
+    r"(?<!food )(?<!food-)\bpoison(ed|ing)?\b",
     # Severe burns
     r"\b(severe|bad|badly|serious|third[- ]degree|large)\s*burn",
     r"\bburned?\b.{0,15}\b(badly|severely|all over|a lot)\b",
@@ -532,6 +540,13 @@ _BENIGN_EXEMPLARS: tuple[str, ...] = (
     "I got a small cut on my hand while cutting vegetables",
     "I cut my finger a little while slicing an apple",
     "I have a small paper cut",
+    # Anchors the benign side of the new food-poisoning exemplar above — plain
+    # vomiting/diarrhea with no food-poisoning-specific language is ordinary
+    # PATH 2 GI triage territory (see symptom_agent's own screening for it),
+    # not an automatic emergency, and shouldn't be pulled over the margin just
+    # for sharing "vomiting"/"diarrhea" vocabulary with that exemplar.
+    "I have been vomiting and having diarrhea since yesterday",
+    "mild diarrhea and an upset stomach for a day",
 )
 
 _exemplar_vectors = np.array(embed_texts(list(_EXEMPLARS)))

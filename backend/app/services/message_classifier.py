@@ -153,6 +153,17 @@ _SYMPTOM_KEYWORDS = frozenset({
     "sweat", "sweats", "sweaty",
     # Digestive
     "diarrhea", "diarrhoea", "constipation", "cramp", "cramps", "bloating",
+    # Requested: digestion-issue phrasing ("indigestion", "acidity", "heartburn",
+    # "gastritis") had no coverage here at all, so a patient describing plain
+    # digestive discomfort in these words (rather than "stomach"/"vomiting",
+    # which already matched) fell through to GENERAL_INFO instead of reaching
+    # symptom_agent's triage flow.
+    "indigestion", "acidity", "heartburn", "gastritis",
+    # Food poisoning is a normal symptom category (routed to Gastro/Internal
+    # Medicine triage, not the emergency red-flag layer — see red_flag.py's
+    # own comment on this product decision), so it needs coverage here the
+    # same as any other GI complaint.
+    "poisoning",
     # Skin/infection — NOTE: "sting"/"stung"/"bite"/"bitten"/"burn"/"burned"/
     # "burning" are deliberately NOT here, see _AMBIGUOUS_ACTION_SYMPTOM_WORDS below.
     "infection", "infected", "itchy", "itching",

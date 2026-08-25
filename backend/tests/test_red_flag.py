@@ -674,6 +674,33 @@ def test_poisoning_and_overdose_patterns_fire(message):
     assert detect_red_flag(message)
 
 
+# Product decision: food poisoning is routed as a normal symptom (Gastro/
+# Internal Medicine triage), not this emergency redirect — unlike swallowing
+# bleach/chemicals/pills above, which stay unconditional emergencies.
+@pytest.mark.parametrize(
+    "message",
+    [
+        "i think i have food poisoning",
+        "i got food poisoning from the restaurant",
+        "food poisoning",
+    ],
+)
+def test_food_poisoning_does_not_fire(message):
+    assert not detect_red_flag(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "i have been vomiting and having diarrhea since yesterday",
+        "mild diarrhea and an upset stomach for a day",
+        "i had a big meal and now i feel a bit bloated",
+    ],
+)
+def test_ordinary_gi_symptoms_do_not_fire(message):
+    assert not detect_red_flag(message)
+
+
 # --- severe burns / fire ---------------------------------------------------------------
 
 
