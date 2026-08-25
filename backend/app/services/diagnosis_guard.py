@@ -69,7 +69,14 @@ _DIAGNOSTIC_PHRASE_RE = re.compile(
     rf"|this (?:is|sounds like|looks like|could be|appears to be) {_BENIGN_LOOKAHEAD}(?:a |an )?\w+"
     rf"|it(?:'s| is) (?:probably|likely|most likely) {_BENIGN_LOOKAHEAD}(?:a |an )?\w+"
     r"|(?:sounds|looks) like (?:a |an )?\w+ (?:infection|condition|disease|disorder)"
-    r"|diagnos\w*"
+    # (?!tic\b) excludes "diagnostic" — a completely benign adjective ("diagnostic
+    # tests", "diagnostic procedures") that has nothing to do with the bot naming a
+    # condition. Reported live: a correct general-info fee answer quoting the KB's
+    # own "procedures, diagnostic tests, medicines... may have separate charges"
+    # disclaimer got silently discarded and replaced with the generic redirect,
+    # since the bare diagnos\w* pattern matched "diagnostic" too. Still matches
+    # diagnose/diagnosed/diagnosing/diagnosis, which is what this rule is for.
+    r"|diagnos(?!tic\b)\w*"
     r"|you (?:are|might be|may be|could be) experiencing (?:a |an )?\w+ (?:attack|infection|disease)"
     r")\b",
     re.IGNORECASE,

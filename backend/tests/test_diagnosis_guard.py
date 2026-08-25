@@ -71,6 +71,15 @@ def test_diagnostic_phrasing_is_flagged(reply):
         "Do you have any other symptoms such as cough, sore throat, sinus pressure, "
         "body aches, or nasal congestion?",
         "Did you have any nausea or vomiting along with the headache?",
+        # Regression: a correct general-info fee answer quoting the KB's own fee
+        # disclaimer ("procedures, diagnostic tests, medicines... may have separate
+        # charges") was discarded and replaced with the generic SAFE_REDIRECT text,
+        # since the bare diagnos\w* pattern matched the benign word "diagnostic"
+        # too — see diagnosis_guard.py's diagnos(?!tic\b) fix.
+        "The dermatology department's consultation fee is PKR 1,800. This is a "
+        "general consultation charge; any procedures, diagnostic tests, medicines "
+        "or other services may have separate fees.",
+        "Diagnostic tests and procedures may have separate charges.",
     ],
 )
 def test_ordinary_non_diagnostic_replies_are_not_flagged(reply):
