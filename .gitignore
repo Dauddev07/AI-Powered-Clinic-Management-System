@@ -9,3 +9,4 @@ dist/
 .DS_Store
 *.egg-info/
 .pytest_cache/
+db_backups/
